@@ -23,33 +23,43 @@ use std::fmt::Write as _;
 
 use crate::ast::{
     Dimension, Document, DocumentBody, Node, Page, Project, PropertyValue, RectNode, TextNode,
-    TextSpan, Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit,
+    TextSpan, Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit, UnknownValue,
 };
 use crate::error::FormatError;
 
 // ---------------------------------------------------------------------------
-// Unknown property raw-value quoting
+// Unknown property value formatting
 // ---------------------------------------------------------------------------
 
-/// Produce a KDL-valid serialization for an unknown property's stored raw value.
+/// Produce a KDL-valid serialization for an `UnknownValue`, preserving the
+/// original KDL type so that parse→format→parse is a perfect round-trip:
 ///
-/// `UnknownProperty::raw` stores the deserialized string form of the KDL value
-/// (i.e. the string content without surrounding quotes, or the number as a
-/// decimal string). Since we cannot recover the original KDL type, we always
-/// emit the value as a quoted string. This is stable and idempotent: a value
-/// stored as `hello` emits as `"hello"`, which re-parses to raw=`hello` again.
-fn quote_unknown_raw(raw: &str) -> String {
-    let mut s = String::with_capacity(raw.len() + 2);
-    s.push('"');
-    for ch in raw.chars() {
-        match ch {
-            '\\' => s.push_str("\\\\"),
-            '"' => s.push_str("\\\""),
-            other => s.push(other),
+/// - `String(s)` → a double-quoted, escaped KDL string (`"hello"`)
+/// - `Integer(n)` → a bare decimal integer (`42`)
+/// - `Float(f)` → a bare number via the canonical f64 formatter (integral
+///   floats emit without `.0`: `1` not `1.0`)
+/// - `Bool(b)` → KDL v2 boolean keyword (`#true` / `#false`)
+/// - `Null` → KDL v2 null keyword (`#null`)
+fn fmt_unknown_value(v: &UnknownValue) -> String {
+    match v {
+        UnknownValue::String(s) => {
+            let mut out = String::with_capacity(s.len() + 2);
+            out.push('"');
+            for ch in s.chars() {
+                match ch {
+                    '\\' => out.push_str("\\\\"),
+                    '"' => out.push_str("\\\""),
+                    other => out.push(other),
+                }
+            }
+            out.push('"');
+            out
         }
+        UnknownValue::Integer(n) => n.to_string(),
+        UnknownValue::Float(f) => fmt_f64(*f),
+        UnknownValue::Bool(b) => (if *b { "#true" } else { "#false" }).to_owned(),
+        UnknownValue::Null => "#null".to_owned(),
     }
-    s.push('"');
-    s
 }
 
 // ---------------------------------------------------------------------------
@@ -383,7 +393,7 @@ fn write_rect(r: &RectNode, out: &mut String, depth: usize) {
         out.push(' ');
         out.push_str(key);
         out.push('=');
-        out.push_str(&quote_unknown_raw(&prop.raw));
+        out.push_str(&fmt_unknown_value(&prop.value));
     }
 
     out.push('\n');
@@ -421,7 +431,7 @@ fn write_text(t: &TextNode, out: &mut String, depth: usize) {
         out.push(' ');
         out.push_str(key);
         out.push('=');
-        out.push_str(&quote_unknown_raw(&prop.raw));
+        out.push_str(&fmt_unknown_value(&prop.value));
     }
 
     out.push_str(" {\n");
@@ -669,6 +679,101 @@ mod tests {
         assert!(
             text.contains("visible=#false"),
             "expected `visible=#false`, got:\n{text}"
+        );
+    }
+
+    /// **Unknown-property multi-type round-trip**: unknown properties of every
+    /// KDL value type survive parse→format→parse with their type intact, and
+    /// the output is idempotent (format twice → identical bytes).
+    #[test]
+    fn test_unknown_property_all_types_round_trip() {
+        // Each property exercises one KdlValue variant.
+        // Raw string r##"..."## needed because KDL v2 booleans/null use `#`.
+        let src = r##"zenith version=1 {
+  project id="proj.rt" name="RT"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.rt" title="RT" {
+    page id="p" w=(px)100 h=(px)100 {
+      rect id="r" x=(px)0 y=(px)0 w=(px)10 h=(px)10 future-flag=#true future-float=1.5 future-int=42 future-null=#null future-str="hi"
+    }
+  }
+}
+"##;
+        let adapter = KdlAdapter;
+        let doc1 = adapter.parse(src.as_bytes()).expect("parse 1");
+
+        // Verify all five types landed correctly after the first parse.
+        let rect = match &doc1.body.pages[0].children[0] {
+            crate::ast::Node::Rect(r) => r,
+            other => panic!("expected Rect, got {other:?}"),
+        };
+        assert_eq!(
+            rect.unknown_props["future-flag"].value,
+            crate::ast::UnknownValue::Bool(true),
+            "boolean must parse as UnknownValue::Bool(true), not a string"
+        );
+        assert_eq!(
+            rect.unknown_props["future-int"].value,
+            crate::ast::UnknownValue::Integer(42),
+            "integer must parse as UnknownValue::Integer(42)"
+        );
+        assert_eq!(
+            rect.unknown_props["future-float"].value,
+            crate::ast::UnknownValue::Float(1.5),
+            "float must parse as UnknownValue::Float(1.5)"
+        );
+        assert_eq!(
+            rect.unknown_props["future-str"].value,
+            crate::ast::UnknownValue::String("hi".to_owned()),
+            "string must parse as UnknownValue::String"
+        );
+        assert_eq!(
+            rect.unknown_props["future-null"].value,
+            crate::ast::UnknownValue::Null,
+            "null must parse as UnknownValue::Null"
+        );
+
+        // Format once → parse → assert same typed values survive (round-trip).
+        let formatted1 = format_document(&doc1).expect("format 1");
+        let doc2 = adapter.parse(&formatted1).expect("parse 2 after format");
+        let rect2 = match &doc2.body.pages[0].children[0] {
+            crate::ast::Node::Rect(r) => r,
+            other => panic!("expected Rect in re-parsed doc, got {other:?}"),
+        };
+        assert_eq!(
+            rect2.unknown_props["future-flag"].value,
+            crate::ast::UnknownValue::Bool(true),
+            "boolean must survive format round-trip as UnknownValue::Bool(true)"
+        );
+        assert_eq!(
+            rect2.unknown_props["future-int"].value,
+            crate::ast::UnknownValue::Integer(42),
+            "integer must survive format round-trip as UnknownValue::Integer(42)"
+        );
+        assert_eq!(
+            rect2.unknown_props["future-float"].value,
+            crate::ast::UnknownValue::Float(1.5),
+            "float must survive format round-trip"
+        );
+        assert_eq!(
+            rect2.unknown_props["future-str"].value,
+            crate::ast::UnknownValue::String("hi".to_owned()),
+            "string must survive format round-trip"
+        );
+        assert_eq!(
+            rect2.unknown_props["future-null"].value,
+            crate::ast::UnknownValue::Null,
+            "null must survive format round-trip"
+        );
+
+        // Idempotence: format a second time → identical bytes.
+        let formatted2 = format_document(&doc2).expect("format 2");
+        assert_eq!(
+            formatted1, formatted2,
+            "format must be idempotent for documents with unknown properties of all types"
         );
     }
 

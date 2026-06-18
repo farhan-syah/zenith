@@ -18,7 +18,7 @@ pub mod validate;
 pub use ast::{
     Dimension, Document, DocumentBody, Node, Page, Project, PropertyValue, RectNode, Span,
     StyleBlock, TextNode, TextSpan, Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit,
-    UnknownNode, UnknownProperty,
+    UnknownNode, UnknownProperty, UnknownValue,
 };
 pub use diagnostics::{Diagnostic, Severity};
 pub use error::{FormatError, ParseError, ParseErrorCode};

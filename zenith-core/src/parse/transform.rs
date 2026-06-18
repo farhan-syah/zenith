@@ -10,7 +10,7 @@ use kdl::{KdlDocument, KdlEntry, KdlNode, KdlValue};
 use crate::ast::{
     Span,
     document::{Document, DocumentBody, Page, Project},
-    node::{Node, RectNode, TextNode, TextSpan, UnknownNode, UnknownProperty},
+    node::{Node, RectNode, TextNode, TextSpan, UnknownNode, UnknownProperty, UnknownValue},
     style::{Style, StyleBlock},
     token::{Token, TokenBlock, TokenLiteral, TokenType, TokenValue},
     value::{Dimension, PropertyValue, Unit},
@@ -201,6 +201,17 @@ fn optional_string_prop_aliased<'a>(
     optional_string_prop(node, primary_key).or_else(|| optional_string_prop(node, alias_key))
 }
 
+/// Map a `KdlValue` to its `UnknownValue` counterpart, preserving type.
+fn kdl_value_to_unknown_value(v: &KdlValue) -> UnknownValue {
+    match v {
+        KdlValue::String(s) => UnknownValue::String(s.clone()),
+        KdlValue::Integer(n) => UnknownValue::Integer(*n),
+        KdlValue::Float(f) => UnknownValue::Float(*f),
+        KdlValue::Bool(b) => UnknownValue::Bool(*b),
+        KdlValue::Null => UnknownValue::Null,
+    }
+}
+
 /// Collect all entries that are NOT in `known_keys` into `unknown_props`.
 fn collect_unknown_props(node: &KdlNode, known_keys: &[&str]) -> BTreeMap<String, UnknownProperty> {
     let mut map = BTreeMap::new();
@@ -211,7 +222,7 @@ fn collect_unknown_props(node: &KdlNode, known_keys: &[&str]) -> BTreeMap<String
                 map.insert(
                     key.to_owned(),
                     UnknownProperty {
-                        raw: kdl_value_to_literal_string(entry.value()),
+                        value: kdl_value_to_unknown_value(entry.value()),
                     },
                 );
             }

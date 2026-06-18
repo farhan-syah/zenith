@@ -5,14 +5,28 @@ use std::collections::BTreeMap;
 use super::Span;
 use super::value::{Dimension, PropertyValue};
 
-/// A raw KDL value retained for an unrecognized property (forward-compat).
+/// The typed value of an unrecognized KDL property, preserved for forward-compat.
 ///
-/// Storing the serialized string keeps the AST lossless for round-trip
-/// without pulling the full KDL entry into every node struct.
+/// Mirrors the KDL v2 value space so that the original KDL type is never
+/// discarded during a parse→format→parse round-trip.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UnknownValue {
+    String(String),
+    Integer(i128),
+    Float(f64),
+    Bool(bool),
+    Null,
+}
+
+/// A typed KDL value retained for an unrecognized property (forward-compat).
+///
+/// Storing the full `UnknownValue` variant keeps the AST lossless for
+/// round-trip: a boolean `magic=#true` round-trips back as a boolean, not
+/// as the string `"true"`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnknownProperty {
-    /// The serialized representation of the raw KDL value (e.g. `"42"`, `"#true"`, `"\"hello\""`).
-    pub raw: String,
+    /// The typed representation of the KDL value.
+    pub value: UnknownValue,
 }
 
 /// A text content span — a run of text with optional inline style overrides.

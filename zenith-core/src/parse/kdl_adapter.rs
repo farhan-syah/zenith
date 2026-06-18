@@ -221,6 +221,13 @@ mod tests {
                     "unknown_props should contain future-prop; got: {:?}",
                     r.unknown_props
                 );
+                // The value must be typed as a String, not flattened to some
+                // other variant — this is the forward-compat round-trip guarantee.
+                assert_eq!(
+                    r.unknown_props["future-prop"].value,
+                    crate::ast::UnknownValue::String("hello".to_owned()),
+                    "unknown string property must parse as UnknownValue::String"
+                );
             }
             other => panic!("expected Rect, got {other:?}"),
         }

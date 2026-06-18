@@ -889,7 +889,7 @@ mod tests {
         unknown_props.insert(
             "magic-glow".to_owned(),
             crate::ast::node::UnknownProperty {
-                raw: "\"true\"".to_owned(),
+                value: crate::ast::node::UnknownValue::String("true".to_owned()),
             },
         );
         let doc = doc_with(
