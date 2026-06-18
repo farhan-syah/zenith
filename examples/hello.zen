@@ -1,0 +1,16 @@
+zenith version=1 {
+  project id="proj.hello" name="Hello Zenith"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#f8fafc"
+    token id="color.ink" type="color" value="#111827"
+    token id="font.body" type="fontFamily" value="Noto Sans"
+    token id="size.heading" type="dimension" value=(px)42
+  }
+  styles {}
+  document id="doc.hello" title="Hello Zenith" {
+    page id="page.hello" w=(px)480 h=(px)160 {
+      rect id="rect.bg" x=(px)0 y=(px)0 w=(px)480 h=(px)160 fill=(token)"color.bg"
+      text id="text.hello" x=(px)24 y=(px)24 w=(px)432 h=(px)112 fill=(token)"color.ink" font-family=(token)"font.body" font-size=(token)"size.heading" { span "Hello Zenith" }
+    }
+  }
+}

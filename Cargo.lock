@@ -605,7 +605,9 @@ name = "zenith-render"
 version = "0.0.0"
 dependencies = [
  "tiny-skia",
+ "ttf-parser",
  "zenith-core",
+ "zenith-layout",
  "zenith-scene",
 ]
 

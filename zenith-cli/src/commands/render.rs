@@ -40,7 +40,8 @@ impl RenderCmdErr {
 /// - The document has validation errors (exit code 1).
 /// - Scene JSON serialisation fails (exit code 2).
 pub fn to_scene_json(src: &str) -> Result<String, RenderCmdErr> {
-    let compile_result = parse_validate_compile(src)?;
+    let provider = default_provider();
+    let compile_result = parse_validate_compile(src, &provider)?;
     compile_result
         .scene
         .to_json()
@@ -54,8 +55,9 @@ pub fn to_scene_json(src: &str) -> Result<String, RenderCmdErr> {
 /// - The document has validation errors (exit code 1).
 /// - Rendering fails (exit code 2).
 pub fn to_png(src: &str) -> Result<Vec<u8>, RenderCmdErr> {
-    let compile_result = parse_validate_compile(src)?;
-    render_png(&compile_result.scene)
+    let provider = default_provider();
+    let compile_result = parse_validate_compile(src, &provider)?;
+    render_png(&compile_result.scene, &provider)
         .map_err(|e| RenderCmdErr::new(format!("render error: {e}"), 2))
 }
 
@@ -64,7 +66,12 @@ pub fn to_png(src: &str) -> Result<Vec<u8>, RenderCmdErr> {
 /// Parse → validate → compile, returning `CompileResult`.
 ///
 /// Returns early with an error if parse fails or if validation has errors.
-fn parse_validate_compile(src: &str) -> Result<zenith_scene::CompileResult, RenderCmdErr> {
+/// The `provider` is the same instance used for both compile and render so
+/// the two steps see the same font registry.
+fn parse_validate_compile(
+    src: &str,
+    provider: &dyn zenith_core::FontProvider,
+) -> Result<zenith_scene::CompileResult, RenderCmdErr> {
     // Parse ─────────────────────────────────────────────────────────────────
     let doc = KdlAdapter
         .parse(src.as_bytes())
@@ -83,7 +90,7 @@ fn parse_validate_compile(src: &str) -> Result<zenith_scene::CompileResult, Rend
     }
 
     // Compile ────────────────────────────────────────────────────────────────
-    Ok(compile(&doc, &default_provider()))
+    Ok(compile(&doc, provider))
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

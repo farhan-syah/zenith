@@ -2,6 +2,7 @@
 //!
 //! No backend-specific types (e.g. tiny-skia) appear anywhere in this module.
 
+use zenith_core::FontProvider;
 use zenith_scene::Scene;
 
 use crate::error::RenderError;
@@ -26,7 +27,15 @@ pub struct RasterImage {
 /// standard library — no backend-specific types cross the boundary.
 pub trait RasterBackend {
     /// Rasterize a scene to straight-alpha RGBA8 pixels plus dimensions.
-    fn rasterize(&self, scene: &Scene) -> Result<RasterImage, RenderError>;
+    ///
+    /// The `fonts` parameter is used to resolve font bytes for glyph runs.
+    /// Runs whose font id cannot be resolved are silently skipped — they do
+    /// not cause an error.
+    fn rasterize(
+        &self,
+        scene: &Scene,
+        fonts: &dyn FontProvider,
+    ) -> Result<RasterImage, RenderError>;
 
     /// Encode a [`RasterImage`] as deterministic PNG bytes.
     fn encode_png(&self, image: &RasterImage) -> Result<Vec<u8>, RenderError>;
