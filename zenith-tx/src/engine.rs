@@ -157,21 +157,16 @@ fn apply_move_forward(
     diagnostics: &mut Vec<Diagnostic>,
     affected: &mut Vec<String>,
 ) {
-    match find_sibling_index(doc, node_id) {
-        SiblingResult::NotFound => {
-            diagnostics.push(Diagnostic::error(
-                "tx.unknown_node",
-                format!("node {:?} not found in document", node_id),
-                None,
-                Some(node_id.to_owned()),
-            ));
-        }
-        SiblingResult::Found {
-            page_index,
-            sibling_index,
-            sibling_count,
-        } => {
-            if sibling_index + 1 >= sibling_count {
+    for page in doc.body.pages.iter_mut() {
+        match move_forward_in(&mut page.children, node_id) {
+            MoveOutcome::NotFound => {
+                // Try the next page.
+            }
+            MoveOutcome::Moved => {
+                record_affected(node_id, affected);
+                return;
+            }
+            MoveOutcome::AlreadyFront => {
                 // Already last (front) — no-op; emit an advisory.
                 diagnostics.push(Diagnostic::advisory(
                     "tx.noop",
@@ -179,19 +174,17 @@ fn apply_move_forward(
                     None,
                     Some(node_id.to_owned()),
                 ));
-            } else {
-                // Swap with the next sibling.
-                // `page_index` came from `find_sibling_index` which scanned
-                // the same `doc.body.pages`; no intervening mutation, so
-                // `.get_mut()` will always be `Some`. We use it instead of
-                // the indexing operator so the engine can never panic.
-                if let Some(page) = doc.body.pages.get_mut(page_index) {
-                    page.children.swap(sibling_index, sibling_index + 1);
-                    record_affected(node_id, affected);
-                }
+                return;
             }
         }
     }
+    // No page contained the node.
+    diagnostics.push(Diagnostic::error(
+        "tx.unknown_node",
+        format!("node {:?} not found in document", node_id),
+        None,
+        Some(node_id.to_owned()),
+    ));
 }
 
 // ── Tree walk helpers ─────────────────────────────────────────────────────────
@@ -203,6 +196,17 @@ enum FindResult<'a> {
     TextNode(&'a mut zenith_core::TextNode),
 }
 
+/// Returns true if `node` is, or transitively contains, a node with `id`.
+fn subtree_contains(node: &Node, id: &str) -> bool {
+    if node_id_of(node) == Some(id) {
+        return true;
+    }
+    if let Node::Group(g) = node {
+        return g.children.iter().any(|c| subtree_contains(c, id));
+    }
+    false
+}
+
 /// Walk the document tree and return a mutable reference to a `TextNode` with
 /// the given id, or indicate not-found / wrong-type.
 ///
@@ -212,15 +216,10 @@ enum FindResult<'a> {
 /// within an `&mut`-iterating for loop.
 fn find_node_mut<'doc>(doc: &'doc mut Document, id: &str) -> FindResult<'doc> {
     // Phase 1: find which page (shared borrow only).
+    // `subtree_contains` recurses into groups at any depth, so a node nested
+    // inside one or more groups is correctly located on its containing page.
     let page_index = doc.body.pages.iter().enumerate().find_map(|(pi, page)| {
-        let found = page.children.iter().any(|node| match node {
-            Node::Text(t) => t.id == id,
-            Node::Rect(r) => r.id == id,
-            Node::Ellipse(e) => e.id == id,
-            Node::Line(l) => l.id == id,
-            Node::Group(g) => g.id == id,
-            Node::Unknown(_) => false,
-        });
+        let found = page.children.iter().any(|n| subtree_contains(n, id));
         if found { Some(pi) } else { None }
     });
 
@@ -244,14 +243,16 @@ fn find_in_children_mut<'a>(children: &'a mut [Node], id: &str) -> Option<FindRe
     // borrow). This avoids a simultaneous shared + mutable borrow of `children`.
 
     // Phase 1: find the index and record what kind of node it is.
+    // `Descend(i)` means the id is nested inside the group at index `i`.
     enum Hit {
         Text(usize),
         WrongType(&'static str),
+        Descend(usize),
     }
 
-    // NOTED LIMITATION: tx ops cannot yet target nodes nested inside a group;
-    // the scan is top-level only. Recursive nested-targeting is tracked as a
-    // separate unit.
+    // The scan checks direct children first. If the id matches a direct child,
+    // we record the node kind. If the id is nested inside a group child, we
+    // record `Descend` so phase 2 can recurse into that group's children vec.
     let hit = children
         .iter()
         .enumerate()
@@ -261,6 +262,9 @@ fn find_in_children_mut<'a>(children: &'a mut [Node], id: &str) -> Option<FindRe
             Node::Ellipse(e) if e.id == id => Some(Hit::WrongType("ellipse")),
             Node::Line(l) if l.id == id => Some(Hit::WrongType("line")),
             Node::Group(g) if g.id == id => Some(Hit::WrongType("group")),
+            Node::Group(g) if g.children.iter().any(|c| subtree_contains(c, id)) => {
+                Some(Hit::Descend(i))
+            }
             // All other variants without a matching id, and Unknown: skip.
             _ => None,
         });
@@ -272,40 +276,46 @@ fn find_in_children_mut<'a>(children: &'a mut [Node], id: &str) -> Option<FindRe
         Some(Hit::Text(i)) => {
             // SAFETY: `i` came from the same `children` slice above; it is
             // within bounds. We replace the shared borrow with an exclusive one.
-            match &mut children[i] {
-                Node::Text(t) => Some(FindResult::TextNode(t)),
+            match children.get_mut(i) {
+                Some(Node::Text(t)) => Some(FindResult::TextNode(t)),
                 // Unreachable: we just confirmed it's Text in phase 1.
                 _ => None,
             }
         }
+        Some(Hit::Descend(i)) => match children.get_mut(i) {
+            Some(Node::Group(g)) => find_in_children_mut(&mut g.children, id),
+            _ => None, // unreachable: phase-1 confirmed a group at i
+        },
     }
 }
 
-/// Result of a sibling-order lookup.
-enum SiblingResult {
+/// Outcome of attempting to move a node one step forward (up in z-order)
+/// within its parent's children list, searching recursively through groups.
+enum MoveOutcome {
     NotFound,
-    Found {
-        page_index: usize,
-        sibling_index: usize,
-        sibling_count: usize,
-    },
+    AlreadyFront,
+    Moved,
 }
 
-/// Find which page and sibling index a node occupies (for reordering).
-fn find_sibling_index(doc: &Document, id: &str) -> SiblingResult {
-    for (pi, page) in doc.body.pages.iter().enumerate() {
-        for (si, node) in page.children.iter().enumerate() {
-            let node_id = node_id_of(node);
-            if node_id == Some(id) {
-                return SiblingResult::Found {
-                    page_index: pi,
-                    sibling_index: si,
-                    sibling_count: page.children.len(),
-                };
+/// Move the node with `id` one step later in whatever children vec directly
+/// contains it (page children or a group's children). Recurses into groups.
+fn move_forward_in(children: &mut [Node], id: &str) -> MoveOutcome {
+    if let Some(i) = children.iter().position(|n| node_id_of(n) == Some(id)) {
+        if i + 1 >= children.len() {
+            return MoveOutcome::AlreadyFront;
+        }
+        children.swap(i, i + 1);
+        return MoveOutcome::Moved;
+    }
+    for child in children.iter_mut() {
+        if let Node::Group(g) = child {
+            match move_forward_in(&mut g.children, id) {
+                MoveOutcome::NotFound => {}
+                other => return other,
             }
         }
     }
-    SiblingResult::NotFound
+    MoveOutcome::NotFound
 }
 
 /// Extract the stable id string from any [`Node`] variant, if it has one.
@@ -559,29 +569,29 @@ mod tests {
         assert_eq!(result.source_after, result.source_before);
     }
 
-    // ── Group limitation: tx ops cannot yet target nodes nested in a group ──
+    // ── SetTextAlign: recursion into group children ───────────────────────────
 
-    #[test]
-    fn tx_cannot_yet_target_node_nested_in_group() {
-        // A document where a text node lives INSIDE a group.
-        // SetTextAlign on the nested text id → tx.unknown_node + Rejected,
-        // because find_node_mut only scans top-level page children.
-        // This test PINS the current limitation so the follow-up unit can flip it.
-        let src = r##"zenith version=1 {
+    const GROUP_TEXT_DOC: &str = r##"zenith version=1 {
   project id="proj" name="Nest"
   tokens format="zenith-token-v1" { }
   styles { }
   document id="doc1" title="T" {
     page id="pg1" w=(px)400 h=(px)300 {
       group id="grp1" {
-        text id="nested.label" x=(px)10 y=(px)10 w=(px)200 h=(px)40 {
+        text id="nested.label" x=(px)10 y=(px)10 w=(px)200 h=(px)40 align="start" {
           span "Hello"
         }
       }
     }
   }
 }"##;
-        let doc = parse(src);
+
+    #[test]
+    fn tx_set_text_align_targets_nested_text() {
+        // A text node nested inside a group should now be reachable via
+        // recursive descent; the tx engine is no longer limited to top-level
+        // page children.
+        let doc = parse(GROUP_TEXT_DOC);
         let tx = Transaction {
             ops: vec![Op::SetTextAlign {
                 node: "nested.label".to_owned(),
@@ -590,18 +600,93 @@ mod tests {
         };
         let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
 
-        // Must be Rejected: the nested text id is not visible at the top-level scan.
+        assert_eq!(result.status, TxStatus::Accepted);
+        assert_eq!(result.affected_node_ids, vec!["nested.label".to_owned()]);
+        assert!(
+            result.source_after.contains("center"),
+            "source_after should contain align=\"center\""
+        );
+        assert!(!result.source_before.contains("center"));
+        assert_ne!(result.source_before, result.source_after);
+    }
+
+    #[test]
+    fn tx_set_text_align_on_group_itself_wrong_type() {
+        // Targeting the group's own id with SetTextAlign must yield
+        // tx.wrong_node_type mentioning "group".
+        let doc = parse(GROUP_TEXT_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetTextAlign {
+                node: "grp1".to_owned(),
+                align: "center".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
         assert_eq!(result.status, TxStatus::Rejected);
         assert!(
             result
                 .diagnostics
                 .iter()
-                .any(|d| d.code == "tx.unknown_node"),
-            "expected tx.unknown_node diagnostic for nested node; got: {:?}",
+                .any(|d| d.code == "tx.wrong_node_type" && d.message.contains("group")),
+            "expected tx.wrong_node_type diagnostic naming \"group\"; got: {:?}",
             result.diagnostics
         );
-        // source_after must equal source_before (nothing was changed).
         assert_eq!(result.source_after, result.source_before);
+    }
+
+    // ── MoveForward: reorder among group siblings ─────────────────────────────
+
+    const GROUP_TWO_RECT_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" { }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      group id="grp1" {
+        rect id="a" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+        rect id="b" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+      }
+    }
+  }
+}"##;
+
+    #[test]
+    fn tx_move_forward_reorders_nested_child() {
+        // Two rects (a then b) nested inside a group. MoveForward on "a"
+        // should reorder them so b appears before a in source_after.
+        let doc = parse(GROUP_TWO_RECT_DOC);
+        let tx = Transaction {
+            ops: vec![Op::MoveForward {
+                node: "a".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Accepted);
+        assert_eq!(result.affected_node_ids, vec!["a".to_owned()]);
+
+        // In source_after, "b" should appear before "a".
+        let pos_a = result
+            .source_after
+            .find("id=\"a\"")
+            .expect("a in source_after");
+        let pos_b = result
+            .source_after
+            .find("id=\"b\"")
+            .expect("b in source_after");
+        assert!(pos_b < pos_a, "b should appear before a in source_after");
+
+        // source_before has a before b.
+        let pb_a = result
+            .source_before
+            .find("id=\"a\"")
+            .expect("a in source_before");
+        let pb_b = result
+            .source_before
+            .find("id=\"b\"")
+            .expect("b in source_before");
+        assert!(pb_a < pb_b, "a should appear before b in source_before");
     }
 
     // ── 6. Invalid align value → tx.invalid_value, Rejected ──────────────────
