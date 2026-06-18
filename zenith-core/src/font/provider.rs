@@ -97,8 +97,12 @@ impl BytesFontProvider {
     ///
     /// The id is computed as `"{family_kebab_lower}-{weight}-{style_lower}"`,
     /// e.g. `"noto-sans-400-normal"`. If the same face is registered more than
-    /// once, the most recent registration wins. Returns the assigned stable id
-    /// as a convenience; callers may register purely for the side effect.
+    /// once, the most recent registration wins and reuses the original id.
+    /// Because kebab-casing can collapse distinct families (e.g. `"My Font"`
+    /// and `"my-font"`) onto the same base id, a numeric suffix is appended
+    /// when the base id is already taken by a *different* face, so every
+    /// registered face keeps a unique id. Returns the assigned stable id as a
+    /// convenience; callers may register purely for the side effect.
     pub fn register(
         &mut self,
         family: &str,
@@ -113,18 +117,33 @@ impl BytesFontProvider {
             FontStyle::Normal => "normal",
             FontStyle::Italic => "italic",
         };
-        let id = format!("{family_kebab}-{weight}-{style_str}");
-
-        let data = FontData {
-            id: id.clone(),
-            bytes,
-            index,
-        };
+        let base_id = format!("{family_kebab}-{weight}-{style_str}");
 
         let key = FaceKey {
             family_lower,
             weight,
             style,
+        };
+
+        // Re-registering the same face reuses its id; a new face whose base id
+        // collides with a different face gets a numeric suffix.
+        let id = match self.by_key.get(&key) {
+            Some(existing) => existing.id.clone(),
+            None => {
+                let mut candidate = base_id.clone();
+                let mut n = 2u32;
+                while self.by_id.contains_key(&candidate) {
+                    candidate = format!("{base_id}-{n}");
+                    n += 1;
+                }
+                candidate
+            }
+        };
+
+        let data = FontData {
+            id: id.clone(),
+            bytes,
+            index,
         };
 
         self.by_key.insert(key, data.clone());
@@ -297,5 +316,30 @@ mod tests {
         let bytes: Arc<[u8]> = Arc::from(vec![0u8; 4].as_slice());
         let id = p.register("My Font", 700, FontStyle::Italic, bytes, 0);
         assert_eq!(id, "my-font-700-italic");
+    }
+
+    #[test]
+    fn re_registering_same_face_reuses_id() {
+        let mut p = BytesFontProvider::new();
+        let bytes: Arc<[u8]> = Arc::from(vec![1u8; 8].as_slice());
+        let id1 = p.register("Inter", 400, FontStyle::Normal, bytes.clone(), 0);
+        let id2 = p.register("Inter", 400, FontStyle::Normal, bytes, 0);
+        assert_eq!(id1, id2, "same face re-registration keeps a stable id");
+    }
+
+    #[test]
+    fn kebab_colliding_families_get_distinct_ids() {
+        // "My Font" and "my-font" both kebab to "my-font-400-normal"; the second
+        // must get a distinct id so it remains independently resolvable by id.
+        let mut p = BytesFontProvider::new();
+        let a: Arc<[u8]> = Arc::from(vec![0xAAu8; 4].as_slice());
+        let b: Arc<[u8]> = Arc::from(vec![0xBBu8; 4].as_slice());
+        let id_a = p.register("My Font", 400, FontStyle::Normal, a, 0);
+        let id_b = p.register("my-font", 400, FontStyle::Normal, b, 0);
+        assert_eq!(id_a, "my-font-400-normal");
+        assert_ne!(id_a, id_b, "colliding families must not share an id");
+        // Both remain resolvable by their distinct ids, with their own bytes.
+        assert_eq!(p.by_id(&id_a).unwrap().bytes[0], 0xAA);
+        assert_eq!(p.by_id(&id_b).unwrap().bytes[0], 0xBB);
     }
 }
