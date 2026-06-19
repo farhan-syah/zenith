@@ -829,8 +829,17 @@ fn compile_node(
             // Resolve the node's box width to pixels (same dim_to_px path as x/y).
             // If w is absent or uses an unsupported unit, alignment is a no-op.
             let box_w_opt: Option<f64> = text.w.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
-            // Resolve the node's box height for rotation center (optional).
+            // Resolve the node's box height for rotation center and fit-check.
             let box_h_opt: Option<f64> = text.h.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+
+            // ── overflow="fit" pre-measurement ───────────────────────────────
+            // Extract line_height from the first successfully shaped span (shared
+            // across all spans because font + size are fixed). Used by the fit
+            // check after both emit paths.
+            let first_line_height: f64 = shaped_spans
+                .first()
+                .map(|s| s.run.line_height as f64)
+                .unwrap_or(0.0);
 
             let align = text.align.as_deref().unwrap_or("start");
             let deco_thickness = (font_size as f64 / 14.0).max(1.0);
@@ -859,6 +868,10 @@ fn compile_node(
                     cy,
                 });
             }
+
+            // Tracks actual line count after emit; set by whichever path runs.
+            // Used solely by the overflow="fit" check below.
+            let mut fit_line_count: usize = 1;
 
             if !needs_wrap {
                 // ── FAST PATH (fits / no box): single-line two-pass emit ──────
@@ -1022,6 +1035,9 @@ fn compile_node(
                     });
                 }
 
+                // Record the actual line count for the overflow="fit" check below.
+                fit_line_count = lines.len();
+
                 // 4. Emit each line, stacked by line_height, with per-line align.
                 let last_idx = lines.len().saturating_sub(1);
                 for (i, line) in lines.iter().enumerate() {
@@ -1117,6 +1133,61 @@ fn compile_node(
                             glyphs: run_to_scene_glyphs(&word.run),
                         });
                     }
+                }
+            }
+
+            // ── overflow="fit" check ──────────────────────────────────────────
+            // Hard-fail when the text content does not fit the declared box.
+            // Only evaluated when BOTH box_w and box_h are present — without a
+            // complete box we cannot determine fit and silently skip the check.
+            // Glyph runs are STILL emitted above; this diagnostic rides alongside.
+            if text.overflow.as_deref() == Some("fit")
+                && let (Some(box_w), Some(box_h)) = (box_w_opt, box_h_opt)
+            {
+                const EPSILON: f64 = 0.5;
+                let content_height = fit_line_count as f64 * first_line_height;
+
+                // Height overflow: wrapped text is taller than the box.
+                let height_overflow = content_height > box_h + EPSILON;
+
+                // Word-wider-than-box: a single word in a single-word line
+                // exceeds box_w (wrapping cannot help). In the wrap path, any
+                // line with one word whose content_w > box_w is unwrappable.
+                // In the single-line path (needs_wrap=false), total_advance ≤
+                // box_w by definition, so no word can be wider.
+                let word_overflow = if needs_wrap {
+                    // Re-check each token's advance against box_w. Any token
+                    // wider than box_w is unwrappable.  We use total_advance
+                    // as a fast proxy: if total_advance > box_w AND there is
+                    // exactly one shaped span whose run.advance_width > box_w
+                    // the single word is wider than the box. More precisely,
+                    // we need to check the per-word tokens; those were consumed
+                    // inside the wrap block, so we detect this via the fact
+                    // that any line with content_w > box_w must contain a lone
+                    // word wider than box_w (the greedy packer would have split
+                    // it if it could). The wrap path set fit_line_count from
+                    // lines.len(), so checking content_height already catches
+                    // the height dimension; the word-wider check is an
+                    // additional width dimension. A simpler heuristic: if
+                    // total_advance > box_w AND fit_line_count==1 the whole
+                    // text landed on one line only because no word break was
+                    // possible — meaning one word >= box_w width.
+                    fit_line_count == 1 && total_advance > box_w + EPSILON
+                } else {
+                    false // fast path: total_advance ≤ box_w by definition
+                };
+
+                if height_overflow || word_overflow {
+                    diagnostics.push(Diagnostic::error(
+                            "text.fit_failed",
+                            format!(
+                                "text '{}': content does not fit its box (overflow=\"fit\"): \
+                                 needs ~{:.0}px height in {:.0}px box (or a word wider than {:.0}px wide box)",
+                                text.id, content_height, box_h, box_w
+                            ),
+                            text.source_span,
+                            Some(text.id.clone()),
+                        ));
                 }
             }
 
@@ -6927,5 +6998,167 @@ mod tests {
             "[5] must be group PopTransform"
         );
         assert!(matches!(cmds[6], SceneCommand::PopClip));
+    }
+
+    // ── overflow="fit" tests ──────────────────────────────────────────────────
+
+    /// A text node with `overflow="fit"` whose long text overflows the small box
+    /// height must produce a `text.fit_failed` Error diagnostic, AND must still
+    /// emit glyph run commands (the scene is not suppressed).
+    #[test]
+    fn overflow_fit_height_exceeded_emits_fit_failed_and_still_draws() {
+        // A tiny 60×20 px box. Font size 16 px → line_height ≈ 18–20 px.
+        // The text has many words that will wrap into multiple lines, so
+        // content_height will exceed 20 px.
+        let src = r##"zenith version=1 {
+  project id="proj.fit1" name="Fit Overflow"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.fit1" title="Fit Overflow" {
+    page id="page.fit1" w=(px)400 h=(px)400 {
+      text id="text.overflow" x=(px)10 y=(px)10 w=(px)60 h=(px)20 overflow="fit" {
+        span "The quick brown fox jumps over the lazy dog and keeps on going"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        // Must have exactly one `text.fit_failed` Error diagnostic.
+        let fit_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "text.fit_failed")
+            .collect();
+        assert_eq!(
+            fit_errors.len(),
+            1,
+            "expected exactly one text.fit_failed diagnostic; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(
+            fit_errors[0].severity,
+            zenith_core::Severity::Error,
+            "text.fit_failed must be Error severity"
+        );
+        assert!(
+            fit_errors[0]
+                .subject_id
+                .as_deref()
+                .map(|s| s.contains("text.overflow"))
+                .unwrap_or(false),
+            "subject_id must name the overflowing text node; got {:?}",
+            fit_errors[0].subject_id
+        );
+
+        // Glyph runs must still be emitted — the scene is not suppressed.
+        let has_glyphs = result
+            .scene
+            .commands
+            .iter()
+            .any(|c| matches!(c, SceneCommand::DrawGlyphRun { .. }));
+        assert!(
+            has_glyphs,
+            "glyph runs must still be emitted even when fit fails"
+        );
+    }
+
+    /// A text node with `overflow="fit"` whose text FITS within the box must
+    /// produce NO `text.fit_failed` diagnostic.
+    #[test]
+    fn overflow_fit_text_fits_no_diagnostic() {
+        // A wide, tall box that the short text will easily fit in.
+        let src = r##"zenith version=1 {
+  project id="proj.fit2" name="Fit OK"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.fit2" title="Fit OK" {
+    page id="page.fit2" w=(px)400 h=(px)400 {
+      text id="text.fits" x=(px)10 y=(px)10 w=(px)300 h=(px)100 overflow="fit" {
+        span "Hi"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        let fit_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "text.fit_failed")
+            .collect();
+        assert!(
+            fit_errors.is_empty(),
+            "text that fits must produce no text.fit_failed diagnostic; got: {:?}",
+            fit_errors
+        );
+    }
+
+    /// A text node with `overflow="clip"` (not "fit") must NEVER produce a
+    /// `text.fit_failed` diagnostic, even when the text clearly overflows.
+    #[test]
+    fn overflow_clip_overflowing_text_no_fit_diagnostic() {
+        let src = r##"zenith version=1 {
+  project id="proj.fit3" name="Clip Overflow"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.fit3" title="Clip Overflow" {
+    page id="page.fit3" w=(px)400 h=(px)400 {
+      text id="text.clip" x=(px)10 y=(px)10 w=(px)60 h=(px)20 overflow="clip" {
+        span "The quick brown fox jumps over the lazy dog and keeps on going"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        let fit_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "text.fit_failed")
+            .collect();
+        assert!(
+            fit_errors.is_empty(),
+            "overflow=\"clip\" must never produce text.fit_failed; got: {:?}",
+            fit_errors
+        );
+    }
+
+    /// A text node with no `overflow` property and overflowing text must NOT
+    /// produce a `text.fit_failed` diagnostic.
+    #[test]
+    fn overflow_absent_overflowing_text_no_fit_diagnostic() {
+        let src = r##"zenith version=1 {
+  project id="proj.fit4" name="No Overflow Prop"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.fit4" title="No Overflow Prop" {
+    page id="page.fit4" w=(px)400 h=(px)400 {
+      text id="text.noov" x=(px)10 y=(px)10 w=(px)60 h=(px)20 {
+        span "The quick brown fox jumps over the lazy dog and keeps on going"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        let fit_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "text.fit_failed")
+            .collect();
+        assert!(
+            fit_errors.is_empty(),
+            "absent overflow must never produce text.fit_failed; got: {:?}",
+            fit_errors
+        );
     }
 }

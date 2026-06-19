@@ -115,6 +115,13 @@ pub fn run() -> ExitCode {
             if let Some(scene_out) = &args.scene {
                 match commands::render::to_scene_json(&src, args.path.parent(), args.page) {
                     Ok(artifact) => {
+                        // Block on hard (Error-severity) compile diagnostics.
+                        let n_hard = count_hard_diagnostics(&artifact.diagnostics);
+                        if n_hard > 0 {
+                            print_diagnostics_stderr(&artifact.diagnostics);
+                            eprintln!("render blocked by {} hard diagnostic(s)", n_hard);
+                            return ExitCode::from(2);
+                        }
                         if let Err(e) = std::fs::write(scene_out, artifact.json.as_bytes()) {
                             eprintln!("error writing scene to '{}': {}", scene_out.display(), e);
                             return ExitCode::from(2);
@@ -148,6 +155,13 @@ pub fn run() -> ExitCode {
                     args.locked,
                 ) {
                     Ok(artifact) => {
+                        // Block on hard (Error-severity) compile diagnostics.
+                        let n_hard = count_hard_diagnostics(&artifact.diagnostics);
+                        if n_hard > 0 {
+                            print_diagnostics_stderr(&artifact.diagnostics);
+                            eprintln!("render blocked by {} hard diagnostic(s)", n_hard);
+                            return ExitCode::from(2);
+                        }
                         if let Err(e) = write_bytes(png_out, &artifact.png) {
                             eprintln!("error writing PNG to '{}': {}", png_out.display(), e);
                             return ExitCode::from(2);
@@ -178,14 +192,29 @@ pub fn run() -> ExitCode {
                 }
                 match commands::render::to_png_all_pages(&src, args.path.parent(), args.locked) {
                     Ok(artifacts) => {
-                        let mut all_diagnostics = Vec::new();
+                        // Collect all diagnostics first; block if any are hard errors
+                        // before writing any page to disk.
+                        let all_diagnostics: Vec<&zenith_core::Diagnostic> = artifacts
+                            .iter()
+                            .flat_map(|a| a.diagnostics.iter())
+                            .collect();
+                        let n_hard = all_diagnostics
+                            .iter()
+                            .filter(|d| d.severity == zenith_core::Severity::Error)
+                            .count();
+                        if n_hard > 0 {
+                            for d in &all_diagnostics {
+                                eprintln!("{}", commands::format_diagnostic_line(d));
+                            }
+                            eprintln!("render blocked by {} hard diagnostic(s)", n_hard);
+                            return ExitCode::from(2);
+                        }
                         for (i, artifact) in artifacts.iter().enumerate() {
                             let page_path = dir.join(format!("page-{}.png", i + 1));
                             if let Err(e) = write_bytes(&page_path, &artifact.png) {
                                 eprintln!("error writing PNG to '{}': {}", page_path.display(), e);
                                 return ExitCode::from(2);
                             }
-                            all_diagnostics.extend(artifact.diagnostics.iter());
                         }
                         if args.json {
                             let out = RenderOutput {
@@ -288,6 +317,14 @@ fn print_diagnostics_stderr(diagnostics: &[zenith_core::Diagnostic]) {
     for d in diagnostics {
         eprintln!("{}", commands::format_diagnostic_line(d));
     }
+}
+
+/// Count diagnostics with [`Severity::Error`].
+fn count_hard_diagnostics(diagnostics: &[zenith_core::Diagnostic]) -> usize {
+    diagnostics
+        .iter()
+        .filter(|d| d.severity == zenith_core::Severity::Error)
+        .count()
 }
 
 // ── I/O helpers ───────────────────────────────────────────────────────────────

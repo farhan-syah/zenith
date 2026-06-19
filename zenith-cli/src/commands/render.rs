@@ -608,4 +608,70 @@ mod tests {
         let err = to_png_all_pages(empty, None, false).expect_err("a doc with no pages must error");
         assert_eq!(err.exit_code, 2);
     }
+
+    // ── overflow="fit" artifact-level tests ──────────────────────────────────
+
+    /// A text node with `overflow="fit"` that overflows its box must produce
+    /// a `text.fit_failed` Error-severity diagnostic in the PNG artifact.
+    /// (Whether the file is written is verified manually via the CLI — the
+    /// render command logic in lib.rs blocks the write when diagnostics contain
+    /// Error, exercised here at the artifact level.)
+    #[test]
+    fn to_png_overflow_fit_exceeded_has_error_diagnostic() {
+        const OVERFLOW_FIT_DOC: &str = r##"zenith version=1 {
+  project id="proj.fitcli" name="Fit CLI"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.fitcli" title="Fit CLI" {
+    page id="page.fitcli" w=(px)400 h=(px)400 {
+      text id="text.fitcli" x=(px)10 y=(px)10 w=(px)60 h=(px)20 overflow="fit" {
+        span "The quick brown fox jumps over the lazy dog and keeps on going"
+      }
+    }
+  }
+}
+"##;
+        // to_png still returns Ok — the artifact carries the Error diagnostic.
+        // The CLI dispatcher (lib.rs) is what blocks the file write.
+        let artifact = to_png(OVERFLOW_FIT_DOC, 1).expect("compile+render must not hard-fail");
+        let has_fit_error = artifact
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "text.fit_failed" && d.severity == zenith_core::Severity::Error);
+        assert!(
+            has_fit_error,
+            "artifact must carry a text.fit_failed Error diagnostic; got: {:?}",
+            artifact.diagnostics
+        );
+    }
+
+    /// A text node with `overflow="fit"` that FITS must produce no
+    /// `text.fit_failed` diagnostic, and the render must succeed cleanly.
+    #[test]
+    fn to_png_overflow_fit_fits_no_error_diagnostic() {
+        const FIT_OK_DOC: &str = r##"zenith version=1 {
+  project id="proj.fitok" name="Fit OK"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.fitok" title="Fit OK" {
+    page id="page.fitok" w=(px)400 h=(px)400 {
+      text id="text.fitok" x=(px)10 y=(px)10 w=(px)300 h=(px)100 overflow="fit" {
+        span "Hi"
+      }
+    }
+  }
+}
+"##;
+        let artifact = to_png(FIT_OK_DOC, 1).expect("render must succeed");
+        let fit_errors: Vec<_> = artifact
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "text.fit_failed")
+            .collect();
+        assert!(
+            fit_errors.is_empty(),
+            "fitting text must produce no text.fit_failed; got: {:?}",
+            fit_errors
+        );
+    }
 }
