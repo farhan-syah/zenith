@@ -113,7 +113,7 @@ pub fn run() -> ExitCode {
 
             // --scene ─────────────────────────────────────────────────────────
             if let Some(scene_out) = &args.scene {
-                match commands::render::to_scene_json(&src, args.page) {
+                match commands::render::to_scene_json(&src, args.path.parent(), args.page) {
                     Ok(artifact) => {
                         if let Err(e) = std::fs::write(scene_out, artifact.json.as_bytes()) {
                             eprintln!("error writing scene to '{}': {}", scene_out.display(), e);

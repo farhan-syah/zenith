@@ -658,6 +658,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "zenith-core",
+ "zenith-layout",
  "zenith-render",
  "zenith-scene",
  "zenith-tx",

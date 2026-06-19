@@ -8,11 +8,13 @@
 //! for all filesystem I/O.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
+
 use zenith_core::{
-    AssetKind, BytesAssetProvider, Diagnostic, Document, KdlAdapter, KdlSource, default_provider,
-    validate,
+    AssetKind, BytesAssetProvider, BytesFontProvider, Diagnostic, Document, KdlAdapter, KdlSource,
+    default_provider, validate,
 };
 use zenith_render::render_png;
 use zenith_scene::compile_page;
@@ -62,16 +64,26 @@ pub struct PngArtifact {
 /// Parse `src`, validate it, compile the requested `page` (1-based), and return
 /// the scene JSON plus the compile-stage diagnostics.
 ///
+/// `project_dir` is the `.zen` file's parent directory. When `Some`, font
+/// assets declared in the document are loaded and registered in the font
+/// provider so that `font.family` tokens referencing them resolve to the
+/// actual face rather than falling back to the bundled Noto fonts. When
+/// `None`, only the bundled fonts are available.
+///
 /// Returns `Err` when:
 /// - The source fails to parse (exit code 2).
 /// - The document has validation errors (exit code 1).
 /// - The `page` is out of range (exit code 2).
 /// - Scene JSON serialisation fails (exit code 2).
-pub fn to_scene_json(src: &str, page: usize) -> Result<SceneArtifact, RenderCmdErr> {
-    let provider = default_provider();
+pub fn to_scene_json(
+    src: &str,
+    project_dir: Option<&Path>,
+    page: usize,
+) -> Result<SceneArtifact, RenderCmdErr> {
     let doc = parse_validate(src)?;
+    let fonts = build_font_provider(&doc, project_dir, false)?;
     let page_index = resolve_page_index(&doc, page)?;
-    let compile_result = compile_page(&doc, &provider, page_index);
+    let compile_result = compile_page(&doc, &fonts, page_index);
     let json = compile_result
         .scene
         .to_json()
@@ -121,8 +133,8 @@ pub fn to_png_with_dir(
     page: usize,
     locked: bool,
 ) -> Result<PngArtifact, RenderCmdErr> {
-    let fonts = default_provider();
     let doc = parse_validate(src)?;
+    let fonts = build_font_provider(&doc, project_dir, locked)?;
     let page_index = resolve_page_index(&doc, page)?;
     let assets = match project_dir {
         Some(dir) => build_asset_provider(&doc, dir, locked)?,
@@ -150,14 +162,11 @@ pub fn to_png_all_pages(
     project_dir: Option<&Path>,
     locked: bool,
 ) -> Result<Vec<PngArtifact>, RenderCmdErr> {
-    let fonts = default_provider();
     let doc = parse_validate(src)?;
+    let fonts = build_font_provider(&doc, project_dir, locked)?;
     let page_count = doc.body.pages.len();
     if page_count == 0 {
-        return Err(RenderCmdErr::new(
-            "document has no pages to render".to_owned(),
-            2,
-        ));
+        return Err(RenderCmdErr::new("document has no pages to render", 2));
     }
     let assets = match project_dir {
         Some(dir) => build_asset_provider(&doc, dir, locked)?,
@@ -174,6 +183,90 @@ pub fn to_png_all_pages(
         });
     }
     Ok(artifacts)
+}
+
+/// Build a [`BytesFontProvider`] preloaded with bundled fonts and any
+/// `font`-kind assets declared in the document.
+///
+/// When `project_dir` is `None`, returns the default bundled-only provider
+/// immediately (no filesystem access is attempted). When `Some`, each
+/// `font`-kind [`AssetDecl`] in the document is read from disk and its
+/// family/weight/style metadata is extracted via
+/// [`zenith_layout::face_metadata`]. Successfully read faces are registered
+/// under their real family name so that a `font.family` token whose value
+/// matches that family resolves to the actual face instead of falling back
+/// to Noto.
+///
+/// Non-locked failures (unreadable file, unparseable font) emit a warning
+/// to stderr and skip the asset. When `locked` is `true`, the same conditions
+/// are hard errors (exit code 2), and every font asset's bytes are verified
+/// against its declared `sha256` exactly like image assets.
+fn build_font_provider(
+    doc: &Document,
+    project_dir: Option<&Path>,
+    locked: bool,
+) -> Result<BytesFontProvider, RenderCmdErr> {
+    let mut provider = default_provider();
+    let dir = match project_dir {
+        Some(d) => d,
+        None => return Ok(provider),
+    };
+    for decl in &doc.assets.assets {
+        if decl.kind != AssetKind::Font {
+            continue;
+        }
+        let path = dir.join(&decl.src);
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) => {
+                if locked {
+                    return Err(RenderCmdErr::new(
+                        format!(
+                            "--locked: could not read font asset '{}' from '{}': {}",
+                            decl.id,
+                            path.display(),
+                            e
+                        ),
+                        2,
+                    ));
+                }
+                eprintln!(
+                    "warning: could not read font asset '{}' from '{}': {} — skipping",
+                    decl.id,
+                    path.display(),
+                    e
+                );
+                continue;
+            }
+        };
+
+        if locked {
+            verify_locked_sha256(&decl.id, "font asset", decl.sha256.as_deref(), &bytes)?;
+        }
+
+        let arc: Arc<[u8]> = Arc::from(bytes.as_slice());
+        match zenith_layout::face_metadata(&arc, 0) {
+            Ok(m) => {
+                provider.register(&m.family, m.weight, m.style, arc, 0);
+            }
+            Err(e) => {
+                if locked {
+                    return Err(RenderCmdErr::new(
+                        format!(
+                            "--locked: font asset '{}' could not be parsed: {}",
+                            decl.id, e
+                        ),
+                        2,
+                    ));
+                }
+                eprintln!(
+                    "warning: font asset '{}' could not be parsed: {} — skipping",
+                    decl.id, e
+                );
+            }
+        }
+    }
+    Ok(provider)
 }
 
 /// Build a [`BytesAssetProvider`] from a parsed document and the project
@@ -222,25 +315,7 @@ fn build_asset_provider(
         };
 
         if locked {
-            let declared = match decl.sha256.as_deref() {
-                Some(d) => d,
-                None => {
-                    return Err(RenderCmdErr::new(
-                        format!("--locked: asset '{}' has no declared sha256", decl.id),
-                        2,
-                    ));
-                }
-            };
-            let hex = format!("{:x}", Sha256::digest(&bytes));
-            if declared.trim().to_lowercase() != hex {
-                return Err(RenderCmdErr::new(
-                    format!(
-                        "--locked: asset '{}' sha256 mismatch (declared {}, actual {})",
-                        decl.id, declared, hex
-                    ),
-                    2,
-                ));
-            }
+            verify_locked_sha256(&decl.id, "asset", decl.sha256.as_deref(), &bytes)?;
         }
 
         provider.register(&decl.id, AssetKind::Image, bytes.into());
@@ -248,7 +323,35 @@ fn build_asset_provider(
     Ok(provider)
 }
 
-// ── Shared pipeline helper ────────────────────────────────────────────────────
+// ── Shared pipeline helpers ───────────────────────────────────────────────────
+
+/// Verify that `bytes` match the `sha256` field declared on an asset.
+///
+/// `id` is the asset identifier (for error messages); `kind` is a short noun
+/// used in error messages (`"asset"` or `"font asset"`).
+///
+/// Returns `Err` (exit code 2) when:
+/// - `sha256` is `None` (no hash declared).
+/// - The computed SHA-256 hex digest does not match `sha256` (case-insensitive,
+///   trimmed).
+fn verify_locked_sha256(
+    id: &str,
+    kind: &str,
+    sha256: Option<&str>,
+    bytes: &[u8],
+) -> Result<(), RenderCmdErr> {
+    let declared = sha256.ok_or_else(|| {
+        RenderCmdErr::new(format!("--locked: {kind} '{id}' has no declared sha256"), 2)
+    })?;
+    let hex = format!("{:x}", Sha256::digest(bytes));
+    if declared.trim().to_lowercase() != hex {
+        return Err(RenderCmdErr::new(
+            format!("--locked: {kind} '{id}' sha256 mismatch (declared {declared}, actual {hex})"),
+            2,
+        ));
+    }
+    Ok(())
+}
 
 /// Parse → validate, returning the parsed [`Document`].
 ///
@@ -384,7 +487,7 @@ mod tests {
 
     #[test]
     fn to_scene_json_surfaces_compile_diagnostics() {
-        let artifact = to_scene_json(UNKNOWN_NODE_DOC, 1).expect("scene must succeed");
+        let artifact = to_scene_json(UNKNOWN_NODE_DOC, None, 1).expect("scene must succeed");
         assert!(
             artifact
                 .diagnostics
@@ -410,7 +513,7 @@ mod tests {
 
     #[test]
     fn to_scene_json_contains_schema_field() {
-        let json = to_scene_json(VALID_DOC, 1)
+        let json = to_scene_json(VALID_DOC, None, 1)
             .expect("scene JSON must succeed")
             .json;
         assert!(
@@ -422,7 +525,7 @@ mod tests {
 
     #[test]
     fn to_scene_json_with_validation_error_returns_err() {
-        let result = to_scene_json(INVALID_DOC, 1);
+        let result = to_scene_json(INVALID_DOC, None, 1);
         assert!(result.is_err(), "invalid doc must not produce scene JSON");
     }
 
