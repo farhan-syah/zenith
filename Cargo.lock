@@ -360,6 +360,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
+name = "oxidoc-highlight"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "020fce77c2e30e036689c8cdc31d80aeb7cad6cbc989595c128118cd743b3367"
+
+[[package]]
 name = "png"
 version = "0.17.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -662,6 +668,7 @@ name = "zenith-core"
 version = "0.0.0"
 dependencies = [
  "kdl",
+ "oxidoc-highlight",
 ]
 
 [[package]]
