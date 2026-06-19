@@ -29,8 +29,9 @@ use crate::ast::node::{Node, PolygonNode, PolylineNode};
 use crate::ast::style::StyleBlock;
 use crate::ast::token::TokenType;
 use crate::ast::value::{Dimension, PropertyValue, Unit, dim_to_px};
+use crate::color::{contrast_ratio, parse_rgb};
 use crate::diagnostics::{Diagnostic, Severity};
-use crate::tokens::ResolvedToken;
+use crate::tokens::{ResolvedToken, ResolvedValue};
 
 // ── Public surface ────────────────────────────────────────────────────────────
 
@@ -155,6 +156,25 @@ pub fn validate(doc: &Document) -> ValidationReport {
         let page_px_bounds = dim_to_px(page.width.value, &page.width.unit)
             .zip(dim_to_px(page.height.value, &page.height.unit));
 
+        // ── Resolve page background color for contrast checks ────────────
+        // Only a TokenRef → Color token produces a usable RGB triple.
+        // If the page has no background or the token is unresolvable, we
+        // set None and silently skip contrast checks for this page — we
+        // cannot determine what the background is without it.
+        let page_bg_rgb: Option<(u8, u8, u8)> = page.background.as_ref().and_then(|pv| {
+            if let PropertyValue::TokenRef(id) = pv {
+                resolved_tokens.get(id.as_str()).and_then(|rt| {
+                    if let ResolvedValue::Color(hex) = &rt.value {
+                        parse_rgb(hex)
+                    } else {
+                        None
+                    }
+                })
+            } else {
+                None
+            }
+        });
+
         // ── Walk page children ────────────────────────────────────────────
         for node in &page.children {
             walk_node(
@@ -167,6 +187,10 @@ pub fn validate(doc: &Document) -> ValidationReport {
                 page_px_bounds,
                 &mut diagnostics,
             );
+            // Contrast check runs after the structural walk so that
+            // token-reference errors are already diagnosed and we can
+            // safely skip nodes whose tokens didn't resolve.
+            check_text_contrast(node, page_bg_rgb, resolved_tokens, &mut diagnostics);
         }
     }
 
@@ -718,6 +742,128 @@ fn walk_node(
             ));
             // Unknown nodes have no children in the v0 AST; nothing to recurse.
         }
+    }
+}
+
+// ── WCAG 2.2 contrast advisory ────────────────────────────────────────────────
+
+/// Recursively check text nodes against the page background for WCAG AA contrast.
+///
+/// # v0 Limitations
+/// - Only compares against the PAGE background color; an intervening rect or
+///   scrim the text visually sits on is NOT detected or used.
+/// - Per-span fills (TextSpan.fill) are NOT individually checked; the node-level
+///   `fill` is used as a proxy for all spans.
+/// - Only `t.fill` TokenRef → Color is resolved; style-inherited fills are NOT
+///   consulted (style fill resolution requires the full style block lookup, which
+///   is a v1 concern; for now, a text node with no direct fill is simply skipped).
+fn check_text_contrast(
+    node: &Node,
+    page_bg_rgb: Option<(u8, u8, u8)>,
+    resolved_tokens: &BTreeMap<String, ResolvedToken>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // If we don't know the page background we cannot compute contrast — bail.
+    let Some(bg_rgb) = page_bg_rgb else {
+        return;
+    };
+
+    match node {
+        Node::Text(t) => {
+            // Resolve the text fill color from a TokenRef → Color token.
+            // If no fill is set or it doesn't resolve to a color, skip.
+            let text_rgb = match t.fill.as_ref() {
+                Some(PropertyValue::TokenRef(id)) => {
+                    resolved_tokens.get(id.as_str()).and_then(|rt| {
+                        if let ResolvedValue::Color(hex) = &rt.value {
+                            parse_rgb(hex)
+                        } else {
+                            None
+                        }
+                    })
+                }
+                // Literal / Dimension fills are caught as raw_visual_literal errors
+                // elsewhere; no need to chase them here.
+                _ => None,
+            };
+
+            let Some(fg_rgb) = text_rgb else {
+                return;
+            };
+
+            // Resolve font-size in px (default 16.0 px when absent).
+            let size_px: f64 = t
+                .font_size
+                .as_ref()
+                .and_then(|pv| {
+                    if let PropertyValue::TokenRef(id) = pv {
+                        resolved_tokens.get(id.as_str()).and_then(|rt| {
+                            if let ResolvedValue::Dimension(dim) = &rt.value {
+                                dim_to_px(dim.value, &dim.unit)
+                            } else {
+                                None
+                            }
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(16.0);
+
+            // Resolve font-weight as u32 (default 400 when absent).
+            let weight: u32 = t
+                .font_weight
+                .as_ref()
+                .and_then(|pv| {
+                    if let PropertyValue::TokenRef(id) = pv {
+                        resolved_tokens.get(id.as_str()).and_then(|rt| {
+                            if let ResolvedValue::FontWeight(w) = &rt.value {
+                                Some(*w)
+                            } else {
+                                None
+                            }
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(400);
+
+            // WCAG AA large text: >= 24 px OR >= 18.66 px bold (>= 700).
+            let is_large = size_px >= 24.0 || (size_px >= 18.66 && weight >= 700);
+            let threshold = if is_large { 3.0_f64 } else { 4.5_f64 };
+
+            let ratio = contrast_ratio(fg_rgb, bg_rgb);
+
+            if ratio < threshold {
+                diagnostics.push(Diagnostic::warning(
+                    "contrast.low",
+                    format!(
+                        "text '{}': contrast ratio {:.2}:1 of fill on page background \
+                         is below WCAG AA ({:.1}:1)",
+                        t.id, ratio, threshold
+                    ),
+                    t.source_span,
+                    Some(t.id.clone()),
+                ));
+            }
+        }
+
+        // Recurse into container nodes, passing the same page_bg through.
+        // Group and Frame children may contain text nodes.
+        Node::Group(g) => {
+            for child in &g.children {
+                check_text_contrast(child, page_bg_rgb, resolved_tokens, diagnostics);
+            }
+        }
+        Node::Frame(f) => {
+            for child in &f.children {
+                check_text_contrast(child, page_bg_rgb, resolved_tokens, diagnostics);
+            }
+        }
+
+        // All other leaf node types carry no text — nothing to check.
+        _ => {}
     }
 }
 
@@ -3666,6 +3812,255 @@ mod tests {
         assert!(
             !has_code(&report, "off_canvas"),
             "rect exactly on page boundary should NOT be off_canvas; codes: {:?}",
+            codes(&report)
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // WCAG 2.2 contrast advisory tests
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// Build a color token with a specific hex value.
+    fn color_token_hex(id: &str, hex: &str) -> Token {
+        Token {
+            id: id.to_owned(),
+            token_type: TokenType::Color,
+            value: TokenValue::Literal(TokenLiteral::String(hex.to_owned())),
+            source_span: None,
+        }
+    }
+
+    /// Build a dimension token in pt.
+    fn dim_token_pt(id: &str, value: f64) -> Token {
+        Token {
+            id: id.to_owned(),
+            token_type: TokenType::Dimension,
+            value: TokenValue::Literal(TokenLiteral::Dimension(Dimension {
+                value,
+                unit: Unit::Pt,
+            })),
+            source_span: None,
+        }
+    }
+
+    /// Build a font-weight token.
+    fn fw_token(id: &str, weight: f64) -> Token {
+        Token {
+            id: id.to_owned(),
+            token_type: TokenType::FontWeight,
+            value: TokenValue::Literal(TokenLiteral::Number(weight)),
+            source_span: None,
+        }
+    }
+
+    /// Helper: build a page with a background color token reference.
+    fn page_with_bg(id: &str, bg_token_id: &str, children: Vec<Node>) -> Page {
+        Page {
+            id: id.to_owned(),
+            name: None,
+            width: px(1280.0),
+            height: px(720.0),
+            background: Some(PropertyValue::TokenRef(bg_token_id.to_owned())),
+            children,
+            source_span: None,
+        }
+    }
+
+    /// Build a text node with explicit fill and optional font-size / font-weight.
+    fn text_with_fill_and_size(
+        id: &str,
+        fill_token: Option<&str>,
+        font_size_token: Option<&str>,
+        font_weight_token: Option<&str>,
+    ) -> Node {
+        Node::Text(crate::ast::node::TextNode {
+            id: id.to_owned(),
+            name: None,
+            role: None,
+            x: Some(px(0.0)),
+            y: Some(px(0.0)),
+            w: Some(px(200.0)),
+            h: Some(px(40.0)),
+            align: None,
+            direction: None,
+            overflow: None,
+            style: None,
+            fill: fill_token.map(|t| PropertyValue::TokenRef(t.to_owned())),
+            font_family: None,
+            font_size: font_size_token.map(|t| PropertyValue::TokenRef(t.to_owned())),
+            font_weight: font_weight_token.map(|t| PropertyValue::TokenRef(t.to_owned())),
+            opacity: None,
+            visible: None,
+            locked: None,
+            rotate: None,
+            spans: vec![],
+            source_span: None,
+            unknown_props: BTreeMap::new(),
+        })
+    }
+
+    /// Light gray (#aaaaaa) text on white page at 16 px → contrast ~2.32:1 < 4.5
+    /// → `contrast.low` warning.
+    #[test]
+    fn low_contrast_normal_text_warns() {
+        let doc = doc_with(
+            vec![
+                color_token_hex("color.bg", "#ffffff"),
+                color_token_hex("color.text", "#aaaaaa"),
+            ],
+            vec![page_with_bg(
+                "page.one",
+                "color.bg",
+                vec![text_with_fill_and_size(
+                    "text.one",
+                    Some("color.text"),
+                    None,
+                    None,
+                )],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "contrast.low"),
+            "light gray on white should warn contrast.low; codes: {:?}",
+            codes(&report)
+        );
+        let diag = report
+            .diagnostics
+            .iter()
+            .find(|d| d.code == "contrast.low")
+            .expect("must exist");
+        assert_eq!(diag.severity, Severity::Warning);
+        assert!(!report.has_errors(), "contrast.low must not be an error");
+    }
+
+    /// Black (#000000) text on white page → contrast 21:1 → NO warning.
+    #[test]
+    fn high_contrast_text_no_warning() {
+        let doc = doc_with(
+            vec![
+                color_token_hex("color.bg", "#ffffff"),
+                color_token_hex("color.text", "#000000"),
+            ],
+            vec![page_with_bg(
+                "page.one",
+                "color.bg",
+                vec![text_with_fill_and_size(
+                    "text.one",
+                    Some("color.text"),
+                    None,
+                    None,
+                )],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            !has_code(&report, "contrast.low"),
+            "black on white must NOT warn contrast.low; codes: {:?}",
+            codes(&report)
+        );
+    }
+
+    /// Large text (20 pt ≈ 26.67 px, which is >= 24 px) with a mid-contrast
+    /// color (#777777 ≈ 4.48:1) passes the large-text threshold (3.0) but would
+    /// fail the normal threshold (4.5) → NO warning.
+    ///
+    /// Note: 20 pt × (4/3) = 26.67 px, which exceeds the 24 px large-text cut-off.
+    #[test]
+    fn large_text_passes_lower_threshold_no_warning() {
+        let doc = doc_with(
+            vec![
+                color_token_hex("color.bg", "#ffffff"),
+                color_token_hex("color.text", "#777777"), // ~4.48:1 — passes 3.0, fails 4.5
+                dim_token_pt("size.large", 20.0),         // 20pt ≈ 26.67px >= 24px → large
+            ],
+            vec![page_with_bg(
+                "page.one",
+                "color.bg",
+                vec![text_with_fill_and_size(
+                    "text.one",
+                    Some("color.text"),
+                    Some("size.large"),
+                    None,
+                )],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            !has_code(&report, "contrast.low"),
+            "large text at ~4.48:1 should pass the 3.0 threshold; codes: {:?}",
+            codes(&report)
+        );
+    }
+
+    /// Small bold text (18 pt ≈ 24 px, which is exactly 24 px → large) with
+    /// mid-contrast (#777777 ≈ 4.48:1) → passes 3.0 → NO warning.
+    #[test]
+    fn bold_large_text_passes_lower_threshold() {
+        let doc = doc_with(
+            vec![
+                color_token_hex("color.bg", "#ffffff"),
+                color_token_hex("color.text", "#777777"),
+                dim_token_pt("size.18pt", 18.0), // 18pt ≈ 24px → exactly at large boundary
+                fw_token("weight.bold", 700.0),
+            ],
+            vec![page_with_bg(
+                "page.one",
+                "color.bg",
+                vec![text_with_fill_and_size(
+                    "text.one",
+                    Some("color.text"),
+                    Some("size.18pt"),
+                    Some("weight.bold"),
+                )],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            !has_code(&report, "contrast.low"),
+            "18pt bold (large text) at ~4.48:1 should pass 3.0; codes: {:?}",
+            codes(&report)
+        );
+    }
+
+    /// Text node with no fill → no contrast check → no warning.
+    #[test]
+    fn text_without_fill_skips_contrast_check() {
+        let doc = doc_with(
+            vec![color_token_hex("color.bg", "#ffffff")],
+            vec![page_with_bg(
+                "page.one",
+                "color.bg",
+                vec![text_with_fill_and_size("text.one", None, None, None)],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            !has_code(&report, "contrast.low"),
+            "text with no fill must not produce contrast.low; codes: {:?}",
+            codes(&report)
+        );
+    }
+
+    /// Page with no background token → contrast checks are skipped entirely.
+    #[test]
+    fn no_page_background_skips_contrast_check() {
+        let doc = doc_with(
+            vec![color_token_hex("color.text", "#aaaaaa")],
+            vec![minimal_page(
+                "page.one",
+                vec![text_with_fill_and_size(
+                    "text.one",
+                    Some("color.text"),
+                    None,
+                    None,
+                )],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            !has_code(&report, "contrast.low"),
+            "page with no background must not produce contrast.low; codes: {:?}",
             codes(&report)
         );
     }

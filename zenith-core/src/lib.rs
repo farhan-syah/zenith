@@ -7,6 +7,7 @@
 
 pub mod asset;
 pub mod ast;
+pub mod color;
 pub mod diagnostics;
 pub mod error;
 pub mod font;
@@ -24,6 +25,7 @@ pub use ast::{
     Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit, UnknownNode, UnknownProperty,
     UnknownStyleProp, UnknownValue, dim_to_px,
 };
+pub use color::{contrast_ratio, parse_rgb, relative_luminance};
 pub use diagnostics::{Diagnostic, Severity};
 pub use error::{FormatError, ParseError, ParseErrorCode};
 pub use font::{BytesFontProvider, FontData, FontProvider, FontStyle, default_provider};
