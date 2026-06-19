@@ -26,7 +26,7 @@ use std::collections::{BTreeMap, HashSet};
 use crate::ast::asset::{AssetDecl, AssetKind};
 use crate::ast::document::Document;
 use crate::ast::node::{Node, PolygonNode, PolylineNode};
-use crate::ast::style::StyleBlock;
+use crate::ast::style::{Style, StyleBlock};
 use crate::ast::token::TokenType;
 use crate::ast::value::{Dimension, PropertyValue, Unit, dim_to_px};
 use crate::color::{contrast_ratio, parse_rgb};
@@ -79,6 +79,15 @@ pub fn validate(doc: &Document) -> ValidationReport {
     // every `style="..."` node attribute references a declared style.
     let declared_style_ids: HashSet<String> =
         doc.styles.styles.iter().map(|s| s.id.clone()).collect();
+
+    // Style lookup by id, so the contrast check can resolve a text node's
+    // style-inherited fill / font-size / font-weight. Ordered for determinism.
+    let style_map: BTreeMap<&str, &Style> = doc
+        .styles
+        .styles
+        .iter()
+        .map(|s| (s.id.as_str(), s))
+        .collect();
 
     // ── Token IDs ─────────────────────────────────────────────────────────
     for token in &doc.tokens.tokens {
@@ -143,7 +152,7 @@ pub fn validate(doc: &Document) -> ValidationReport {
             &page.id,
             "background",
             page.background.as_ref(),
-            VisualExpect::Color,
+            VisualExpect::ColorOrGradient,
             &mut referenced_token_ids,
             resolved_tokens,
             &mut diagnostics,
@@ -190,7 +199,13 @@ pub fn validate(doc: &Document) -> ValidationReport {
             // Contrast check runs after the structural walk so that
             // token-reference errors are already diagnosed and we can
             // safely skip nodes whose tokens didn't resolve.
-            check_text_contrast(node, page_bg_rgb, resolved_tokens, &mut diagnostics);
+            check_text_contrast(
+                node,
+                page_bg_rgb,
+                resolved_tokens,
+                &style_map,
+                &mut diagnostics,
+            );
         }
     }
 
@@ -284,7 +299,7 @@ fn walk_node(
                 &r.id,
                 "fill",
                 r.fill.as_ref(),
-                VisualExpect::Color,
+                VisualExpect::ColorOrGradient,
                 referenced_token_ids,
                 resolved_tokens,
                 diagnostics,
@@ -312,6 +327,15 @@ fn walk_node(
                 "radius",
                 r.radius.as_ref(),
                 VisualExpect::Dimension,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+            check_visual_prop(
+                &r.id,
+                "shadow",
+                r.shadow.as_ref(),
+                VisualExpect::Shadow,
                 referenced_token_ids,
                 resolved_tokens,
                 diagnostics,
@@ -353,7 +377,7 @@ fn walk_node(
                 &e.id,
                 "fill",
                 e.fill.as_ref(),
-                VisualExpect::Color,
+                VisualExpect::ColorOrGradient,
                 referenced_token_ids,
                 resolved_tokens,
                 diagnostics,
@@ -372,6 +396,15 @@ fn walk_node(
                 "stroke-width",
                 e.stroke_width.as_ref(),
                 VisualExpect::Dimension,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+            check_visual_prop(
+                &e.id,
+                "shadow",
+                e.shadow.as_ref(),
+                VisualExpect::Shadow,
                 referenced_token_ids,
                 resolved_tokens,
                 diagnostics,
@@ -498,6 +531,40 @@ fn walk_node(
                 resolved_tokens,
                 diagnostics,
             );
+            check_visual_prop(
+                &t.id,
+                "shadow",
+                t.shadow.as_ref(),
+                VisualExpect::Shadow,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+
+            // Per-span visual properties. Spans inherit the node id as their
+            // subject so token refs in `span ... fill=(token)".." font-weight=..`
+            // are registered (otherwise the token is falsely flagged unused) and
+            // get the same existence/type/raw-literal validation as node props.
+            for span in &t.spans {
+                check_visual_prop(
+                    &t.id,
+                    "fill",
+                    span.fill.as_ref(),
+                    VisualExpect::Color,
+                    referenced_token_ids,
+                    resolved_tokens,
+                    diagnostics,
+                );
+                check_visual_prop(
+                    &t.id,
+                    "font-weight",
+                    span.font_weight.as_ref(),
+                    VisualExpect::FontWeight,
+                    referenced_token_ids,
+                    resolved_tokens,
+                    diagnostics,
+                );
+            }
 
             // Unknown properties.
             for prop_name in t.unknown_props.keys() {
@@ -718,6 +785,17 @@ fn walk_node(
                 ));
             }
 
+            // Visual properties.
+            check_visual_prop(
+                &img.id,
+                "shadow",
+                img.shadow.as_ref(),
+                VisualExpect::Shadow,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+
             // Unknown properties.
             for prop_name in img.unknown_props.keys() {
                 diagnostics.push(Diagnostic::warning(
@@ -781,13 +859,16 @@ fn walk_node(
 ///   scrim the text visually sits on is NOT detected or used.
 /// - Per-span fills (TextSpan.fill) are NOT individually checked; the node-level
 ///   `fill` is used as a proxy for all spans.
-/// - Only `t.fill` TokenRef → Color is resolved; style-inherited fills are NOT
-///   consulted (style fill resolution requires the full style block lookup, which
-///   is a v1 concern; for now, a text node with no direct fill is simply skipped).
+/// - Fill / font-size / font-weight are resolved from the node's direct
+///   property when present, otherwise from the referenced `style` block's
+///   matching property (`fill` / `font-size` / `font-weight`). A node with
+///   neither a direct nor a style-inherited fill is simply skipped. Per-span
+///   fills (TextSpan.fill) are still not individually consulted here.
 fn check_text_contrast(
     node: &Node,
     page_bg_rgb: Option<(u8, u8, u8)>,
     resolved_tokens: &BTreeMap<String, ResolvedToken>,
+    style_map: &BTreeMap<&str, &Style>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     // If we don't know the page background we cannot compute contrast — bail.
@@ -797,9 +878,17 @@ fn check_text_contrast(
 
     match node {
         Node::Text(t) => {
+            // Effective property = direct node property, falling back to the
+            // referenced style block's matching property when the node omits it.
+            let style_prop = |key: &str| -> Option<&PropertyValue> {
+                style_map
+                    .get(t.style.as_deref()?)
+                    .and_then(|s| s.properties.get(key))
+            };
+
             // Resolve the text fill color from a TokenRef → Color token.
             // If no fill is set or it doesn't resolve to a color, skip.
-            let text_rgb = match t.fill.as_ref() {
+            let text_rgb = match t.fill.as_ref().or_else(|| style_prop("fill")) {
                 Some(PropertyValue::TokenRef(id)) => {
                     resolved_tokens.get(id.as_str()).and_then(|rt| {
                         if let ResolvedValue::Color(hex) = &rt.value {
@@ -822,6 +911,7 @@ fn check_text_contrast(
             let size_px: f64 = t
                 .font_size
                 .as_ref()
+                .or_else(|| style_prop("font-size"))
                 .and_then(|pv| {
                     if let PropertyValue::TokenRef(id) = pv {
                         resolved_tokens.get(id.as_str()).and_then(|rt| {
@@ -841,6 +931,7 @@ fn check_text_contrast(
             let weight: u32 = t
                 .font_weight
                 .as_ref()
+                .or_else(|| style_prop("font-weight"))
                 .and_then(|pv| {
                     if let PropertyValue::TokenRef(id) = pv {
                         resolved_tokens.get(id.as_str()).and_then(|rt| {
@@ -880,12 +971,12 @@ fn check_text_contrast(
         // Group and Frame children may contain text nodes.
         Node::Group(g) => {
             for child in &g.children {
-                check_text_contrast(child, page_bg_rgb, resolved_tokens, diagnostics);
+                check_text_contrast(child, page_bg_rgb, resolved_tokens, style_map, diagnostics);
             }
         }
         Node::Frame(f) => {
             for child in &f.children {
-                check_text_contrast(child, page_bg_rgb, resolved_tokens, diagnostics);
+                check_text_contrast(child, page_bg_rgb, resolved_tokens, style_map, diagnostics);
             }
         }
 
@@ -1310,9 +1401,13 @@ fn check_optional_dim(
 #[derive(Debug, Clone, Copy)]
 enum VisualExpect {
     Color,
+    /// A fill/background slot that accepts either a color or a gradient token.
+    ColorOrGradient,
     Dimension,
     FontFamily,
     FontWeight,
+    /// A shadow slot that accepts a shadow token.
+    Shadow,
 }
 
 /// Check a single visual property value:
@@ -1352,10 +1447,31 @@ fn check_visual_prop(
                 return;
             };
 
+            // If this is a gradient token, its stop color tokens are referenced
+            // transitively — record them so they are not falsely flagged
+            // `token.unused`.
+            if let ResolvedValue::Gradient(g) = &resolved.value {
+                for (_, color_id) in &g.stops {
+                    referenced_token_ids.insert(color_id.clone());
+                }
+            }
+
+            // Likewise, a shadow token references its per-layer color tokens
+            // transitively — record them so they are not falsely flagged
+            // `token.unused`.
+            if let ResolvedValue::Shadow(s) = &resolved.value {
+                for layer in &s.layers {
+                    referenced_token_ids.insert(layer.color_token.clone());
+                }
+            }
+
             // Type compatibility check.
             let type_ok = match expect {
                 VisualExpect::Color => {
                     matches!(resolved.token_type, TokenType::Color)
+                }
+                VisualExpect::ColorOrGradient => {
+                    matches!(resolved.token_type, TokenType::Color | TokenType::Gradient)
                 }
                 VisualExpect::Dimension => {
                     matches!(resolved.token_type, TokenType::Dimension)
@@ -1365,6 +1481,9 @@ fn check_visual_prop(
                 }
                 VisualExpect::FontWeight => {
                     matches!(resolved.token_type, TokenType::FontWeight)
+                }
+                VisualExpect::Shadow => {
+                    matches!(resolved.token_type, TokenType::Shadow)
                 }
             };
 
@@ -1586,9 +1705,11 @@ fn style_prop_expect(key: &str) -> Option<VisualExpect> {
 fn visual_expect_name(e: VisualExpect) -> &'static str {
     match e {
         VisualExpect::Color => "color",
+        VisualExpect::ColorOrGradient => "color or gradient",
         VisualExpect::Dimension => "dimension",
         VisualExpect::FontFamily => "fontFamily",
         VisualExpect::FontWeight => "fontWeight",
+        VisualExpect::Shadow => "shadow",
     }
 }
 
@@ -1599,6 +1720,8 @@ fn token_type_name(t: &TokenType) -> &str {
         TokenType::Number => "number",
         TokenType::FontFamily => "fontFamily",
         TokenType::FontWeight => "fontWeight",
+        TokenType::Gradient => "gradient",
+        TokenType::Shadow => "shadow",
         TokenType::Unknown(s) => s.as_str(),
     }
 }
@@ -1665,6 +1788,7 @@ mod tests {
 
     fn minimal_rect(id: &str, fill: Option<PropertyValue>) -> Node {
         Node::Rect(RectNode {
+            shadow: None,
             id: id.to_owned(),
             name: None,
             role: None,
@@ -1689,6 +1813,7 @@ mod tests {
 
     fn minimal_ellipse(id: &str, fill: Option<PropertyValue>) -> Node {
         Node::Ellipse(EllipseNode {
+            shadow: None,
             id: id.to_owned(),
             name: None,
             role: None,
@@ -1711,6 +1836,7 @@ mod tests {
 
     fn minimal_text(id: &str, fill: Option<PropertyValue>) -> Node {
         Node::Text(TextNode {
+            shadow: None,
             id: id.to_owned(),
             name: None,
             role: None,
@@ -1860,6 +1986,7 @@ mod tests {
             vec![minimal_page(
                 "page.one",
                 vec![Node::Rect(RectNode {
+                    shadow: None,
                     id: "rect.no-w".to_owned(),
                     name: None,
                     role: None,
@@ -1919,6 +2046,7 @@ mod tests {
     #[test]
     fn font_weight_with_missing_token_ref_produces_unknown_reference() {
         let text = Node::Text(TextNode {
+            shadow: None,
             id: "text.fw".to_owned(),
             name: None,
             role: None,
@@ -2128,6 +2256,7 @@ mod tests {
             vec![minimal_page(
                 "page.one",
                 vec![Node::Rect(RectNode {
+                    shadow: None,
                     id: "rect.one".to_owned(),
                     name: None,
                     role: None,
@@ -2243,6 +2372,7 @@ mod tests {
         // A rect nested inside a group has no `x` property; walk_node must
         // recurse into group children and report the missing geometry.
         let child_rect = Node::Rect(RectNode {
+            shadow: None,
             id: "rect.inner".to_owned(),
             name: None,
             role: None,
@@ -2459,6 +2589,7 @@ mod tests {
         // A rect nested inside a frame has no `x`; walk_node must recurse
         // into frame children and report the missing geometry.
         let child_rect = Node::Rect(RectNode {
+            shadow: None,
             id: "rect.inner".to_owned(),
             name: None,
             role: None,
@@ -2591,6 +2722,7 @@ mod tests {
             vec![minimal_page(
                 "page.one",
                 vec![Node::Rect(RectNode {
+                    shadow: None,
                     id: "rect.one".to_owned(),
                     name: None,
                     role: None,
@@ -2630,6 +2762,7 @@ mod tests {
             vec![minimal_page(
                 "page.one",
                 vec![Node::Text(TextNode {
+                    shadow: None,
                     id: "text.one".to_owned(),
                     name: None,
                     role: None,
@@ -2695,6 +2828,7 @@ mod tests {
             vec![minimal_page(
                 "page.one",
                 vec![Node::Ellipse(EllipseNode {
+                    shadow: None,
                     id: "ellipse.no-w".to_owned(),
                     name: None,
                     role: None,
@@ -2756,6 +2890,7 @@ mod tests {
             vec![minimal_page(
                 "page.one",
                 vec![Node::Ellipse(EllipseNode {
+                    shadow: None,
                     id: "ellipse.stroke-lit".to_owned(),
                     name: None,
                     role: None,
@@ -3097,6 +3232,7 @@ mod tests {
 
     fn full_image(id: &str, asset: &str, fit: Option<&str>) -> ImageNode {
         ImageNode {
+            shadow: None,
             id: id.to_owned(),
             name: None,
             role: None,
@@ -3768,6 +3904,7 @@ mod tests {
     /// Helper: rect at (x, y, w, h) in px, no fill.
     fn rect_at(id: &str, x: f64, y: f64, w: f64, h: f64) -> Node {
         Node::Rect(RectNode {
+            shadow: None,
             id: id.to_owned(),
             name: None,
             role: None,
@@ -3944,6 +4081,7 @@ mod tests {
         font_weight_token: Option<&str>,
     ) -> Node {
         Node::Text(crate::ast::node::TextNode {
+            shadow: None,
             id: id.to_owned(),
             name: None,
             role: None,
