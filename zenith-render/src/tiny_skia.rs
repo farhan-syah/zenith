@@ -377,6 +377,74 @@ impl RasterBackend for TinySkiaBackend {
                     );
                 }
 
+                SceneCommand::StrokeEllipse {
+                    x,
+                    y,
+                    w,
+                    h,
+                    color,
+                    stroke_width,
+                } => {
+                    if !x.is_finite()
+                        || !y.is_finite()
+                        || !w.is_finite()
+                        || !h.is_finite()
+                        || !stroke_width.is_finite()
+                        || *stroke_width > f64::from(f32::MAX)
+                        || *w <= 0.0
+                        || *h <= 0.0
+                    {
+                        continue;
+                    }
+
+                    let effective_clip = *clip_stack.last().unwrap_or(&page_clip);
+
+                    // Ink-bbox early-out: the stroke extends half its width beyond
+                    // the ellipse edge on all sides.
+                    let half_sw = stroke_width / 2.0;
+                    if intersect_rects(
+                        (x - half_sw, y - half_sw, x + w + half_sw, y + h + half_sw),
+                        effective_clip,
+                    )
+                    .is_none()
+                    {
+                        continue;
+                    }
+
+                    // Build the oval path at its TRUE bounding box — NOT the
+                    // intersected box. The clip mask truncates without reshaping.
+                    let Some(rect) = Rect::from_xywh(*x as f32, *y as f32, *w as f32, *h as f32)
+                    else {
+                        continue;
+                    };
+                    let Some(path) = PathBuilder::from_oval(rect) else {
+                        continue; // degenerate rect: skip
+                    };
+
+                    let mask = match clip_mask(effective_clip, width, height) {
+                        None => continue,
+                        Some(m) => m,
+                    };
+
+                    let stroke = Stroke {
+                        width: *stroke_width as f32,
+                        ..Default::default()
+                    };
+
+                    let mut paint = Paint::default();
+                    paint.set_color_rgba8(color.r, color.g, color.b, color.a);
+                    // AA-on: curved stroke edge, deterministic same-machine.
+                    paint.anti_alias = true;
+
+                    pixmap.stroke_path(
+                        &path,
+                        &paint,
+                        &stroke,
+                        Transform::identity(),
+                        mask.as_ref(),
+                    );
+                }
+
                 SceneCommand::StrokeLine {
                     x1,
                     y1,
@@ -1550,6 +1618,59 @@ mod tests {
         assert_eq!(
             img1.rgba, img2.rgba,
             "two rasterizes of StrokePolyline must be byte-identical"
+        );
+    }
+
+    #[test]
+    fn stroke_ellipse_renders() {
+        let color = Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        };
+        let mut scene = Scene::new(100.0, 100.0);
+        scene.commands.push(SceneCommand::PushClip {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        });
+        scene.commands.push(SceneCommand::StrokeEllipse {
+            x: 20.0,
+            y: 30.0,
+            w: 60.0,
+            h: 40.0,
+            color,
+            stroke_width: 4.0,
+        });
+        scene.commands.push(SceneCommand::PopClip);
+
+        let backend = TinySkiaBackend;
+        let provider = default_provider();
+        let img1 = backend
+            .rasterize(&scene, &provider, &no_assets())
+            .expect("rasterize 1");
+
+        // At least one pixel must be inked.
+        let any_ink = (0..img1.height).any(|py| {
+            (0..img1.width).any(|px| {
+                let (_, _, _, a) = pixel(&img1.rgba, img1.width, px, py);
+                a > 0
+            })
+        });
+        assert!(
+            any_ink,
+            "StrokeEllipse must rasterize at least one ink pixel"
+        );
+
+        // Determinism.
+        let img2 = backend
+            .rasterize(&scene, &provider, &no_assets())
+            .expect("rasterize 2");
+        assert_eq!(
+            img1.rgba, img2.rgba,
+            "two rasterizes of StrokeEllipse must be byte-identical"
         );
     }
 

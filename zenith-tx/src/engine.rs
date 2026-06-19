@@ -462,15 +462,15 @@ fn node_fill_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> {
 
 /// Return a mutable reference to the `stroke` field of a node, or `None` for
 /// variants that do not have a `stroke` property
-/// (`Ellipse`, `Text`, `Frame`, `Group`, `Image`, `Unknown`).
+/// (`Text`, `Code`, `Frame`, `Group`, `Image`, `Unknown`).
 fn node_stroke_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> {
     match node {
         Node::Rect(n) => Some(&mut n.stroke),
         Node::Line(n) => Some(&mut n.stroke),
         Node::Polygon(n) => Some(&mut n.stroke),
         Node::Polyline(n) => Some(&mut n.stroke),
-        Node::Ellipse(_)
-        | Node::Text(_)
+        Node::Ellipse(n) => Some(&mut n.stroke),
+        Node::Text(_)
         | Node::Code(_)
         | Node::Frame(_)
         | Node::Group(_)
@@ -481,15 +481,15 @@ fn node_stroke_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> {
 
 /// Return a mutable reference to the `stroke_width` field of a node, or `None`
 /// for variants that do not have a `stroke_width` property
-/// (`Ellipse`, `Text`, `Frame`, `Group`, `Image`, `Unknown`).
+/// (`Text`, `Code`, `Frame`, `Group`, `Image`, `Unknown`).
 fn node_stroke_width_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> {
     match node {
         Node::Rect(n) => Some(&mut n.stroke_width),
         Node::Line(n) => Some(&mut n.stroke_width),
         Node::Polygon(n) => Some(&mut n.stroke_width),
         Node::Polyline(n) => Some(&mut n.stroke_width),
-        Node::Ellipse(_)
-        | Node::Text(_)
+        Node::Ellipse(n) => Some(&mut n.stroke_width),
+        Node::Text(_)
         | Node::Code(_)
         | Node::Frame(_)
         | Node::Group(_)
@@ -2791,7 +2791,8 @@ mod tests {
     }
 
     #[test]
-    fn set_stroke_unsupported_on_ellipse() {
+    fn set_stroke_accepted_on_ellipse() {
+        // Ellipse now supports stroke — set_stroke must be Accepted.
         let doc = parse(STROKE_DOC);
         let tx = Transaction {
             ops: vec![Op::SetStroke {
@@ -2801,18 +2802,17 @@ mod tests {
         };
         let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
 
-        assert_eq!(result.status, TxStatus::Rejected);
-        assert!(
-            result
-                .diagnostics
-                .iter()
-                .any(|d| d.code == "tx.unsupported_property"
-                    && d.message
-                        .contains("set_stroke is not supported on a ellipse node")),
-            "expected tx.unsupported_property naming ellipse; got: {:?}",
+        assert_eq!(
+            result.status,
+            TxStatus::Accepted,
+            "set_stroke on an ellipse must be Accepted; got: {:?}",
             result.diagnostics
         );
-        assert_eq!(result.source_after, result.source_before);
+        assert!(
+            result.source_after.contains("stroke=(token)\"color.rule\""),
+            "formatted source must contain the new stroke property; got:\n{}",
+            result.source_after
+        );
     }
 
     #[test]

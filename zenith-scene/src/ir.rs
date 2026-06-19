@@ -48,11 +48,6 @@ pub enum FitMode {
 /// All variants are tagged in JSON via `#[serde(tag = "op")]` so that each
 /// serialized command carries an `"op"` field naming the primitive, e.g.
 /// `{ "op": "FillRect", "x": 0.0, … }`.
-///
-/// Only `FillRect`, `PushClip`, and `PopClip` are emitted in Unit 6.  All
-/// other variants are defined here now so the enum is the stable contract and
-/// downstream crates can match exhaustively; their fields are minimal
-/// placeholders until the matching compile path is wired up.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "op")]
 pub enum SceneCommand {
@@ -100,6 +95,16 @@ pub enum SceneCommand {
         w: f64,
         h: f64,
         color: Color,
+    },
+    /// Stroke an axis-aligned ellipse (centered on the ellipse path; no
+    /// stroke-alignment in v0).
+    StrokeEllipse {
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+        color: Color,
+        stroke_width: f64,
     },
     /// Stroke a line segment.
     StrokeLine {

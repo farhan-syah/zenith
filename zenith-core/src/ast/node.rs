@@ -150,7 +150,11 @@ pub struct LineNode {
     pub unknown_props: BTreeMap<String, UnknownProperty>,
 }
 
-/// An `ellipse` node (fill-only; bounded by x/y/w/h bounding box).
+/// An `ellipse` node (fill + centered stroke; bounded by x/y/w/h bounding box).
+///
+/// `stroke-alignment` is not supported for ellipse in v0 — stroke is always
+/// centered on the ellipse path. `stroke_alignment` may be added in a later
+/// schema version.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EllipseNode {
     pub id: String,
@@ -162,6 +166,8 @@ pub struct EllipseNode {
     pub h: Option<Dimension>,
     pub style: Option<String>,
     pub fill: Option<PropertyValue>,
+    pub stroke: Option<PropertyValue>,
+    pub stroke_width: Option<PropertyValue>,
     pub opacity: Option<f64>,
     pub visible: Option<bool>,
     pub locked: Option<bool>,

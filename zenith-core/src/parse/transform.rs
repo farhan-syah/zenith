@@ -850,12 +850,29 @@ fn transform_image(node: &KdlNode) -> Result<ImageNode, ParseError> {
 }
 
 const ELLIPSE_KNOWN_PROPS: &[&str] = &[
-    "id", "name", "role", "x", "y", "w", "h", "style", "fill", "opacity", "visible", "locked",
+    "id",
+    "name",
+    "role",
+    "x",
+    "y",
+    "w",
+    "h",
+    "style",
+    "fill",
+    "stroke",
+    "stroke-width",
+    "stroke_width",
+    "opacity",
+    "visible",
+    "locked",
     "rotate",
 ];
 
 fn transform_ellipse(node: &KdlNode) -> Result<EllipseNode, ParseError> {
     let id = required_string_prop(node, "id")?.to_owned();
+
+    // Handle both hyphenated and underscored variants for forward-compat.
+    let stroke_width = optional_property_value_aliased(node, "stroke-width", "stroke_width");
 
     let unknown_props = collect_unknown_props(node, ELLIPSE_KNOWN_PROPS);
 
@@ -869,6 +886,8 @@ fn transform_ellipse(node: &KdlNode) -> Result<EllipseNode, ParseError> {
         h: optional_dimension_prop(node, "h"),
         style: optional_string_prop(node, "style").map(str::to_owned),
         fill: optional_property_value(node, "fill"),
+        stroke: optional_property_value(node, "stroke"),
+        stroke_width,
         opacity: optional_f64_prop(node, "opacity"),
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),

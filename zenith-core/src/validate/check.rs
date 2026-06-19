@@ -348,12 +348,30 @@ fn walk_node(
             check_optional_dim(&e.id, "w", e.w.as_ref(), e.source_span, diagnostics);
             check_optional_dim(&e.id, "h", e.h.as_ref(), e.source_span, diagnostics);
 
-            // Visual properties (fill-only; no stroke/radius for ellipse).
+            // Visual properties.
             check_visual_prop(
                 &e.id,
                 "fill",
                 e.fill.as_ref(),
                 VisualExpect::Color,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+            check_visual_prop(
+                &e.id,
+                "stroke",
+                e.stroke.as_ref(),
+                VisualExpect::Color,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+            check_visual_prop(
+                &e.id,
+                "stroke-width",
+                e.stroke_width.as_ref(),
+                VisualExpect::Dimension,
                 referenced_token_ids,
                 resolved_tokens,
                 diagnostics,
@@ -1671,6 +1689,8 @@ mod tests {
             h: Some(px(100.0)),
             style: None,
             fill,
+            stroke: None,
+            stroke_width: None,
             opacity: None,
             visible: None,
             locked: None,
@@ -2674,6 +2694,8 @@ mod tests {
                     h: Some(px(100.0)),
                     style: None,
                     fill: None,
+                    stroke: None,
+                    stroke_width: None,
                     opacity: None,
                     visible: None,
                     locked: None,
@@ -2710,6 +2732,44 @@ mod tests {
         assert!(
             has_code(&report, "token.raw_visual_literal"),
             "codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    // ── Ellipse: raw literal stroke → token.raw_visual_literal ────────────
+
+    #[test]
+    fn ellipse_stroke_raw_literal_produces_raw_visual_literal() {
+        let doc = doc_with(
+            vec![],
+            vec![minimal_page(
+                "page.one",
+                vec![Node::Ellipse(EllipseNode {
+                    id: "ellipse.stroke-lit".to_owned(),
+                    name: None,
+                    role: None,
+                    x: Some(px(0.0)),
+                    y: Some(px(0.0)),
+                    w: Some(px(100.0)),
+                    h: Some(px(100.0)),
+                    style: None,
+                    fill: None,
+                    stroke: Some(PropertyValue::Literal("#ff0000".to_owned())),
+                    stroke_width: None,
+                    opacity: None,
+                    visible: None,
+                    locked: None,
+                    rotate: None,
+                    source_span: None,
+                    unknown_props: BTreeMap::new(),
+                })],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "token.raw_visual_literal"),
+            "ellipse with raw literal stroke must produce token.raw_visual_literal; codes: {:?}",
             codes(&report)
         );
         assert!(report.has_errors());

@@ -531,26 +531,51 @@ fn compile_node(
             let x = x_raw + ctx.dx;
             let y = y_raw + ctx.dy;
 
-            // Resolve fill color — node-local prop overrides style cascade.
+            // Apply node opacity then cascade ctx.opacity on top.
+            let node_opacity = ellipse.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
+
+            // FILL (emitted first, under the stroke) — node-local prop overrides
+            // style cascade.
             let fill_prop = ellipse
                 .fill
                 .as_ref()
                 .or_else(|| style_prop(&ellipse.style, style_map, "fill"));
-            let Some(fill_prop) = fill_prop else {
-                // No fill → nothing to draw for a fill-only primitive.
-                return;
-            };
-            let Some(mut color) =
-                resolve_property_color(fill_prop, resolved, diagnostics, &ellipse.id)
-            else {
-                return;
-            };
+            if let Some(fill_prop) = fill_prop
+                && let Some(mut color) =
+                    resolve_property_color(fill_prop, resolved, diagnostics, &ellipse.id)
+            {
+                color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+                commands.push(SceneCommand::FillEllipse { x, y, w, h, color });
+            }
 
-            // Apply node opacity then cascade ctx.opacity on top.
-            let node_opacity = ellipse.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
-            color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+            // STROKE (emitted on top of the fill) — node-local prop overrides
+            // style cascade. Stroke is centered on the ellipse path in v0.
+            let stroke_prop = ellipse
+                .stroke
+                .as_ref()
+                .or_else(|| style_prop(&ellipse.style, style_map, "stroke"));
+            if let Some(stroke_prop) = stroke_prop
+                && let Some(mut color) =
+                    resolve_property_color(stroke_prop, resolved, diagnostics, &ellipse.id)
+            {
+                color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+                let sw = ellipse
+                    .stroke_width
+                    .clone()
+                    .or_else(|| style_prop(&ellipse.style, style_map, "stroke-width").cloned());
+                let stroke_width = resolve_property_dimension_px(&sw, resolved, 1.0);
+                commands.push(SceneCommand::StrokeEllipse {
+                    x,
+                    y,
+                    w,
+                    h,
+                    color,
+                    stroke_width,
+                });
+            }
 
-            commands.push(SceneCommand::FillEllipse { x, y, w, h, color });
+            // If neither fill nor stroke is present, the ellipse draws nothing —
+            // no diagnostic needed (an invisible ellipse is valid in v0).
         }
 
         Node::Text(text) => {
@@ -3031,6 +3056,157 @@ mod tests {
         );
         assert!(matches!(cmds[0], SceneCommand::PushClip { .. }));
         assert!(matches!(cmds[1], SceneCommand::PopClip));
+    }
+
+    // ── Ellipse: fill + stroke tokens compile to FillEllipse then StrokeEllipse
+
+    #[test]
+    fn ellipse_fill_and_stroke_tokens_emit_fill_then_stroke() {
+        let src = r##"zenith version=1 {
+  project id="proj.e3" name="E3"
+  tokens format="zenith-token-v1" {
+    token id="color.fill"   type="color"     value="#1e293b"
+    token id="color.stroke" type="color"     value="#94a3b8"
+    token id="size.sw"      type="dimension" value=(px)4
+  }
+  styles {}
+  document id="doc.e3" title="E3" {
+    page id="page.e3" w=(px)200 h=(px)200 {
+      ellipse id="ellipse.e3" x=(px)10 y=(px)10 w=(px)180 h=(px)180 fill=(token)"color.fill" stroke=(token)"color.stroke" stroke-width=(token)"size.sw"
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+
+        let cmds = &result.scene.commands;
+        // PushClip, FillEllipse, StrokeEllipse, PopClip
+        assert_eq!(cmds.len(), 4, "expected 4 commands, got: {:?}", cmds);
+
+        assert!(
+            matches!(cmds[0], SceneCommand::PushClip { .. }),
+            "first command must be PushClip"
+        );
+
+        match &cmds[1] {
+            SceneCommand::FillEllipse { x, y, w, h, color } => {
+                assert_eq!(*x, 10.0);
+                assert_eq!(*y, 10.0);
+                assert_eq!(*w, 180.0);
+                assert_eq!(*h, 180.0);
+                // #1e293b → r=0x1e=30, g=0x29=41, b=0x3b=59, a=255
+                assert_eq!(color.r, 0x1e);
+                assert_eq!(color.g, 0x29);
+                assert_eq!(color.b, 0x3b);
+                assert_eq!(color.a, 255);
+            }
+            other => panic!("expected FillEllipse at index 1, got {other:?}"),
+        }
+
+        match &cmds[2] {
+            SceneCommand::StrokeEllipse {
+                x,
+                y,
+                w,
+                h,
+                color,
+                stroke_width,
+            } => {
+                assert_eq!(*x, 10.0);
+                assert_eq!(*y, 10.0);
+                assert_eq!(*w, 180.0);
+                assert_eq!(*h, 180.0);
+                // #94a3b8 → r=0x94=148, g=0xa3=163, b=0xb8=184, a=255
+                assert_eq!(color.r, 0x94);
+                assert_eq!(color.g, 0xa3);
+                assert_eq!(color.b, 0xb8);
+                assert_eq!(color.a, 255);
+                assert_eq!(*stroke_width, 4.0);
+            }
+            other => panic!("expected StrokeEllipse at index 2, got {other:?}"),
+        }
+
+        assert!(
+            matches!(cmds[3], SceneCommand::PopClip),
+            "last command must be PopClip"
+        );
+    }
+
+    // ── Ellipse: stroke only (no fill) compiles to StrokeEllipse only ─────
+
+    #[test]
+    fn ellipse_stroke_only_emits_stroke_ellipse_without_fill() {
+        let src = r##"zenith version=1 {
+  project id="proj.e4" name="E4"
+  tokens format="zenith-token-v1" {
+    token id="color.stroke" type="color"     value="#f43f5e"
+    token id="size.sw"      type="dimension" value=(px)3
+  }
+  styles {}
+  document id="doc.e4" title="E4" {
+    page id="page.e4" w=(px)100 h=(px)100 {
+      ellipse id="ellipse.e4" x=(px)5 y=(px)5 w=(px)90 h=(px)90 stroke=(token)"color.stroke" stroke-width=(token)"size.sw"
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+
+        let cmds = &result.scene.commands;
+        // PushClip, StrokeEllipse, PopClip — no FillEllipse
+        assert_eq!(
+            cmds.len(),
+            3,
+            "expected 3 commands (no fill), got: {:?}",
+            cmds
+        );
+
+        assert!(
+            matches!(cmds[0], SceneCommand::PushClip { .. }),
+            "first command must be PushClip"
+        );
+
+        match &cmds[1] {
+            SceneCommand::StrokeEllipse {
+                x,
+                y,
+                w,
+                h,
+                color,
+                stroke_width,
+            } => {
+                assert_eq!(*x, 5.0);
+                assert_eq!(*y, 5.0);
+                assert_eq!(*w, 90.0);
+                assert_eq!(*h, 90.0);
+                // #f43f5e → r=0xf4=244, g=0x3f=63, b=0x5e=94, a=255
+                assert_eq!(color.r, 0xf4);
+                assert_eq!(color.g, 0x3f);
+                assert_eq!(color.b, 0x5e);
+                assert_eq!(color.a, 255);
+                assert_eq!(*stroke_width, 3.0);
+            }
+            other => panic!("expected StrokeEllipse at index 1, got {other:?}"),
+        }
+
+        assert!(
+            matches!(cmds[2], SceneCommand::PopClip),
+            "last command must be PopClip"
+        );
     }
 
     // ── Line: token stroke compiles to StrokeLine ─────────────────────────
