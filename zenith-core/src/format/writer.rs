@@ -806,6 +806,9 @@ fn write_code(c: &CodeNode, out: &mut String, depth: usize) {
     write_opt_property_value(out, "fill", &c.fill);
     write_opt_property_value(out, "font-family", &c.font_family);
     write_opt_property_value(out, "font-size", &c.font_size);
+    if let Some(t) = c.syntax_theme {
+        let _ = write!(out, " syntax-theme=\"{}\"", t.as_str());
+    }
     write_opt_f64(out, "opacity", &c.opacity);
     write_opt_bool(out, "visible", &c.visible);
     write_opt_bool(out, "locked", &c.locked);
@@ -1106,6 +1109,64 @@ mod tests {
             Node::Polyline(p) => p.source_span = None,
             Node::Unknown(u) => u.source_span = None,
         }
+    }
+
+    /// **syntax-theme round-trip**: a code node with `syntax-theme="light"`
+    /// must parse to `Some(SyntaxTheme::Light)` and format back to
+    /// `syntax-theme="light"` in the canonical position (between font-size and
+    /// opacity).
+    #[test]
+    fn test_syntax_theme_parse_format_round_trip() {
+        let src = r##"zenith version=1 {
+  project id="proj.sth" name="STH"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.sth" title="STH" {
+    page id="page.sth" w=(px)400 h=(px)300 {
+      code id="code.sth" x=(px)10 y=(px)10 language="rust" syntax-theme="light" {
+        content "let x = 1;"
+      }
+    }
+  }
+}
+"##;
+        let adapter = KdlAdapter;
+        let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+        let code_node = match &doc.body.pages[0].children[0] {
+            Node::Code(c) => c,
+            other => panic!("expected Code node, got {other:?}"),
+        };
+        use crate::tokens::SyntaxTheme;
+        assert_eq!(
+            code_node.syntax_theme,
+            Some(SyntaxTheme::Light),
+            "syntax-theme=\"light\" must parse to Some(SyntaxTheme::Light)"
+        );
+
+        let formatted = format_document(&doc).expect("format must succeed");
+        let formatted_str = String::from_utf8(formatted).expect("formatted must be utf8");
+        assert!(
+            formatted_str.contains("syntax-theme=\"light\""),
+            "formatter must emit syntax-theme=\"light\"; got:\n{formatted_str}"
+        );
+
+        // Canonical position: between font-size and opacity. Since neither
+        // font-size nor opacity is set in this fixture, just check that
+        // syntax-theme appears and re-parses correctly.
+        let doc2 = adapter
+            .parse(formatted_str.as_bytes())
+            .expect("re-parse after format");
+        let code2 = match &doc2.body.pages[0].children[0] {
+            Node::Code(c) => c,
+            other => panic!("expected Code node on re-parse, got {other:?}"),
+        };
+        assert_eq!(
+            code2.syntax_theme,
+            Some(SyntaxTheme::Light),
+            "syntax-theme must survive a format → re-parse round-trip"
+        );
     }
 
     /// **Number formatting**: integral `f64` emits without decimal point.

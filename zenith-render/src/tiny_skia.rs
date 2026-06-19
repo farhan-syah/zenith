@@ -1198,7 +1198,7 @@ mod tests {
             y: baseline_y,
             font_id: run.font_id.clone(),
             font_size,
-            color: ink_color.clone(),
+            color: ink_color,
             glyphs,
         });
 
@@ -1410,7 +1410,7 @@ mod tests {
         scene.commands.push(SceneCommand::FillPolygon {
             // Triangle: top-center, bottom-right, bottom-left
             points: vec![50.0, 10.0, 90.0, 90.0, 10.0, 90.0],
-            color: color.clone(),
+            color,
             even_odd: false,
         });
         scene.commands.push(SceneCommand::PopClip);
@@ -1462,7 +1462,7 @@ mod tests {
         });
         scene.commands.push(SceneCommand::StrokePolyline {
             points: vec![10.0, 50.0, 50.0, 10.0, 90.0, 50.0],
-            color: color.clone(),
+            color,
             stroke_width: 4.0,
             closed: false,
         });

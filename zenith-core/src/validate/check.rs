@@ -1393,6 +1393,7 @@ mod tests {
             fill,
             font_family: None,
             font_size: None,
+            syntax_theme: None,
             opacity: None,
             visible: None,
             locked: None,

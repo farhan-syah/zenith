@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use super::Span;
 use super::value::{Dimension, PropertyValue};
+use crate::tokens::SyntaxTheme;
 
 /// The typed value of an unrecognized KDL property, preserved for forward-compat.
 ///
@@ -234,6 +235,8 @@ pub struct CodeNode {
     pub fill: Option<PropertyValue>,
     pub font_family: Option<PropertyValue>,
     pub font_size: Option<PropertyValue>,
+    /// Optional built-in syntax-highlight color theme; `None` = use default (`Dark`).
+    pub syntax_theme: Option<SyntaxTheme>,
     pub opacity: Option<f64>,
     pub visible: Option<bool>,
     pub locked: Option<bool>,

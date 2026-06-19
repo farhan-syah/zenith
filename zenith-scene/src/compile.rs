@@ -13,7 +13,8 @@ use std::collections::BTreeMap;
 use zenith_core::{
     Diagnostic, Document, FontProvider, FontStyle, FrameNode, GroupNode, ImageNode, Node,
     ObjectPosition, Point, PolygonNode, PolylineNode, PropertyValue, ResolvedToken, ResolvedValue,
-    Span, Style, Unit, resolve_tokens,
+    Span, Style, TokenKind, Unit, builtin_color, is_supported, resolve_tokens, scan,
+    token_id_for_kind,
 };
 use zenith_layout::{RustybuzzEngine, ShapeRequest, TextLayoutEngine};
 
@@ -681,7 +682,7 @@ fn compile_node(
                                 y: baseline_y + font_size as f64 * 0.12,
                                 w: run_advance,
                                 h: deco_thickness,
-                                color: color.clone(),
+                                color,
                             });
                         }
                         if span.strikethrough == Some(true) {
@@ -690,7 +691,7 @@ fn compile_node(
                                 y: baseline_y - font_size as f64 * 0.30,
                                 w: run_advance,
                                 h: deco_thickness,
-                                color: color.clone(),
+                                color,
                             });
                         }
 
@@ -970,6 +971,35 @@ fn compile_node(
                 });
             }
 
+            // Resolve syntax-highlighting settings before the per-line loop.
+            // `theme` drives builtin fallback colors; `hl_lang` is `Some` only
+            // when the node declares a language that oxidoc-highlight supports.
+            // When `hl_lang` is `None` the existing single-run path is used
+            // unchanged, guaranteeing byte-identical output for all non-highlighted
+            // documents.
+            let theme = code.syntax_theme.unwrap_or_default();
+            let hl_lang: Option<&str> = code.language.as_deref().filter(|l| is_supported(l));
+
+            // Helper: resolve a TokenKind to a Color, consulting doc tokens first
+            // and falling back to the builtin palette. Opacity is baked in.
+            let syntax_color = |kind: TokenKind| -> Color {
+                let hex: &str = resolved
+                    .get(token_id_for_kind(kind))
+                    .and_then(|rt| match &rt.value {
+                        ResolvedValue::Color(h) => Some(h.as_str()),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| builtin_color(theme, kind));
+                let mut c = parse_srgb_hex(hex).unwrap_or(Color {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                });
+                c.a = (c.a as f64 * node_opacity * ctx.opacity).round() as u8;
+                c
+            };
+
             // Multi-line emission: each physical line becomes its own glyph run,
             // stacked by `line_height`. Blank lines emit no run but the index `i`
             // still advances, preserving their vertical space. All non-blank
@@ -980,46 +1010,143 @@ fn compile_node(
                     continue;
                 }
 
-                let req = ShapeRequest {
-                    text: line,
-                    families: &families,
-                    weight: 400,
-                    style: FontStyle::Normal,
-                    font_size,
-                };
+                if let Some(lang) = hl_lang {
+                    // ── Highlighted path: per-token colored segments ──────────
+                    // Tokenise the line, walk gaps between tokens, collect
+                    // (text_slice, color) pairs, shape each, then emit.
+                    let plain_color = syntax_color(TokenKind::Plain);
+                    let tokens = scan(line, lang);
 
-                match engine.shape(&req, fonts) {
-                    Err(e) => {
-                        diagnostics.push(Diagnostic::advisory(
-                            "scene.text_unshaped",
-                            format!("code node '{}' could not be shaped: {}", code.id, e.message),
-                            code.source_span,
-                            Some(code.id.clone()),
-                        ));
-                        continue;
+                    // Build segment list: (slice, color)
+                    let mut segments: Vec<(&str, Color)> = Vec::new();
+                    let mut pos: usize = 0;
+                    for tok in &tokens {
+                        // Gap before this token → plain color.
+                        if tok.start > pos
+                            && let Some(gap) = line.get(pos..tok.start)
+                            && !gap.is_empty()
+                        {
+                            segments.push((gap, plain_color));
+                        }
+                        if let Some(slice) = line.get(tok.start..tok.end)
+                            && !slice.is_empty()
+                        {
+                            segments.push((slice, syntax_color(tok.kind)));
+                        }
+                        pos = tok.end;
                     }
-                    Ok(run) => {
-                        let baseline_y =
-                            code_y + run.ascent as f64 + (i as f64) * run.line_height as f64;
-                        let glyphs: Vec<SceneGlyph> = run
-                            .glyphs
-                            .iter()
-                            .map(|g| SceneGlyph {
-                                glyph_id: g.glyph_id,
-                                dx: g.x,
-                                dy: g.y,
-                            })
-                            .collect();
+                    // Trailing gap after last token.
+                    if pos < line.len()
+                        && let Some(tail) = line.get(pos..)
+                        && !tail.is_empty()
+                    {
+                        segments.push((tail, plain_color));
+                    }
 
-                        commands.push(SceneCommand::DrawGlyphRun {
-                            x: code_x,
-                            y: baseline_y,
-                            font_id: run.font_id,
-                            font_size: run.font_size,
-                            // Cloned per line: `color` is reused across every line's run.
-                            color: color.clone(),
-                            glyphs,
-                        });
+                    // Shape all segments; collect (run, color) pairs so metrics
+                    // can be read from the first successful run before emitting.
+                    let mut shaped = Vec::new();
+                    for (seg_text, seg_color) in segments {
+                        let req = ShapeRequest {
+                            text: seg_text,
+                            families: &families,
+                            weight: 400,
+                            style: FontStyle::Normal,
+                            font_size,
+                        };
+                        match engine.shape(&req, fonts) {
+                            Err(e) => {
+                                diagnostics.push(Diagnostic::advisory(
+                                    "scene.text_unshaped",
+                                    format!(
+                                        "code node '{}' could not be shaped: {}",
+                                        code.id, e.message
+                                    ),
+                                    code.source_span,
+                                    Some(code.id.clone()),
+                                ));
+                                // Skip this segment; cursor does not advance.
+                            }
+                            Ok(run) => {
+                                shaped.push((run, seg_color));
+                            }
+                        }
+                    }
+
+                    // Emit: metrics are font-constant, read from first shaped run.
+                    if let Some((first_run, _)) = shaped.first() {
+                        let baseline_y = code_y
+                            + first_run.ascent as f64
+                            + (i as f64) * first_run.line_height as f64;
+                        let mut x_cursor = code_x;
+                        for (run, seg_color) in shaped {
+                            let advance = run.advance_width as f64;
+                            let glyphs: Vec<SceneGlyph> = run
+                                .glyphs
+                                .iter()
+                                .map(|g| SceneGlyph {
+                                    glyph_id: g.glyph_id,
+                                    dx: g.x,
+                                    dy: g.y,
+                                })
+                                .collect();
+                            commands.push(SceneCommand::DrawGlyphRun {
+                                x: x_cursor,
+                                y: baseline_y,
+                                font_id: run.font_id,
+                                font_size: run.font_size,
+                                color: seg_color,
+                                glyphs,
+                            });
+                            x_cursor += advance;
+                        }
+                    }
+                } else {
+                    // ── Plain path (no highlighting): single run per line ──────
+                    // Kept byte-identical to the original implementation.
+                    let req = ShapeRequest {
+                        text: line,
+                        families: &families,
+                        weight: 400,
+                        style: FontStyle::Normal,
+                        font_size,
+                    };
+
+                    match engine.shape(&req, fonts) {
+                        Err(e) => {
+                            diagnostics.push(Diagnostic::advisory(
+                                "scene.text_unshaped",
+                                format!(
+                                    "code node '{}' could not be shaped: {}",
+                                    code.id, e.message
+                                ),
+                                code.source_span,
+                                Some(code.id.clone()),
+                            ));
+                            continue;
+                        }
+                        Ok(run) => {
+                            let baseline_y =
+                                code_y + run.ascent as f64 + (i as f64) * run.line_height as f64;
+                            let glyphs: Vec<SceneGlyph> = run
+                                .glyphs
+                                .iter()
+                                .map(|g| SceneGlyph {
+                                    glyph_id: g.glyph_id,
+                                    dx: g.x,
+                                    dy: g.y,
+                                })
+                                .collect();
+
+                            commands.push(SceneCommand::DrawGlyphRun {
+                                x: code_x,
+                                y: baseline_y,
+                                font_id: run.font_id,
+                                font_size: run.font_size,
+                                color,
+                                glyphs,
+                            });
+                        }
                     }
                 }
             }
@@ -4073,6 +4200,130 @@ mod tests {
         );
     }
 
+    // ── Code node: syntax highlighting splits into per-token runs ────────────
+
+    /// A code node with `language="rust"` and a Rust snippet must produce MORE
+    /// DrawGlyphRun commands than there are lines (per-token splitting) and at
+    /// least two distinct colors.
+    #[test]
+    fn code_node_highlighted_rust_emits_per_token_runs() {
+        let src = r##"zenith version=1 {
+  project id="proj.hl1" name="HL1"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.hl1" title="HL1" {
+    page id="page.hl1" w=(px)800 h=(px)400 {
+      code id="code.hl1" x=(px)10 y=(px)10 language="rust" overflow="visible" {
+        content "let x = 42;"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        let runs: Vec<&SceneCommand> = result
+            .scene
+            .commands
+            .iter()
+            .filter(|c| matches!(c, SceneCommand::DrawGlyphRun { .. }))
+            .collect();
+        // "let x = 42;" tokenises into multiple tokens → more than 1 run per line.
+        assert!(
+            runs.len() > 1,
+            "highlighted line must emit multiple runs; got {}",
+            runs.len()
+        );
+        // At least two distinct colors must appear (keyword vs number vs operator…).
+        let mut colors: Vec<(u8, u8, u8, u8)> = runs
+            .iter()
+            .filter_map(|c| match c {
+                SceneCommand::DrawGlyphRun { color, .. } => {
+                    Some((color.r, color.g, color.b, color.a))
+                }
+                _ => None,
+            })
+            .collect();
+        colors.dedup();
+        assert!(
+            colors.len() >= 2,
+            "at least two distinct colors expected; got {:?}",
+            colors
+        );
+    }
+
+    /// A code node with NO language (or an unsupported one) must emit exactly
+    /// ONE DrawGlyphRun per non-empty line — byte-identical to the pre-highlight
+    /// behavior.
+    #[test]
+    fn code_node_no_language_single_run_per_line() {
+        let src = r##"zenith version=1 {
+  project id="proj.hl2" name="HL2"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.hl2" title="HL2" {
+    page id="page.hl2" w=(px)800 h=(px)400 {
+      code id="code.hl2" x=(px)10 y=(px)10 language="zzz" overflow="visible" {
+        content "let x = 42;\nlet y = 1;"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        let run_count = result
+            .scene
+            .commands
+            .iter()
+            .filter(|c| matches!(c, SceneCommand::DrawGlyphRun { .. }))
+            .count();
+        // 2 non-empty lines → exactly 2 runs (single-run plain path).
+        assert_eq!(
+            run_count, 2,
+            "unsupported language must yield 1 run/line (2 total); got {run_count}"
+        );
+    }
+
+    /// A code node with `language="rust"` and a doc-declared `syntax.keyword`
+    /// token (red) must use that color for keyword runs, overriding the builtin.
+    #[test]
+    fn code_node_highlighted_doc_token_overrides_builtin_color() {
+        // `let` is a Rust keyword. With syntax.keyword=#ff0000 the keyword run
+        // must be red (r=255, g=0, b=0).
+        let src = r##"zenith version=1 {
+  project id="proj.hl3" name="HL3"
+  tokens format="zenith-token-v1" {
+    token id="syntax.keyword" type="color" value="#ff0000"
+  }
+  styles {}
+  document id="doc.hl3" title="HL3" {
+    page id="page.hl3" w=(px)800 h=(px)400 {
+      code id="code.hl3" x=(px)10 y=(px)10 language="rust" overflow="visible" {
+        content "let x = 1;"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        let keyword_run = result.scene.commands.iter().find_map(|c| match c {
+            SceneCommand::DrawGlyphRun { color, .. }
+                if color.r == 255 && color.g == 0 && color.b == 0 =>
+            {
+                Some(*color)
+            }
+            _ => None,
+        });
+        assert!(
+            keyword_run.is_some(),
+            "expected a red (r=255,g=0,b=0) run for the overridden keyword token; \
+             commands: {:?}",
+            result.scene.commands
+        );
+    }
+
     // ── Text node: font-weight token selects the bold face ───────────────────
 
     /// A text node with a `font-weight` token resolving to 700 must emit a
@@ -4147,7 +4398,7 @@ mod tests {
             .filter_map(|c| match c {
                 SceneCommand::DrawGlyphRun {
                     x, color, font_id, ..
-                } => Some((*x, color.clone(), font_id.clone())),
+                } => Some((*x, *color, font_id.clone())),
                 _ => None,
             })
             .collect()

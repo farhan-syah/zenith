@@ -22,6 +22,14 @@ impl SyntaxTheme {
             None
         }
     }
+
+    /// The canonical lowercase name, for formatting.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SyntaxTheme::Dark => "dark",
+            SyntaxTheme::Light => "light",
+        }
+    }
 }
 
 /// Returns the dotted token id for a given `TokenKind`.
@@ -156,6 +164,18 @@ mod tests {
         assert_eq!(SyntaxTheme::from_name("DARK"), Some(SyntaxTheme::Dark));
         assert_eq!(SyntaxTheme::from_name("light"), Some(SyntaxTheme::Light));
         assert_eq!(SyntaxTheme::from_name("nope"), None);
+    }
+
+    #[test]
+    fn as_str_round_trips_for_both_variants() {
+        for t in [SyntaxTheme::Dark, SyntaxTheme::Light] {
+            assert_eq!(
+                SyntaxTheme::from_name(t.as_str()),
+                Some(t),
+                "as_str/from_name round-trip failed for {:?}",
+                t
+            );
+        }
     }
 
     #[test]

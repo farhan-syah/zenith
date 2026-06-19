@@ -21,6 +21,7 @@ use crate::ast::{
     value::{Dimension, PropertyValue, Unit},
 };
 use crate::error::{ParseError, ParseErrorCode};
+use crate::tokens::SyntaxTheme;
 
 // ---------------------------------------------------------------------------
 // Span helpers
@@ -1013,6 +1014,8 @@ const CODE_KNOWN_PROPS: &[&str] = &[
     "font_family",
     "font-size",
     "font_size",
+    "syntax-theme",
+    "syntax_theme",
     "opacity",
     "visible",
     "locked",
@@ -1028,6 +1031,9 @@ fn transform_code(node: &KdlNode) -> Result<CodeNode, ParseError> {
         .or_else(|| optional_bool_prop(node, "line_numbers"));
     let tab_width =
         optional_u32_prop(node, "tab-width").or_else(|| optional_u32_prop(node, "tab_width"));
+    let syntax_theme = optional_string_prop(node, "syntax-theme")
+        .or_else(|| optional_string_prop(node, "syntax_theme"))
+        .and_then(SyntaxTheme::from_name);
 
     // The verbatim source is carried by a `content` child node whose first
     // positional argument is the DECODED string. KDL v2 multi-line string
@@ -1064,6 +1070,7 @@ fn transform_code(node: &KdlNode) -> Result<CodeNode, ParseError> {
         fill: optional_property_value(node, "fill"),
         font_family,
         font_size,
+        syntax_theme,
         opacity: optional_f64_prop(node, "opacity"),
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),

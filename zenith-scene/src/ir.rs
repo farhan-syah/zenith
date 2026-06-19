@@ -16,7 +16,7 @@ use serde::Serialize;
 ///
 /// `r`, `g`, `b`, `a` are all in `0..=255` (linear 8-bit sRGB per channel,
 /// straight / un-pre-multiplied alpha).
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct Color {
     pub r: u8,
     pub g: u8,

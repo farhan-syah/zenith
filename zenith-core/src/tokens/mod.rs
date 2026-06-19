@@ -6,5 +6,7 @@
 mod resolve;
 mod syntax;
 
+pub use oxidoc_highlight::token::Token as HighlightToken;
+pub use oxidoc_highlight::{is_supported, scan};
 pub use resolve::{ResolvedToken, ResolvedValue, TokenResolution, resolve_tokens};
 pub use syntax::{SyntaxTheme, TokenKind, builtin_color, token_id_for_kind};

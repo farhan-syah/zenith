@@ -29,7 +29,7 @@ pub use error::{FormatError, ParseError, ParseErrorCode};
 pub use font::{BytesFontProvider, FontData, FontProvider, FontStyle, default_provider};
 pub use parse::{KdlAdapter, KdlSource};
 pub use tokens::{
-    ResolvedToken, ResolvedValue, SyntaxTheme, TokenKind, TokenResolution, builtin_color,
-    resolve_tokens, token_id_for_kind,
+    HighlightToken, ResolvedToken, ResolvedValue, SyntaxTheme, TokenKind, TokenResolution,
+    builtin_color, is_supported, resolve_tokens, scan, token_id_for_kind,
 };
 pub use validate::{ValidationReport, validate};
