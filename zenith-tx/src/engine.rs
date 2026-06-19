@@ -2089,19 +2089,9 @@ fn apply_align_nodes(
         return;
     }
 
-    // Validate anchor value.
-    if anchor != "selection" && anchor != "page" {
-        diagnostics.push(Diagnostic::error(
-            "tx.unsupported_property",
-            format!(
-                "align_nodes: unknown anchor {:?}; must be \"selection\" or \"page\"",
-                anchor
-            ),
-            None,
-            None,
-        ));
-        return;
-    }
+    // `anchor` is "page", "selection", or a node id (align relative to that
+    // node's bbox). A node-id anchor is resolved when the reference rectangle is
+    // computed below; an unknown id is rejected there.
 
     // ── Phase 1: shared scan — gather bbox and check existence ────────────────
     //
@@ -2219,8 +2209,8 @@ fn apply_align_nodes(
                 }
             }
         }
-    } else {
-        // anchor == "selection": union bbox of all alignable nodes.
+    } else if anchor == "selection" {
+        // union bbox of all alignable nodes.
         let ref_left = alignable.iter().map(|n| n.x).fold(f64::INFINITY, f64::min);
         let ref_right = alignable
             .iter()
@@ -2232,6 +2222,43 @@ fn apply_align_nodes(
             .map(|n| n.y + n.h)
             .fold(f64::NEG_INFINITY, f64::max);
         (ref_left, ref_right, ref_top, ref_bottom)
+    } else {
+        // anchor is a NODE ID: align relative to that node's bbox.
+        let found: Option<Option<(f64, f64, f64, f64)>> = 'anchor_scan: {
+            for page in doc.body.pages.iter() {
+                if let Some(node) = find_node_shared(&page.children, anchor) {
+                    break 'anchor_scan Some(read_geometry_px(node));
+                }
+            }
+            None
+        };
+        match found {
+            Some(Some((x, y, w, h))) => (x, x + w, y, y + h),
+            Some(None) => {
+                diagnostics.push(Diagnostic::error(
+                    "tx.unsupported_property",
+                    format!(
+                        "align_nodes: anchor node {:?} has no resolvable x/y/w/h geometry",
+                        anchor
+                    ),
+                    None,
+                    Some(anchor.to_owned()),
+                ));
+                return;
+            }
+            None => {
+                diagnostics.push(Diagnostic::error(
+                    "tx.unknown_node",
+                    format!(
+                        "align_nodes: anchor {:?} is not \"page\", \"selection\", or a known node id",
+                        anchor
+                    ),
+                    None,
+                    Some(anchor.to_owned()),
+                ));
+                return;
+            }
+        }
     };
 
     // ── Phase 2: exclusive borrow — write new x or y for each node ───────────
