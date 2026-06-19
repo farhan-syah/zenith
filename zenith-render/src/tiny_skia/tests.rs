@@ -1,0 +1,1359 @@
+//! Integration-style pixel/determinism tests for the tiny-skia backend.
+//!
+//! Moved verbatim from the old inline `#[cfg(test)] mod tests` block in
+//! `tiny_skia.rs`; exercises the public `render_image` / `render_png` entry
+//! points and the `TinySkiaBackend` directly.
+
+use std::sync::Arc;
+
+use zenith_core::{AssetKind, BytesAssetProvider, FontStyle, default_provider};
+use zenith_layout::{RustybuzzEngine, ShapeRequest, TextLayoutEngine};
+use zenith_scene::{
+    Color, FitMode, GradientPaint, GradientStop, Scene, SceneCommand, SceneGlyph, ShadowSpec,
+};
+
+use crate::backend::RasterBackend;
+use crate::render::{render_image, render_png};
+
+use super::TinySkiaBackend;
+
+/// A shared empty asset provider for tests that draw no images.
+fn no_assets() -> BytesAssetProvider {
+    BytesAssetProvider::new()
+}
+
+fn red() -> Color {
+    Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    }
+}
+
+fn make_solid_red_scene(page: f64) -> Scene {
+    let mut s = Scene::new(page, page);
+    s.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: page,
+        h: page,
+    });
+    s.commands.push(SceneCommand::FillRect {
+        x: 0.0,
+        y: 0.0,
+        w: page,
+        h: page,
+        color: red(),
+    });
+    s.commands.push(SceneCommand::PopClip);
+    s
+}
+
+/// Index into a straight-alpha RGBA8 buffer for pixel (px, py) in an image
+/// of the given `width`.
+fn pixel(rgba: &[u8], width: u32, px: u32, py: u32) -> (u8, u8, u8, u8) {
+    let base = ((py * width + px) * 4) as usize;
+    (rgba[base], rgba[base + 1], rgba[base + 2], rgba[base + 3])
+}
+
+// ── pixel correctness ─────────────────────────────────────────────────
+
+#[test]
+fn pixel_correctness_solid_red() {
+    let scene = make_solid_red_scene(4.0);
+    let backend = TinySkiaBackend;
+    let provider = default_provider();
+    let img = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .expect("rasterize must succeed");
+    assert_eq!(img.width, 4);
+    assert_eq!(img.height, 4);
+    // center pixel
+    assert_eq!(pixel(&img.rgba, img.width, 2, 2), (255, 0, 0, 255));
+    // corner pixel
+    assert_eq!(pixel(&img.rgba, img.width, 0, 0), (255, 0, 0, 255));
+}
+
+// ── determinism ───────────────────────────────────────────────────────
+
+#[test]
+fn determinism_identical_png_bytes() {
+    let scene = make_solid_red_scene(4.0);
+    let backend = TinySkiaBackend;
+    let provider = default_provider();
+    let png1 = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .and_then(|img| backend.encode_png(&img))
+        .expect("first render");
+    let png2 = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .and_then(|img| backend.encode_png(&img))
+        .expect("second render");
+    assert_eq!(
+        png1, png2,
+        "PNG output must be byte-identical for the same scene"
+    );
+}
+
+// ── PNG validity ──────────────────────────────────────────────────────
+
+#[test]
+fn png_magic_bytes() {
+    let scene = make_solid_red_scene(4.0);
+    let backend = TinySkiaBackend;
+    let provider = default_provider();
+    let png = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .and_then(|img| backend.encode_png(&img))
+        .expect("render");
+    assert_eq!(
+        &png[..8],
+        &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A],
+        "output must start with PNG magic bytes"
+    );
+}
+
+// ── clip enforced ─────────────────────────────────────────────────────
+
+#[test]
+fn clip_clamps_fill_to_page() {
+    // 4×4 page; FillRect extends well beyond the page edge.
+    let mut scene = Scene::new(4.0, 4.0);
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 4.0,
+        h: 4.0,
+    });
+    scene.commands.push(SceneCommand::FillRect {
+        x: 2.0,
+        y: 2.0,
+        w: 10.0,
+        h: 10.0,
+        color: red(),
+    });
+    scene.commands.push(SceneCommand::PopClip);
+
+    let backend = TinySkiaBackend;
+    let provider = default_provider();
+    let img = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .expect("must not panic or error");
+    assert_eq!(img.width, 4);
+    assert_eq!(img.height, 4);
+    // Pixel inside the overlap region (3,3) should be red.
+    assert_eq!(pixel(&img.rgba, img.width, 3, 3), (255, 0, 0, 255));
+    // Pixel outside the fill (0,0) should be transparent.
+    assert_eq!(pixel(&img.rgba, img.width, 0, 0), (0, 0, 0, 0));
+}
+
+// ── transparent default ───────────────────────────────────────────────
+
+#[test]
+fn transparent_default_no_fill() {
+    let mut scene = Scene::new(4.0, 4.0);
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 4.0,
+        h: 4.0,
+    });
+    scene.commands.push(SceneCommand::PopClip);
+
+    let backend = TinySkiaBackend;
+    let provider = default_provider();
+    let img = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .expect("must succeed");
+    // All pixels must be fully transparent.
+    for i in 0..(img.width * img.height) {
+        let base = (i * 4) as usize;
+        assert_eq!(
+            &img.rgba[base..base + 4],
+            &[0, 0, 0, 0],
+            "pixel {i} must be transparent"
+        );
+    }
+}
+
+// ── invalid size ──────────────────────────────────────────────────────
+
+#[test]
+fn invalid_zero_size_returns_error() {
+    let scene = Scene::new(0.0, 0.0);
+    let backend = TinySkiaBackend;
+    let provider = default_provider();
+    assert!(
+        backend.rasterize(&scene, &provider, &no_assets()).is_err(),
+        "zero-size scene must return RenderError"
+    );
+}
+
+// ── glyph: draws pixels ───────────────────────────────────────────────
+
+/// Build a DrawGlyphRun scene for the letter "A" using the bundled Noto Sans
+/// font, then verify that at least one pixel in the output matches the run
+/// color (i.e. text was actually rasterized).
+#[test]
+fn glyph_run_draws_pixels() {
+    let provider = default_provider();
+    let families = vec!["Noto Sans".to_string()];
+    let font_size = 32.0_f32;
+
+    // Shape "A" to get a real glyph id from the bundled font.
+    let req = ShapeRequest {
+        text: "A",
+        families: &families,
+        weight: 400,
+        style: FontStyle::Normal,
+        font_size,
+    };
+    let run = RustybuzzEngine::new()
+        .shape(&req, &provider)
+        .expect("shaping must succeed");
+
+    // Page: 80×40.  Baseline at y=32 (leaves room for the glyph above).
+    let page_w = 80.0_f64;
+    let page_h = 40.0_f64;
+    let baseline_y = 34.0_f64;
+    let origin_x = 4.0_f64;
+
+    let ink_color = Color {
+        r: 0,
+        g: 0,
+        b: 200,
+        a: 255,
+    };
+
+    // Map the shaped glyphs into SceneGlyph instances.
+    let glyphs: Vec<SceneGlyph> = run
+        .glyphs
+        .iter()
+        .map(|g| SceneGlyph {
+            glyph_id: g.glyph_id,
+            dx: g.x,
+            dy: g.y,
+        })
+        .collect();
+
+    let mut scene = Scene::new(page_w, page_h);
+    scene.commands.push(SceneCommand::DrawGlyphRun {
+        x: origin_x,
+        y: baseline_y,
+        font_id: run.font_id.clone(),
+        font_size,
+        color: ink_color,
+        glyphs,
+    });
+
+    let img = render_image(&scene, &provider, &no_assets()).expect("render must succeed");
+
+    // At least one pixel must have non-zero blue (the ink color).
+    let any_ink = (0..img.height).any(|py| {
+        (0..img.width).any(|px| {
+            let (r, g, b, a) = pixel(&img.rgba, img.width, px, py);
+            // Anti-aliased: the pixel need not be exactly (0,0,200,255);
+            // just check that the blue channel is dominant and alpha > 0.
+            a > 0 && b > r && b > g
+        })
+    });
+
+    assert!(
+        any_ink,
+        "DrawGlyphRun must rasterize at least one ink pixel for 'A' at 32px"
+    );
+}
+
+// ── glyph: determinism ────────────────────────────────────────────────
+
+#[test]
+fn glyph_run_deterministic_png() {
+    let provider = default_provider();
+    let families = vec!["Noto Sans".to_string()];
+    let font_size = 24.0_f32;
+
+    let req = ShapeRequest {
+        text: "Zenith",
+        families: &families,
+        weight: 400,
+        style: FontStyle::Normal,
+        font_size,
+    };
+    let run = RustybuzzEngine::new()
+        .shape(&req, &provider)
+        .expect("shaping must succeed");
+
+    let glyphs: Vec<SceneGlyph> = run
+        .glyphs
+        .iter()
+        .map(|g| SceneGlyph {
+            glyph_id: g.glyph_id,
+            dx: g.x,
+            dy: g.y,
+        })
+        .collect();
+
+    let mut scene = Scene::new(200.0, 40.0);
+    scene.commands.push(SceneCommand::DrawGlyphRun {
+        x: 4.0,
+        y: 30.0,
+        font_id: run.font_id.clone(),
+        font_size,
+        color: Color {
+            r: 10,
+            g: 10,
+            b: 10,
+            a: 255,
+        },
+        glyphs,
+    });
+
+    let png1 = render_png(&scene, &provider, &no_assets()).expect("first render");
+    let png2 = render_png(&scene, &provider, &no_assets()).expect("second render");
+    assert_eq!(
+        png1, png2,
+        "glyph run PNG must be byte-identical across two renders"
+    );
+}
+
+// ── glyph: missing font id ────────────────────────────────────────────
+
+#[test]
+fn glyph_run_missing_font_id_succeeds_silently() {
+    let provider = default_provider();
+
+    let mut scene = Scene::new(40.0, 40.0);
+    scene.commands.push(SceneCommand::DrawGlyphRun {
+        x: 0.0,
+        y: 20.0,
+        font_id: "nonexistent-font-000-normal".to_string(),
+        font_size: 16.0,
+        color: Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        },
+        glyphs: vec![SceneGlyph {
+            glyph_id: 36,
+            dx: 0.0,
+            dy: 0.0,
+        }],
+    });
+
+    // Must succeed (Ok) — the run is skipped, no panic, no error.
+    let img = render_image(&scene, &provider, &no_assets())
+        .expect("render must succeed even with unknown font");
+
+    // All pixels should be transparent (nothing was drawn).
+    let any_opaque = (0..img.height).any(|py| {
+        (0..img.width).any(|px| {
+            let (_, _, _, a) = pixel(&img.rgba, img.width, px, py);
+            a > 0
+        })
+    });
+    assert!(
+        !any_opaque,
+        "no pixels should be drawn when the font id is unknown"
+    );
+}
+
+// ── image: stretch renders + determinism ──────────────────────────────
+
+/// The committed 2×2 RGBA test PNG.
+const SWATCH_PNG: &[u8] = include_bytes!("../../../examples/assets/swatch.png");
+
+fn swatch_provider() -> BytesAssetProvider {
+    let mut p = BytesAssetProvider::new();
+    p.register("asset.swatch", AssetKind::Image, Arc::from(SWATCH_PNG));
+    p
+}
+
+/// Build a scene that draws the swatch stretched into a box, clipped to it.
+fn swatch_scene() -> Scene {
+    let mut scene = Scene::new(40.0, 40.0);
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 40.0,
+        h: 40.0,
+    });
+    scene.commands.push(SceneCommand::PushClip {
+        x: 8.0,
+        y: 8.0,
+        w: 24.0,
+        h: 24.0,
+    });
+    scene.commands.push(SceneCommand::DrawImage {
+        x: 8.0,
+        y: 8.0,
+        w: 24.0,
+        h: 24.0,
+        asset_id: "asset.swatch".to_string(),
+        fit: FitMode::Stretch,
+        pos_x: 50.0,
+        pos_y: 50.0,
+        opacity: 1.0,
+    });
+    scene.commands.push(SceneCommand::PopClip);
+    scene.commands.push(SceneCommand::PopClip);
+    scene
+}
+
+#[test]
+fn draw_image_stretch_renders() {
+    let backend = TinySkiaBackend;
+    let fonts = default_provider();
+    let assets = swatch_provider();
+    let scene = swatch_scene();
+
+    let img1 = backend
+        .rasterize(&scene, &fonts, &assets)
+        .expect("rasterize 1");
+    let img2 = backend
+        .rasterize(&scene, &fonts, &assets)
+        .expect("rasterize 2");
+
+    // (i) determinism: byte-identical pixels across two rasterizes.
+    assert_eq!(
+        img1.rgba, img2.rgba,
+        "two rasterizes of the same image scene must be byte-identical"
+    );
+
+    // (ii) at least one pixel inside the box is non-transparent.
+    let any_ink = (0..img1.height).any(|py| {
+        (0..img1.width).any(|px| {
+            let (_, _, _, a) = pixel(&img1.rgba, img1.width, px, py);
+            a > 0
+        })
+    });
+    assert!(
+        any_ink,
+        "DrawImage stretch must rasterize at least one non-transparent pixel"
+    );
+}
+
+// ── FillPolygon: triangle renders + determinism ───────────────────────
+
+#[test]
+fn fill_polygon_renders() {
+    // A simple triangle on a 100×100 page.
+    let color = Color {
+        r: 0,
+        g: 200,
+        b: 0,
+        a: 255,
+    };
+    let mut scene = Scene::new(100.0, 100.0);
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 100.0,
+    });
+    scene.commands.push(SceneCommand::FillPolygon {
+        // Triangle: top-center, bottom-right, bottom-left
+        points: vec![50.0, 10.0, 90.0, 90.0, 10.0, 90.0],
+        color,
+        even_odd: false,
+    });
+    scene.commands.push(SceneCommand::PopClip);
+
+    let backend = TinySkiaBackend;
+    let provider = default_provider();
+    let img1 = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .expect("rasterize 1");
+
+    // At least one pixel inside the triangle must be green.
+    let any_ink = (0..img1.height).any(|py| {
+        (0..img1.width).any(|px| {
+            let (_, g, _, a) = pixel(&img1.rgba, img1.width, px, py);
+            a > 0 && g > 0
+        })
+    });
+    assert!(
+        any_ink,
+        "FillPolygon must rasterize at least one green pixel"
+    );
+
+    // Determinism: two renders must be byte-identical.
+    let img2 = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .expect("rasterize 2");
+    assert_eq!(
+        img1.rgba, img2.rgba,
+        "two rasterizes of FillPolygon must be byte-identical"
+    );
+}
+
+// ── StrokePolyline: open stroke renders + determinism ─────────────────
+
+#[test]
+fn stroke_polyline_renders() {
+    let color = Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    let mut scene = Scene::new(100.0, 100.0);
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 100.0,
+    });
+    scene.commands.push(SceneCommand::StrokePolyline {
+        points: vec![10.0, 50.0, 50.0, 10.0, 90.0, 50.0],
+        color,
+        stroke_width: 4.0,
+        closed: false,
+    });
+    scene.commands.push(SceneCommand::PopClip);
+
+    let backend = TinySkiaBackend;
+    let provider = default_provider();
+    let img1 = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .expect("rasterize 1");
+
+    // At least one pixel must be inked.
+    let any_ink = (0..img1.height).any(|py| {
+        (0..img1.width).any(|px| {
+            let (_, _, _, a) = pixel(&img1.rgba, img1.width, px, py);
+            a > 0
+        })
+    });
+    assert!(
+        any_ink,
+        "StrokePolyline must rasterize at least one ink pixel"
+    );
+
+    // Determinism.
+    let img2 = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .expect("rasterize 2");
+    assert_eq!(
+        img1.rgba, img2.rgba,
+        "two rasterizes of StrokePolyline must be byte-identical"
+    );
+}
+
+#[test]
+fn stroke_ellipse_renders() {
+    let color = Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    let mut scene = Scene::new(100.0, 100.0);
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 100.0,
+    });
+    scene.commands.push(SceneCommand::StrokeEllipse {
+        x: 20.0,
+        y: 30.0,
+        w: 60.0,
+        h: 40.0,
+        color,
+        stroke_width: 4.0,
+    });
+    scene.commands.push(SceneCommand::PopClip);
+
+    let backend = TinySkiaBackend;
+    let provider = default_provider();
+    let img1 = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .expect("rasterize 1");
+
+    // At least one pixel must be inked.
+    let any_ink = (0..img1.height).any(|py| {
+        (0..img1.width).any(|px| {
+            let (_, _, _, a) = pixel(&img1.rgba, img1.width, px, py);
+            a > 0
+        })
+    });
+    assert!(
+        any_ink,
+        "StrokeEllipse must rasterize at least one ink pixel"
+    );
+
+    // Determinism.
+    let img2 = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .expect("rasterize 2");
+    assert_eq!(
+        img1.rgba, img2.rgba,
+        "two rasterizes of StrokeEllipse must be byte-identical"
+    );
+}
+
+#[test]
+fn draw_image_missing_asset_is_skipped() {
+    let backend = TinySkiaBackend;
+    let fonts = default_provider();
+    // Empty provider: the asset id is not registered.
+    let assets = BytesAssetProvider::new();
+
+    let mut scene = Scene::new(20.0, 20.0);
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 20.0,
+        h: 20.0,
+    });
+    scene.commands.push(SceneCommand::DrawImage {
+        x: 0.0,
+        y: 0.0,
+        w: 20.0,
+        h: 20.0,
+        asset_id: "asset.missing".to_string(),
+        fit: FitMode::Stretch,
+        pos_x: 50.0,
+        pos_y: 50.0,
+        opacity: 1.0,
+    });
+    scene.commands.push(SceneCommand::PopClip);
+
+    // Must not panic; renders without any image pixels.
+    let img = backend
+        .rasterize(&scene, &fonts, &assets)
+        .expect("rasterize must succeed even with a missing asset");
+    let any_opaque = (0..img.height).any(|py| {
+        (0..img.width).any(|px| {
+            let (_, _, _, a) = pixel(&img.rgba, img.width, px, py);
+            a > 0
+        })
+    });
+    assert!(
+        !any_opaque,
+        "no pixels should be drawn when the asset is missing"
+    );
+}
+
+// ── ellipse: partial clip truncates, does not reshape ─────────────────
+
+/// A 20×20 circle (FillEllipse x=0,y=0,w=20,h=20) is drawn inside a
+/// bottom-right quadrant clip [10,10,20,20].
+///
+/// Correct behaviour (TRUNCATE): the ellipse is drawn at its TRUE bounds
+/// and the mask chops off the parts outside [10,10,20,20].
+///
+/// Old wrong behaviour (RESHAPE): the ellipse bbox was intersected with the
+/// clip, yielding a tiny oval fitted to [10,10,10,10].  A corner pixel such
+/// as (18,18) — inside the clip box but outside the true circle — would
+/// have been filled because the reshaping made the oval touch it.
+///
+/// We assert:
+/// - (18,18) alpha == 0  (outside the true circle; must stay transparent)
+/// - (12,12) alpha > 0   (inside both clip and true circle; must be filled)
+#[test]
+fn ellipse_partial_clip_truncates_not_reshapes() {
+    let mut scene = Scene::new(20.0, 20.0);
+    // Full-page outer clip.
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 20.0,
+        h: 20.0,
+    });
+    // Bottom-right quadrant sub-page clip.
+    scene.commands.push(SceneCommand::PushClip {
+        x: 10.0,
+        y: 10.0,
+        w: 10.0,
+        h: 10.0,
+    });
+    // A circle that exactly fits the full page (center (10,10), r=10).
+    scene.commands.push(SceneCommand::FillEllipse {
+        x: 0.0,
+        y: 0.0,
+        w: 20.0,
+        h: 20.0,
+        color: Color {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 255,
+        },
+    });
+    scene.commands.push(SceneCommand::PopClip);
+    scene.commands.push(SceneCommand::PopClip);
+
+    let backend = TinySkiaBackend;
+    let provider = default_provider();
+    let img = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .expect("rasterize must succeed");
+
+    // (18,18): inside clip [10,10,20,20] but outside the true circle
+    // (dist from center (10,10) ≈ √(8²+8²) ≈ 11.3 > 10).
+    // Must be transparent — the ellipse should be TRUNCATED here, not
+    // reshaping the oval to fill the entire clip box.
+    let (_, _, _, a_outside) = pixel(&img.rgba, img.width, 18, 18);
+    assert_eq!(
+        a_outside, 0,
+        "pixel (18,18) is outside the true circle; must be transparent (truncate, not reshape)"
+    );
+
+    // (12,12): inside both the clip box and the true circle
+    // (dist from center (10,10) ≈ √(2²+2²) ≈ 2.8 < 10).
+    // Must have been drawn (alpha > 0).
+    let (_, _, _, a_inside) = pixel(&img.rgba, img.width, 12, 12);
+    assert!(
+        a_inside > 0,
+        "pixel (12,12) is inside both the clip and the circle; must be filled"
+    );
+}
+
+// ── stroke line: sub-page clip mask is honored ────────────────────────
+
+/// A diagonal stroked line spanning the page is wrapped in a small top-left
+/// clip [0,0,5,5]. After wiring StrokeLine to `mask.as_ref()`, ink beyond the
+/// clip (e.g. (15,15), on the line but outside the box) must be suppressed,
+/// while ink inside the clip (near (2,2)) remains. Before the fix the line
+/// drew its full length (sub-page clip ignored) and (15,15) would be inked.
+#[test]
+fn stroke_line_clipped_to_subpage_clip() {
+    let mut scene = Scene::new(20.0, 20.0);
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 20.0,
+        h: 20.0,
+    });
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 5.0,
+        h: 5.0,
+    });
+    scene.commands.push(SceneCommand::StrokeLine {
+        x1: 0.0,
+        y1: 0.0,
+        x2: 20.0,
+        y2: 20.0,
+        color: Color {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 255,
+        },
+        stroke_width: 4.0,
+    });
+    scene.commands.push(SceneCommand::PopClip);
+    scene.commands.push(SceneCommand::PopClip);
+
+    let backend = TinySkiaBackend;
+    let provider = default_provider();
+    let img = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .expect("rasterize must succeed");
+
+    // (15,15): on the line but outside the [0,0,5,5] clip → must be clipped away.
+    let (_, _, _, a_outside) = pixel(&img.rgba, img.width, 15, 15);
+    assert_eq!(
+        a_outside, 0,
+        "pixel (15,15) is outside the sub-page clip; the stroked line must be truncated there"
+    );
+
+    // (2,2): on the line and inside the clip → must be inked.
+    let (_, _, _, a_inside) = pixel(&img.rgba, img.width, 2, 2);
+    assert!(
+        a_inside > 0,
+        "pixel (2,2) is on the line inside the clip; must be inked"
+    );
+}
+
+// ── glyph run: sub-page clip mask is honored ──────────────────────────
+
+/// A glyph run for "A" at 32px is placed at x≈20, baseline≈34 on an
+/// 80×40 page, then wrapped in a tiny clip [0,0,4,4] that lies far from
+/// the glyph ink.  After fixing DrawGlyphRun to pass `mask.as_ref()`, the
+/// effective clip mask must suppress all ink → NO opaque pixel anywhere.
+///
+/// Before the fix (mask=None) tiny-skia only clips to the pixmap edge, so
+/// the glyph would render normally and the test would fail.
+#[test]
+fn glyph_run_clipped_to_subpage_clip() {
+    let provider = default_provider();
+    let families = vec!["Noto Sans".to_string()];
+    let font_size = 32.0_f32;
+
+    let req = ShapeRequest {
+        text: "A",
+        families: &families,
+        weight: 400,
+        style: FontStyle::Normal,
+        font_size,
+    };
+    let run = RustybuzzEngine::new()
+        .shape(&req, &provider)
+        .expect("shaping must succeed");
+
+    let glyphs: Vec<SceneGlyph> = run
+        .glyphs
+        .iter()
+        .map(|g| SceneGlyph {
+            glyph_id: g.glyph_id,
+            dx: g.x,
+            dy: g.y,
+        })
+        .collect();
+
+    let mut scene = Scene::new(80.0, 40.0);
+    // Tiny clip box [0,0,4,4] — entirely disjoint from the glyph ink.
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 4.0,
+        h: 4.0,
+    });
+    // Glyph ink lands around x≥20, y up to baseline 34 — well outside the clip.
+    scene.commands.push(SceneCommand::DrawGlyphRun {
+        x: 20.0,
+        y: 34.0,
+        font_id: run.font_id.clone(),
+        font_size,
+        color: Color {
+            r: 0,
+            g: 0,
+            b: 200,
+            a: 255,
+        },
+        glyphs,
+    });
+    scene.commands.push(SceneCommand::PopClip);
+
+    let backend = TinySkiaBackend;
+    let img = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .expect("rasterize must succeed");
+
+    // The clip mask must suppress all glyph ink — no opaque pixel anywhere.
+    let any_opaque = (0..img.height).any(|py| {
+        (0..img.width).any(|px| {
+            let (_, _, _, a) = pixel(&img.rgba, img.width, px, py);
+            a > 0
+        })
+    });
+    assert!(
+        !any_opaque,
+        "glyph ink must be fully clipped by the sub-page mask; found opaque pixels"
+    );
+}
+
+// ── StrokeRect: border pixels are inked ───────────────────────────────
+
+#[test]
+fn stroke_rect_draws_border_pixels() {
+    let mut scene = Scene::new(40.0, 40.0);
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 40.0,
+        h: 40.0,
+    });
+    scene.commands.push(SceneCommand::StrokeRect {
+        x: 10.0,
+        y: 10.0,
+        w: 20.0,
+        h: 20.0,
+        color: Color {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 255,
+        },
+        stroke_width: 4.0,
+    });
+    scene.commands.push(SceneCommand::PopClip);
+
+    let backend = TinySkiaBackend;
+    let provider = default_provider();
+    let img = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .expect("rasterize must succeed");
+
+    // A pixel on the top border (around y=10) must be inked.
+    let (_, _, _, a_border) = pixel(&img.rgba, img.width, 20, 10);
+    assert!(a_border > 0, "top border pixel (20,10) must be inked");
+
+    // The interior center (20,20) must be EMPTY (stroke, not fill).
+    let (_, _, _, a_center) = pixel(&img.rgba, img.width, 20, 20);
+    assert_eq!(a_center, 0, "stroke-only interior (20,20) must be empty");
+}
+
+// ── FillRoundedRect: corner is cut, center is filled ──────────────────
+
+#[test]
+fn fill_rounded_rect_cuts_corner_fills_center() {
+    // A rect [0,0,40,40] with a large radius (20 → fully circular) leaves the
+    // extreme corner pixel (0,0) at background while the center is filled.
+    let mut scene = Scene::new(40.0, 40.0);
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 40.0,
+        h: 40.0,
+    });
+    scene.commands.push(SceneCommand::FillRoundedRect {
+        x: 0.0,
+        y: 0.0,
+        w: 40.0,
+        h: 40.0,
+        radius: 20.0,
+        color: Color {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 255,
+        },
+    });
+    scene.commands.push(SceneCommand::PopClip);
+
+    let backend = TinySkiaBackend;
+    let provider = default_provider();
+    let img = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .expect("rasterize must succeed");
+
+    // Corner (0,0) is outside the rounded shape → transparent.
+    let (_, _, _, a_corner) = pixel(&img.rgba, img.width, 0, 0);
+    assert_eq!(
+        a_corner, 0,
+        "corner pixel (0,0) must be cut by the radius (transparent)"
+    );
+
+    // Center (20,20) is inside → filled.
+    let (_, _, _, a_center) = pixel(&img.rgba, img.width, 20, 20);
+    assert!(a_center > 0, "center pixel (20,20) must be filled");
+}
+
+// ── determinism: StrokeRect + FillRoundedRect + StrokeRoundedRect ─────
+
+#[test]
+fn rounded_and_stroke_rects_deterministic_png() {
+    let mut scene = Scene::new(80.0, 80.0);
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 80.0,
+        h: 80.0,
+    });
+    scene.commands.push(SceneCommand::StrokeRect {
+        x: 5.0,
+        y: 5.0,
+        w: 30.0,
+        h: 30.0,
+        color: Color {
+            r: 200,
+            g: 0,
+            b: 0,
+            a: 255,
+        },
+        stroke_width: 3.0,
+    });
+    scene.commands.push(SceneCommand::FillRoundedRect {
+        x: 40.0,
+        y: 5.0,
+        w: 30.0,
+        h: 30.0,
+        radius: 10.0,
+        color: Color {
+            r: 0,
+            g: 200,
+            b: 0,
+            a: 255,
+        },
+    });
+    scene.commands.push(SceneCommand::StrokeRoundedRect {
+        x: 20.0,
+        y: 40.0,
+        w: 40.0,
+        h: 30.0,
+        radius: 8.0,
+        color: Color {
+            r: 0,
+            g: 0,
+            b: 200,
+            a: 255,
+        },
+        stroke_width: 3.0,
+    });
+    scene.commands.push(SceneCommand::PopClip);
+
+    let provider = default_provider();
+    let png1 = render_png(&scene, &provider, &no_assets()).expect("first render");
+    let png2 = render_png(&scene, &provider, &no_assets()).expect("second render");
+    assert_eq!(
+        png1, png2,
+        "StrokeRect + FillRoundedRect + StrokeRoundedRect scene must render byte-identically"
+    );
+}
+
+// ── SVG asset: rasterizes and draws red pixels ────────────────────────
+
+/// An inline 10×10 SVG filled solid red is registered as `AssetKind::Svg`,
+/// drawn stretched into a 10×10 box on a 10×10 page, and the center pixel
+/// must be red (proving the SVG was rasterized and composited).
+#[test]
+fn draw_image_svg_asset_renders_red_pixels() {
+    const RED_SVG: &[u8] = b"<svg xmlns='http://www.w3.org/2000/svg' \
+        width='10' height='10'>\
+        <rect width='10' height='10' fill='#ff0000'/>\
+        </svg>";
+
+    let mut assets = BytesAssetProvider::new();
+    assets.register("asset.red", AssetKind::Svg, Arc::from(RED_SVG));
+
+    let mut scene = Scene::new(10.0, 10.0);
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 10.0,
+        h: 10.0,
+    });
+    scene.commands.push(SceneCommand::DrawImage {
+        x: 0.0,
+        y: 0.0,
+        w: 10.0,
+        h: 10.0,
+        asset_id: "asset.red".to_string(),
+        fit: FitMode::Stretch,
+        pos_x: 50.0,
+        pos_y: 50.0,
+        opacity: 1.0,
+    });
+    scene.commands.push(SceneCommand::PopClip);
+
+    let backend = TinySkiaBackend;
+    let fonts = default_provider();
+    let img = backend
+        .rasterize(&scene, &fonts, &assets)
+        .expect("SVG rasterize must succeed");
+
+    // Center pixel must be red (r dominant, a > 0).
+    let (r, g, b, a) = pixel(&img.rgba, img.width, 5, 5);
+    assert!(a > 0, "center pixel must be opaque after SVG rasterize");
+    assert!(
+        r > g && r > b,
+        "center pixel must be red-dominant; got r={r} g={g} b={b}"
+    );
+}
+
+// ── SVG <text>: text element converts to paths and rasterizes ─────────
+
+/// An inline SVG containing a red `<text>` element is registered as
+/// `AssetKind::Svg`, drawn via DrawImage, and the output pixmap must contain
+/// at least one RED pixel — proving the text was converted to paths and
+/// rasterized (not silently dropped due to an empty fontdb).
+#[test]
+fn draw_image_svg_text_renders_red_pixels() {
+    const TEXT_SVG: &[u8] = b"<svg xmlns='http://www.w3.org/2000/svg' \
+        width='200' height='60'>\
+        <text x='0' y='40' font-size='40' fill='#ff0000'>Hi</text>\
+        </svg>";
+
+    let mut assets = BytesAssetProvider::new();
+    assets.register("asset.text_svg", AssetKind::Svg, Arc::from(TEXT_SVG));
+
+    let mut scene = Scene::new(200.0, 60.0);
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 200.0,
+        h: 60.0,
+    });
+    scene.commands.push(SceneCommand::DrawImage {
+        x: 0.0,
+        y: 0.0,
+        w: 200.0,
+        h: 60.0,
+        asset_id: "asset.text_svg".to_string(),
+        fit: FitMode::Stretch,
+        pos_x: 50.0,
+        pos_y: 50.0,
+        opacity: 1.0,
+    });
+    scene.commands.push(SceneCommand::PopClip);
+
+    let backend = TinySkiaBackend;
+    let fonts = default_provider();
+    let img = backend
+        .rasterize(&scene, &fonts, &assets)
+        .expect("SVG text rasterize must succeed");
+
+    // At least one pixel must be red-dominant — text paths were rasterized.
+    let any_red = (0..img.height).any(|py| {
+        (0..img.width).any(|px| {
+            let (r, g, b, a) = pixel(&img.rgba, img.width, px, py);
+            a > 0 && r > g && r > b
+        })
+    });
+    assert!(
+        any_red,
+        "SVG <text> must produce at least one red pixel after convert_text + rasterize"
+    );
+}
+
+// ── PushTransform: rotation moves ink outside the axis-aligned bbox ────
+
+/// A red FillRect [25,25,50,50] on a 100×100 page is wrapped in a 45°
+/// rotation about the rect center (50,50). We assert:
+/// - at least one red pixel exists (the rect still renders), and
+/// - the inked-pixel set differs from the SAME FillRect rendered WITHOUT
+///   the transform (proving the rotation actually rotated the geometry), and
+/// - two renders of the rotated scene are byte-identical (deterministic).
+#[test]
+fn push_transform_rotates_fill_rect() {
+    let red_color = Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+
+    // Rotated scene.
+    let mut rotated = Scene::new(100.0, 100.0);
+    rotated.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 100.0,
+    });
+    rotated.commands.push(SceneCommand::PushTransform {
+        angle_deg: 45.0,
+        cx: 50.0,
+        cy: 50.0,
+    });
+    rotated.commands.push(SceneCommand::FillRect {
+        x: 25.0,
+        y: 25.0,
+        w: 50.0,
+        h: 50.0,
+        color: red_color,
+    });
+    rotated.commands.push(SceneCommand::PopTransform);
+    rotated.commands.push(SceneCommand::PopClip);
+
+    // Unrotated baseline (same FillRect, no transform).
+    let mut plain = Scene::new(100.0, 100.0);
+    plain.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 100.0,
+    });
+    plain.commands.push(SceneCommand::FillRect {
+        x: 25.0,
+        y: 25.0,
+        w: 50.0,
+        h: 50.0,
+        color: red_color,
+    });
+    plain.commands.push(SceneCommand::PopClip);
+
+    let backend = TinySkiaBackend;
+    let provider = default_provider();
+    let rot1 = backend
+        .rasterize(&rotated, &provider, &no_assets())
+        .expect("rotated rasterize 1");
+    let rot2 = backend
+        .rasterize(&rotated, &provider, &no_assets())
+        .expect("rotated rasterize 2");
+    let base = backend
+        .rasterize(&plain, &provider, &no_assets())
+        .expect("plain rasterize");
+
+    // (i) Determinism: two renders of the rotated scene are byte-identical.
+    assert_eq!(
+        rot1.rgba, rot2.rgba,
+        "two rasterizes of the rotated scene must be byte-identical"
+    );
+
+    // (ii) At least one red pixel was drawn.
+    let any_red = (0..rot1.height).any(|py| {
+        (0..rot1.width).any(|px| {
+            let (r, g, b, a) = pixel(&rot1.rgba, rot1.width, px, py);
+            a > 0 && r > g && r > b
+        })
+    });
+    assert!(
+        any_red,
+        "rotated FillRect must produce at least one red pixel"
+    );
+
+    // (iii) The inked-pixel set must differ from the unrotated baseline —
+    // a 45° rotation pushes ink past the original [25,75] axis-aligned bbox
+    // (the rotated diamond reaches the page edges at x≈14.6 and x≈85.4).
+    assert_ne!(
+        rot1.rgba, base.rgba,
+        "rotation must change the inked pixels versus the unrotated FillRect"
+    );
+
+    // (iv) A specific pixel OUTSIDE the original axis-aligned bbox but inside
+    // the rotated diamond must be inked. The rotated diamond has corners at
+    // (50,~14.6),(85.4,50),(50,85.4),(14.6,50); the point (20,50) lies inside
+    // the diamond but outside the original [25..75]×[25..75] rect.
+    let (_, _, _, a_outside_bbox) = pixel(&rot1.rgba, rot1.width, 20, 50);
+    assert!(
+        a_outside_bbox > 0,
+        "pixel (20,50) is outside the unrotated bbox but inside the rotated diamond; must be inked"
+    );
+    // Sanity: the same pixel is transparent in the unrotated baseline.
+    let (_, _, _, a_base) = pixel(&base.rgba, base.width, 20, 50);
+    assert_eq!(
+        a_base, 0,
+        "pixel (20,50) must be transparent in the unrotated baseline"
+    );
+}
+
+// ── Gradient fill (GRAD-2) ────────────────────────────────────────────
+
+/// A `FillRectGradient` (vertical, 90°) renders without error, produces a
+/// non-uniform fill (top row differs from bottom row), and is byte-identical
+/// across two renders.
+#[test]
+fn fill_rect_gradient_renders_non_uniform_and_deterministic() {
+    let mut scene = Scene::new(40.0, 40.0);
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 40.0,
+        h: 40.0,
+    });
+    scene.commands.push(SceneCommand::FillRectGradient {
+        x: 0.0,
+        y: 0.0,
+        w: 40.0,
+        h: 40.0,
+        gradient: GradientPaint {
+            angle_deg: 90.0, // top-to-bottom
+            stops: vec![
+                GradientStop {
+                    offset: 0.0,
+                    color: Color {
+                        r: 0,
+                        g: 0,
+                        b: 0,
+                        a: 255,
+                    },
+                },
+                GradientStop {
+                    offset: 1.0,
+                    color: Color {
+                        r: 255,
+                        g: 255,
+                        b: 255,
+                        a: 255,
+                    },
+                },
+            ],
+        },
+    });
+    scene.commands.push(SceneCommand::PopClip);
+
+    let backend = TinySkiaBackend;
+    let provider = default_provider();
+    let img = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .expect("rasterize must succeed");
+
+    // Vertical gradient: the top row must be darker than the bottom row.
+    let (top_r, _, _, _) = pixel(&img.rgba, img.width, 20, 1);
+    let (bot_r, _, _, _) = pixel(&img.rgba, img.width, 20, 38);
+    assert!(
+        bot_r > top_r,
+        "vertical gradient must brighten downward: top={top_r}, bottom={bot_r}"
+    );
+
+    // Byte-identical across two renders.
+    let img2 = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .expect("rasterize must succeed");
+    assert_eq!(img.rgba, img2.rgba, "gradient render must be deterministic");
+}
+
+// ── Shadow (SHAD-2) ───────────────────────────────────────────────────
+
+/// A `BeginShadow` (one black, blurred, slightly-offset layer) wrapping a
+/// `FillRect`, closed by `EndShadow`, must:
+/// (i) render deterministically (two runs byte-identical), and
+/// (ii) bleed shadow ink OUTSIDE the original rect but within blur range.
+#[test]
+fn shadow_blurs_and_bleeds_outward_deterministically() {
+    // 40×40 canvas; an opaque red rect at [15,25]×[15,25].
+    let build = || {
+        let mut scene = Scene::new(40.0, 40.0);
+        scene.commands.push(SceneCommand::BeginShadow {
+            shadows: vec![ShadowSpec {
+                dx: 1.0,
+                dy: 1.0,
+                blur: 3.0,
+                color: Color {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                },
+            }],
+        });
+        scene.commands.push(SceneCommand::FillRect {
+            x: 15.0,
+            y: 15.0,
+            w: 10.0,
+            h: 10.0,
+            color: Color {
+                r: 255,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+        });
+        scene.commands.push(SceneCommand::EndShadow);
+        scene
+    };
+
+    let backend = TinySkiaBackend;
+    let provider = default_provider();
+    let img1 = backend
+        .rasterize(&build(), &provider, &no_assets())
+        .expect("rasterize must succeed");
+    let img2 = backend
+        .rasterize(&build(), &provider, &no_assets())
+        .expect("rasterize must succeed");
+
+    // (i) Determinism.
+    assert_eq!(
+        img1.rgba, img2.rgba,
+        "shadow render must be byte-identical across runs"
+    );
+
+    // (ii) The crisp red ink is intact inside the rect.
+    let (cr, _, _, ca) = pixel(&img1.rgba, img1.width, 20, 20);
+    assert!(ca == 255 && cr > 200, "rect center must stay opaque red");
+
+    // (iii) Shadow bleeds OUTSIDE the original rect: a pixel just left of the
+    // rect's left edge (x=12, well outside [15,25)) but within blur range
+    // must be non-transparent and dark (the black shadow).
+    let (sr, sg, sb, sa) = pixel(&img1.rgba, img1.width, 12, 20);
+    assert!(
+        sa > 0,
+        "shadow must bleed outside the rect (x=12): got alpha {sa}"
+    );
+    assert!(
+        sr < 128 && sg < 128 && sb < 128,
+        "the bled shadow pixel must be dark: ({sr},{sg},{sb})"
+    );
+
+    // (iv) Far outside the blur range stays transparent.
+    let (_, _, _, far_a) = pixel(&img1.rgba, img1.width, 0, 0);
+    assert_eq!(far_a, 0, "corner far from the shadow must stay transparent");
+}
