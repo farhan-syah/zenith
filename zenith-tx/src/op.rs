@@ -398,4 +398,42 @@ pub enum Op {
         #[serde(default)]
         position: Position,
     },
+    /// Align a set of nodes to a common edge or centre along one axis.
+    ///
+    /// `align` controls the alignment target:
+    /// - Horizontal: `"left"`, `"hcenter"`, `"right"`
+    /// - Vertical: `"top"`, `"vcenter"`, `"bottom"`
+    ///
+    /// `anchor` controls the reference rectangle:
+    /// - `"selection"` (default): the union bounding box of all alignable nodes.
+    /// - `"page"`: the page that contains the nodes (0,0 to page w/h).
+    ///
+    /// Only nodes supported by `set_geometry` (`rect`, `ellipse`, `frame`,
+    /// `image`) with resolvable `x/y/w/h` in px/pt are alignable. Any node
+    /// that lacks full geometry is skipped with a `tx.unsupported_property`
+    /// warning; the rest are still aligned.
+    ///
+    /// An unknown `align` value is rejected with `tx.unsupported_property`.
+    /// An unknown `anchor` value is rejected with `tx.unsupported_property`.
+    /// Fewer than one alignable node emits `tx.noop`.
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"align_nodes","node_ids":["r1","r2","r3"],"align":"left"}
+    /// ```
+    AlignNodes {
+        /// Ids of the nodes to align.
+        node_ids: Vec<String>,
+        /// Which edge or centre to align to: `left`, `hcenter`, `right`,
+        /// `top`, `vcenter`, or `bottom`.
+        align: String,
+        /// Reference rectangle: `"selection"` (union bbox) or `"page"`.
+        /// Defaults to `"selection"`.
+        #[serde(default = "default_anchor")]
+        anchor: String,
+    },
+}
+
+fn default_anchor() -> String {
+    "selection".to_owned()
 }

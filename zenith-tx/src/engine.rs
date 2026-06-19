@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use zenith_core::{
     Diagnostic, Dimension, Document, GroupNode, KdlAdapter, KdlSource, Node, Point, PropertyValue,
-    Severity, TextSpan, Unit, validate,
+    Severity, TextSpan, Unit, dim_to_px, validate,
 };
 
 use crate::op::{Op, OpPoint, OpSpan, Position, Transaction};
@@ -16,6 +16,9 @@ use crate::result::{TxError, TxResult, TxStatus};
 // ── Valid align values ────────────────────────────────────────────────────────
 
 const VALID_ALIGNS: &[&str] = &["start", "center", "end", "justify"];
+
+/// Valid alignment directions for [`Op::AlignNodes`].
+const VALID_ALIGN_DIRS: &[&str] = &["left", "hcenter", "right", "top", "vcenter", "bottom"];
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
@@ -193,6 +196,13 @@ fn apply_op(
             position,
         } => {
             apply_reparent(node_id, new_parent, position, doc, diagnostics, affected);
+        }
+        Op::AlignNodes {
+            node_ids,
+            align,
+            anchor,
+        } => {
+            apply_align_nodes(node_ids, align, anchor, doc, diagnostics, affected);
         }
     }
 }
@@ -1937,6 +1947,239 @@ fn apply_reparent(
 
     new_children.insert(idx, node);
     record_affected(node_id, affected);
+}
+
+// ── AlignNodes ────────────────────────────────────────────────────────────────
+
+/// Read the four bbox dimensions of a node as px values, if the node kind
+/// supports geometry and all four fields are present and resolvable.
+///
+/// Returns `Some((x, y, w, h))` or `None` if the node is unsupported, any
+/// field is absent, or any unit cannot be converted to px (e.g. `%`, `deg`).
+fn read_geometry_px(node: &Node) -> Option<(f64, f64, f64, f64)> {
+    let (x, y, w, h) = match node {
+        Node::Rect(r) => (r.x.as_ref(), r.y.as_ref(), r.w.as_ref(), r.h.as_ref()),
+        Node::Ellipse(e) => (e.x.as_ref(), e.y.as_ref(), e.w.as_ref(), e.h.as_ref()),
+        Node::Frame(f) => (f.x.as_ref(), f.y.as_ref(), f.w.as_ref(), f.h.as_ref()),
+        Node::Image(i) => (i.x.as_ref(), i.y.as_ref(), i.w.as_ref(), i.h.as_ref()),
+        _ => return None,
+    };
+    let resolve = |d: Option<&Dimension>| -> Option<f64> {
+        d.and_then(|dim| dim_to_px(dim.value, &dim.unit))
+    };
+    Some((resolve(x)?, resolve(y)?, resolve(w)?, resolve(h)?))
+}
+
+fn apply_align_nodes(
+    node_ids: &[String],
+    align: &str,
+    anchor: &str,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    // Validate align value.
+    if !VALID_ALIGN_DIRS.contains(&align) {
+        diagnostics.push(Diagnostic::error(
+            "tx.unsupported_property",
+            format!("align_nodes: unknown align {:?}", align),
+            None,
+            None,
+        ));
+        return;
+    }
+
+    // Validate anchor value.
+    if anchor != "selection" && anchor != "page" {
+        diagnostics.push(Diagnostic::error(
+            "tx.unsupported_property",
+            format!(
+                "align_nodes: unknown anchor {:?}; must be \"selection\" or \"page\"",
+                anchor
+            ),
+            None,
+            None,
+        ));
+        return;
+    }
+
+    // ── Phase 1: shared scan — gather bbox and check existence ────────────────
+    //
+    // We need a shared borrow to read geometry before taking the exclusive borrow
+    // to write back. Collect (id, x, y, w, h) for every alignable node.
+    // Nodes that are not found or lack resolvable geometry are skipped with
+    // advisories; the loop continues so the remaining nodes are still aligned.
+
+    struct NodeBbox {
+        id: String,
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+    }
+
+    let mut alignable: Vec<NodeBbox> = Vec::new();
+
+    for node_id in node_ids {
+        // Shared-borrow scan across all pages.
+        let found: Option<Option<(f64, f64, f64, f64)>> = 'page_scan: {
+            for page in doc.body.pages.iter() {
+                if let Some(node) = find_node_shared(&page.children, node_id) {
+                    break 'page_scan Some(read_geometry_px(node));
+                }
+            }
+            None // not found in any page
+        };
+
+        match found {
+            None => {
+                // Node not found at all.
+                diagnostics.push(Diagnostic::error(
+                    "tx.unknown_node",
+                    format!("align_nodes: node {:?} not found in document", node_id),
+                    None,
+                    Some(node_id.clone()),
+                ));
+            }
+            Some(None) => {
+                // Node found but geometry is unresolvable (wrong kind or missing/pct field).
+                // Use Warning so the caller sees AcceptedWithWarnings and knows a
+                // node was silently skipped.
+                diagnostics.push(Diagnostic::warning(
+                    "tx.unsupported_property",
+                    format!(
+                        "align_nodes: node {:?} has no resolvable x/y/w/h geometry; skipped",
+                        node_id
+                    ),
+                    None,
+                    Some(node_id.clone()),
+                ));
+            }
+            Some(Some((x, y, w, h))) => {
+                alignable.push(NodeBbox {
+                    id: node_id.clone(),
+                    x,
+                    y,
+                    w,
+                    h,
+                });
+            }
+        }
+    }
+
+    // Need at least one alignable node to proceed.
+    if alignable.is_empty() {
+        diagnostics.push(Diagnostic::advisory(
+            "tx.noop",
+            "align_nodes: no alignable nodes with resolvable geometry; document is unchanged"
+                .to_owned(),
+            None,
+            None,
+        ));
+        return;
+    }
+
+    // ── Compute the reference rectangle ───────────────────────────────────────
+
+    let (ref_left, ref_right, ref_top, ref_bottom) = if anchor == "page" {
+        // Find the page that contains the first alignable node.
+        let first_id = &alignable[0].id;
+        let page_opt = doc
+            .body
+            .pages
+            .iter()
+            .find(|page| page.children.iter().any(|n| subtree_contains(n, first_id)));
+        match page_opt {
+            None => {
+                diagnostics.push(Diagnostic::error(
+                    "tx.invalid_parent",
+                    format!(
+                        "align_nodes: could not locate page containing node {:?}",
+                        first_id
+                    ),
+                    None,
+                    Some(first_id.clone()),
+                ));
+                return;
+            }
+            Some(page) => {
+                let pw = dim_to_px(page.width.value, &page.width.unit);
+                let ph = dim_to_px(page.height.value, &page.height.unit);
+                match (pw, ph) {
+                    (Some(w), Some(h)) => (0.0_f64, w, 0.0_f64, h),
+                    _ => {
+                        diagnostics.push(Diagnostic::error(
+                            "tx.invalid_parent",
+                            "align_nodes: page width/height cannot be resolved to px".to_owned(),
+                            None,
+                            None,
+                        ));
+                        return;
+                    }
+                }
+            }
+        }
+    } else {
+        // anchor == "selection": union bbox of all alignable nodes.
+        let ref_left = alignable.iter().map(|n| n.x).fold(f64::INFINITY, f64::min);
+        let ref_right = alignable
+            .iter()
+            .map(|n| n.x + n.w)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let ref_top = alignable.iter().map(|n| n.y).fold(f64::INFINITY, f64::min);
+        let ref_bottom = alignable
+            .iter()
+            .map(|n| n.y + n.h)
+            .fold(f64::NEG_INFINITY, f64::max);
+        (ref_left, ref_right, ref_top, ref_bottom)
+    };
+
+    // ── Phase 2: exclusive borrow — write new x or y for each node ───────────
+    //
+    // Compute the new position per node from the captured bbox, then apply via
+    // find_node_any_mut + node_geometry_mut, mirroring apply_set_geometry's
+    // write path.
+
+    for bbox in &alignable {
+        let new_x = match align {
+            "left" => Some(ref_left),
+            "hcenter" => Some((ref_left + ref_right) / 2.0 - bbox.w / 2.0),
+            "right" => Some(ref_right - bbox.w),
+            _ => None,
+        };
+        let new_y = match align {
+            "top" => Some(ref_top),
+            "vcenter" => Some((ref_top + ref_bottom) / 2.0 - bbox.h / 2.0),
+            "bottom" => Some(ref_bottom - bbox.h),
+            _ => None,
+        };
+
+        // At least one of new_x/new_y is Some (align was validated above).
+        match find_node_any_mut(doc, &bbox.id) {
+            None => {
+                // Should not happen: we found it in phase 1, but guard anyway.
+                diagnostics.push(Diagnostic::error(
+                    "tx.unknown_node",
+                    format!("align_nodes: node {:?} disappeared between phases", bbox.id),
+                    None,
+                    Some(bbox.id.clone()),
+                ));
+            }
+            Some(node) => {
+                // node_geometry_mut is guaranteed Some here: we filtered on
+                // read_geometry_px which uses the same set of node kinds.
+                if let Some((nx, ny, _, _)) = node_geometry_mut(node) {
+                    if let Some(v) = new_x {
+                        *nx = Some(px(v));
+                    }
+                    if let Some(v) = new_y {
+                        *ny = Some(px(v));
+                    }
+                    record_affected(&bbox.id, affected);
+                }
+            }
+        }
+    }
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────
@@ -4654,6 +4897,234 @@ mod tests {
                         position: Position::First,
                     },
                 ],
+            }
+        );
+    }
+
+    // ── AlignNodes tests ──────────────────────────────────────────────────────
+
+    /// Three sibling rects at different x positions (10, 50, 90) on a 400×300
+    /// page; all have the same width (80px).
+    const THREE_RECTS_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" { }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      rect id="r1" x=(px)10 y=(px)20 w=(px)80 h=(px)50
+      rect id="r2" x=(px)50 y=(px)60 w=(px)80 h=(px)50
+      rect id="r3" x=(px)90 y=(px)100 w=(px)80 h=(px)50
+    }
+  }
+}"##;
+
+    /// Parse a node's x value from `source_after` by looking for
+    /// `id="<id>"` and then the first `x=(px)<value>` on the same node line.
+    /// This is intentionally naive — sufficient for deterministic test docs.
+    fn extract_px_attr(source: &str, node_id: &str, attr: &str) -> Option<f64> {
+        // Find the line containing this node id.
+        source
+            .lines()
+            .find(|line| line.contains(&format!("id=\"{node_id}\"")))
+            .and_then(|line| {
+                let needle = format!("{attr}=(px)");
+                let start = line.find(&needle)? + needle.len();
+                let rest = &line[start..];
+                let end = rest
+                    .find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-')
+                    .unwrap_or(rest.len());
+                rest[..end].parse::<f64>().ok()
+            })
+    }
+
+    // ── align "left" anchor "selection" → all get x = min(x) = 10 ───────────
+
+    #[test]
+    fn align_left_selection() {
+        let doc = parse(THREE_RECTS_DOC);
+        let tx = Transaction {
+            ops: vec![Op::AlignNodes {
+                node_ids: vec!["r1".to_owned(), "r2".to_owned(), "r3".to_owned()],
+                align: "left".to_owned(),
+                anchor: "selection".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction must not error");
+
+        assert_eq!(
+            result.status,
+            TxStatus::Accepted,
+            "diagnostics: {:?}",
+            result.diagnostics
+        );
+        // All three nodes must be affected.
+        assert!(result.affected_node_ids.contains(&"r1".to_owned()));
+        assert!(result.affected_node_ids.contains(&"r2".to_owned()));
+        assert!(result.affected_node_ids.contains(&"r3".to_owned()));
+
+        // All three must have x = 10 (the minimum original x).
+        for id in ["r1", "r2", "r3"] {
+            let x = extract_px_attr(&result.source_after, id, "x")
+                .unwrap_or_else(|| panic!("could not extract x for {id}"));
+            assert!((x - 10.0).abs() < 1e-9, "expected x=10 for {id}, got {x}");
+        }
+    }
+
+    // ── align "right" anchor "selection" → all right edges equal max(x+w) ───
+
+    #[test]
+    fn align_right_selection() {
+        let doc = parse(THREE_RECTS_DOC);
+        // ref_right = max(x+w) = max(90, 130, 170) = 170
+        // each node: x = 170 - 80 = 90
+        let tx = Transaction {
+            ops: vec![Op::AlignNodes {
+                node_ids: vec!["r1".to_owned(), "r2".to_owned(), "r3".to_owned()],
+                align: "right".to_owned(),
+                anchor: "selection".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction must not error");
+
+        assert_eq!(
+            result.status,
+            TxStatus::Accepted,
+            "diagnostics: {:?}",
+            result.diagnostics
+        );
+        for id in ["r1", "r2", "r3"] {
+            let x = extract_px_attr(&result.source_after, id, "x")
+                .unwrap_or_else(|| panic!("could not extract x for {id}"));
+            // ref_right=170, w=80 → x = 90
+            assert!((x - 90.0).abs() < 1e-9, "expected x=90 for {id}, got {x}");
+        }
+    }
+
+    // ── align "hcenter" anchor "page" → x = page_w/2 − w/2 ──────────────────
+
+    #[test]
+    fn align_hcenter_page() {
+        let doc = parse(THREE_RECTS_DOC);
+        // page_w=400, each rect w=80 → centered x = 400/2 − 80/2 = 200 − 40 = 160
+        let tx = Transaction {
+            ops: vec![Op::AlignNodes {
+                node_ids: vec!["r1".to_owned(), "r2".to_owned(), "r3".to_owned()],
+                align: "hcenter".to_owned(),
+                anchor: "page".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction must not error");
+
+        assert_eq!(
+            result.status,
+            TxStatus::Accepted,
+            "diagnostics: {:?}",
+            result.diagnostics
+        );
+        for id in ["r1", "r2", "r3"] {
+            let x = extract_px_attr(&result.source_after, id, "x")
+                .unwrap_or_else(|| panic!("could not extract x for {id}"));
+            assert!((x - 160.0).abs() < 1e-9, "expected x=160 for {id}, got {x}");
+        }
+    }
+
+    // ── node without geometry (group) in the set → skipped, others aligned ───
+
+    /// Doc with two rects and one group; the group has no resolvable bbox.
+    const RECTS_AND_GROUP_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" { }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      rect id="r1" x=(px)20 y=(px)0 w=(px)60 h=(px)40
+      rect id="r2" x=(px)80 y=(px)0 w=(px)60 h=(px)40
+      group id="grp1" { }
+    }
+  }
+}"##;
+
+    #[test]
+    fn align_skips_non_geometry_node() {
+        let doc = parse(RECTS_AND_GROUP_DOC);
+        let tx = Transaction {
+            ops: vec![Op::AlignNodes {
+                node_ids: vec!["r1".to_owned(), "grp1".to_owned(), "r2".to_owned()],
+                align: "left".to_owned(),
+                anchor: "selection".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction must not error");
+
+        // grp1 skipped → advisory, but the tx is still accepted.
+        assert_eq!(
+            result.status,
+            TxStatus::AcceptedWithWarnings,
+            "diagnostics: {:?}",
+            result.diagnostics
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.unsupported_property" && d.message.contains("grp1")),
+            "expected tx.unsupported_property advisory for grp1; got: {:?}",
+            result.diagnostics
+        );
+        // r1 and r2 must still have been aligned (x=20, the minimum).
+        for id in ["r1", "r2"] {
+            let x = extract_px_attr(&result.source_after, id, "x")
+                .unwrap_or_else(|| panic!("could not extract x for {id}"));
+            assert!((x - 20.0).abs() < 1e-9, "expected x=20 for {id}, got {x}");
+        }
+        // grp1 must not appear in affected.
+        assert!(
+            !result.affected_node_ids.contains(&"grp1".to_owned()),
+            "grp1 must not be in affected_node_ids"
+        );
+    }
+
+    // ── unknown align value → tx.unsupported_property, rejected ──────────────
+
+    #[test]
+    fn align_nodes_unknown_align_rejected() {
+        let doc = parse(THREE_RECTS_DOC);
+        let tx = Transaction {
+            ops: vec![Op::AlignNodes {
+                node_ids: vec!["r1".to_owned()],
+                align: "diagonal".to_owned(),
+                anchor: "selection".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction must not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.unsupported_property" && d.message.contains("diagonal")),
+            "expected tx.unsupported_property naming \"diagonal\"; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    // ── serde round-trip: align_nodes with default anchor ────────────────────
+
+    #[test]
+    fn from_json_align_nodes_round_trip() {
+        // anchor is omitted → should deserialize to "selection" via serde default.
+        let json = r#"{"ops":[{"op":"align_nodes","node_ids":["r1","r2"],"align":"left"}]}"#;
+        let tx = Transaction::from_json(json).expect("parse JSON");
+        assert_eq!(
+            tx,
+            Transaction {
+                ops: vec![Op::AlignNodes {
+                    node_ids: vec!["r1".to_owned(), "r2".to_owned()],
+                    align: "left".to_owned(),
+                    anchor: "selection".to_owned(),
+                }],
             }
         );
     }
