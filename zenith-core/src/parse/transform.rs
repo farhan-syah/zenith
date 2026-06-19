@@ -10,7 +10,7 @@ use kdl::{KdlDocument, KdlEntry, KdlNode, KdlValue};
 use crate::ast::{
     Span,
     asset::{AssetBlock, AssetDecl, AssetKind},
-    document::{Document, DocumentBody, Page, Project, SafeZone, SafeZoneType},
+    document::{Document, DocumentBody, Fold, Page, Project, SafeZone, SafeZoneType},
     node::{
         CodeNode, EllipseNode, FrameNode, GroupNode, ImageNode, LineNode, Node, ObjectPosition,
         Point, PolygonNode, PolylineNode, RectNode, TextNode, TextSpan, UnknownNode,
@@ -813,17 +813,19 @@ fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
 
     let source_span = node_span(node);
 
-    // A page's children block mixes `safe-zone` declarations (page metadata,
-    // not rendering nodes) with renderable nodes. Split them here: safe-zones
-    // go to `page.safe_zones`; everything else through `transform_node`.
+    // A page's children block mixes `safe-zone` and `fold` declarations (page
+    // metadata, not rendering nodes) with renderable nodes. Split them here:
+    // safe-zones go to `page.safe_zones`; folds to `page.folds`; everything
+    // else through `transform_node`.
     let mut safe_zones: Vec<SafeZone> = Vec::new();
+    let mut folds: Vec<Fold> = Vec::new();
     let mut children: Vec<Node> = Vec::new();
     if let Some(doc) = node.children() {
         for child in doc.nodes() {
-            if child.name().value() == "safe-zone" {
-                safe_zones.push(transform_safe_zone(child)?);
-            } else {
-                children.push(transform_node(child)?);
+            match child.name().value() {
+                "safe-zone" => safe_zones.push(transform_safe_zone(child)?),
+                "fold" => folds.push(transform_fold(child)?),
+                _ => children.push(transform_node(child)?),
             }
         }
     }
@@ -835,8 +837,35 @@ fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
         height,
         background,
         safe_zones,
+        folds,
         children,
         source_span,
+    })
+}
+
+/// Transform a `fold` page child into a [`Fold`].
+///
+/// Reads required `id`; `orientation` maps a string (`"vertical"` /
+/// `"horizontal"`, defaulting to `"vertical"` for any other / absent value);
+/// `position` is an optional dimension (x for vertical, y for horizontal).
+fn transform_fold(node: &KdlNode) -> Result<Fold, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+
+    let orientation = match optional_string_prop(node, "orientation") {
+        Some("horizontal") => "horizontal".to_owned(),
+        _ => "vertical".to_owned(),
+    };
+
+    let position = match node.entry("position") {
+        Some(e) => Some(entry_to_dimension(e, "position")?),
+        None => None,
+    };
+
+    Ok(Fold {
+        id,
+        orientation,
+        position,
+        source_span: node_span(node),
     })
 }
 

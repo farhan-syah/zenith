@@ -27,8 +27,10 @@
 //! - [`nodes`] — the recursive node walk and geometry helpers.
 //! - [`contrast`] — the WCAG 2.2 contrast advisory.
 //! - [`safezone`] — safe-zone exclusion/required overlap advisories.
+//! - [`fold`] — fold-line content-crossing advisories.
 
 mod contrast;
+mod fold;
 mod nodes;
 mod safezone;
 mod visual;
@@ -240,6 +242,7 @@ pub fn validate(doc: &Document) -> ValidationReport {
         // compared in the same pixel space the off_canvas check uses.
         if let Some((page_w, page_h)) = page_px_bounds {
             safezone::check_safe_zones(page, page_w, page_h, &mut diagnostics);
+            fold::check_folds(page, page_w, page_h, &mut diagnostics);
         }
     }
 

@@ -5,8 +5,8 @@
 use std::fmt::Write as _;
 
 use crate::ast::{
-    CodeNode, DocumentBody, EllipseNode, FrameNode, GroupNode, ImageNode, LineNode, Node, Page,
-    Point, PolygonNode, PolylineNode, RectNode, SafeZone, SafeZoneType, TextNode, TextSpan,
+    CodeNode, DocumentBody, EllipseNode, Fold, FrameNode, GroupNode, ImageNode, LineNode, Node,
+    Page, Point, PolygonNode, PolylineNode, RectNode, SafeZone, SafeZoneType, TextNode, TextSpan,
 };
 
 use super::{
@@ -54,9 +54,13 @@ fn write_page(page: &Page, out: &mut String, depth: usize) {
     write_opt_property_value(out, "background", &page.background);
 
     out.push_str(" {\n");
-    // Safe-zones are page metadata, emitted before the renderable children.
+    // Safe-zones and folds are page metadata, emitted before the renderable
+    // children.
     for zone in &page.safe_zones {
         write_safe_zone(zone, out, depth + 1);
+    }
+    for fold in &page.folds {
+        write_fold(fold, out, depth + 1);
     }
     write_children_block(&page.children, out, depth);
     indent(out, depth);
@@ -87,6 +91,22 @@ fn write_safe_zone(zone: &SafeZone, out: &mut String, depth: usize) {
     out.push_str(" h=");
     out.push_str(&fmt_dimension(&zone.h));
     write_opt_str(out, "label", &zone.label);
+    out.push('\n');
+}
+
+/// Emit a single `fold` line:
+/// `fold id="..." orientation="vertical|horizontal" position=(px)N`
+/// (`position` is omitted when `None`).
+fn write_fold(fold: &Fold, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("fold");
+    out.push_str(" id=\"");
+    out.push_str(&fold.id);
+    out.push('"');
+    out.push_str(" orientation=\"");
+    out.push_str(&fold.orientation);
+    out.push('"');
+    write_opt_dimension(out, "position", &fold.position);
     out.push('\n');
 }
 

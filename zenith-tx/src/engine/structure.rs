@@ -684,6 +684,10 @@ pub(super) fn apply_duplicate_page(
         zone.id.push_str(id_suffix);
         zone.source_span = None;
     }
+    for fold in clone.folds.iter_mut() {
+        fold.id.push_str(id_suffix);
+        fold.source_span = None;
+    }
 
     // 5. Insert the clone immediately after the source page.
     doc.body.pages.insert(position + 1, clone);

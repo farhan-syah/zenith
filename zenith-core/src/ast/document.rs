@@ -29,6 +29,10 @@ pub struct Page {
     /// Author-declared safe/dead zones for this page. These are not rendering
     /// nodes; the validator checks page children against them.
     pub safe_zones: Vec<SafeZone>,
+    /// Author-declared fold-line positions for this page (tri-fold/bi-fold
+    /// print). These are non-printing page metadata, not rendering nodes; the
+    /// validator advises when content crosses a fold line.
+    pub folds: Vec<Fold>,
     /// Child content nodes in z-order (first = bottommost, last = topmost).
     pub children: Vec<Node>,
     /// Source declaration span, when available.
@@ -57,6 +61,24 @@ pub struct SafeZone {
     pub w: Dimension,
     pub h: Dimension,
     pub label: Option<String>,
+    pub source_span: Option<Span>,
+}
+
+/// A non-printing fold-line position declared on a [`Page`].
+///
+/// Declared as a `fold` child of a `page`; it is a sibling of rendering nodes
+/// but is itself never rendered. A vertical fold has an `x` position; a
+/// horizontal fold has a `y` position. Used for tri-fold / bi-fold print
+/// layouts so the validator can advise when content crosses a fold line.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Fold {
+    pub id: String,
+    /// `"vertical"` (position is an x coordinate) or `"horizontal"` (position
+    /// is a y coordinate). Any other / absent value defaults to `"vertical"`.
+    pub orientation: String,
+    /// The fold-line position: x for a vertical fold, y for a horizontal fold.
+    /// `None` when the author omitted `position`.
+    pub position: Option<Dimension>,
     pub source_span: Option<Span>,
 }
 

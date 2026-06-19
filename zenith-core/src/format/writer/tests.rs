@@ -146,6 +146,9 @@ fn strip_spans(mut doc: crate::ast::Document) -> crate::ast::Document {
         for zone in &mut page.safe_zones {
             zone.source_span = None;
         }
+        for fold in &mut page.folds {
+            fold.source_span = None;
+        }
         for node in &mut page.children {
             strip_node_span(node);
         }
@@ -1487,5 +1490,68 @@ fn test_safe_zone_format_round_trip() {
         strip_spans(doc_orig),
         strip_spans(doc_reparsed),
         "safe-zone must survive a format round-trip (spans excluded)"
+    );
+}
+
+/// A `.zen` document with a `fold` declared as a page child.
+const FOLD_DOC: &str = r##"zenith version=1 {
+  project id="proj.fold" name="Fold Project"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.fold" title="Fold Doc" {
+    page id="page.one" w=(px)2480 h=(px)1000 {
+      fold id="fold.1" orientation="vertical" position=(px)1169
+      rect id="logo" x=(px)600 y=(px)40 w=(px)200 h=(px)80 fill="#ffffff"
+    }
+  }
+}
+"##;
+
+/// **Parse**: a `fold` page child lands in `page.folds`, NOT in
+/// `page.children`.
+#[test]
+fn test_fold_parses_into_page_not_children() {
+    let adapter = KdlAdapter;
+    let doc = adapter
+        .parse(FOLD_DOC.as_bytes())
+        .expect("parse must succeed");
+    let page = &doc.body.pages[0];
+
+    assert_eq!(page.folds.len(), 1, "exactly one fold parsed");
+    let fold = &page.folds[0];
+    assert_eq!(fold.id, "fold.1");
+    assert_eq!(fold.orientation, "vertical");
+    let pos = fold.position.as_ref().expect("position present");
+    assert_eq!(pos.value, 1169.0);
+
+    // The renderable rect is the ONLY child; the fold is not a child.
+    assert_eq!(page.children.len(), 1, "only the rect is a child node");
+    match &page.children[0] {
+        Node::Rect(r) => assert_eq!(r.id, "logo"),
+        other => panic!("expected Rect, got {other:?}"),
+    }
+}
+
+/// **Format round-trip**: a fold survives a parse → format → parse pass
+/// unchanged (spans excluded).
+#[test]
+fn test_fold_format_round_trip() {
+    let adapter = KdlAdapter;
+    let doc_orig = adapter.parse(FOLD_DOC.as_bytes()).expect("original parse");
+    let formatted = format_document(&doc_orig).expect("format");
+
+    let text = String::from_utf8(formatted.clone()).expect("utf8");
+    assert!(
+        text.contains("fold id=\"fold.1\" orientation=\"vertical\" position=(px)1169"),
+        "formatted fold line missing/incorrect; output:\n{text}"
+    );
+
+    let doc_reparsed = adapter.parse(&formatted).expect("re-parse after format");
+    assert_eq!(
+        strip_spans(doc_orig),
+        strip_spans(doc_reparsed),
+        "fold must survive a format round-trip (spans excluded)"
     );
 }
