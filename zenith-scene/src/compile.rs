@@ -366,25 +366,60 @@ fn compile_node(
                     .clone()
                     .or_else(|| style_prop(&rect.style, style_map, "stroke-width").cloned());
                 let stroke_width = resolve_property_dimension_px(&sw, resolved, 1.0);
-                if radius > 0.0 {
-                    commands.push(SceneCommand::StrokeRoundedRect {
-                        x,
-                        y,
-                        w,
-                        h,
-                        radius,
-                        color,
-                        stroke_width,
-                    });
-                } else {
-                    commands.push(SceneCommand::StrokeRect {
-                        x,
-                        y,
-                        w,
-                        h,
-                        color,
-                        stroke_width,
-                    });
+
+                // Stroke alignment offsets the stroke path relative to the box
+                // edge by half the stroke width. `center` (default) straddles the
+                // edge; `inside`/`outside` shift the whole stroked rectangle in or
+                // out. The fill geometry above is unaffected.
+                let half = stroke_width / 2.0;
+                let (sx, sy, sw_geom, sh_geom, sradius) = match rect.stroke_alignment.as_deref() {
+                    // The corner radius only shifts for an already-rounded rect;
+                    // a sharp rect (radius 0) must stay sharp.
+                    Some("inside") => (
+                        x + half,
+                        y + half,
+                        w - stroke_width,
+                        h - stroke_width,
+                        if radius > 0.0 {
+                            (radius - half).max(0.0)
+                        } else {
+                            0.0
+                        },
+                    ),
+                    Some("outside") => (
+                        x - half,
+                        y - half,
+                        w + stroke_width,
+                        h + stroke_width,
+                        if radius > 0.0 { radius + half } else { 0.0 },
+                    ),
+                    // "center" (default) and any unrecognized value.
+                    _ => (x, y, w, h, radius),
+                };
+
+                // An inside-aligned stroke can shrink the box to nothing; skip
+                // rather than emit a degenerate rectangle.
+                if sw_geom > 0.0 && sh_geom > 0.0 {
+                    if sradius > 0.0 {
+                        commands.push(SceneCommand::StrokeRoundedRect {
+                            x: sx,
+                            y: sy,
+                            w: sw_geom,
+                            h: sh_geom,
+                            radius: sradius,
+                            color,
+                            stroke_width,
+                        });
+                    } else {
+                        commands.push(SceneCommand::StrokeRect {
+                            x: sx,
+                            y: sy,
+                            w: sw_geom,
+                            h: sh_geom,
+                            color,
+                            stroke_width,
+                        });
+                    }
                 }
             }
         }
@@ -3715,6 +3750,56 @@ mod tests {
             }
             other => panic!("expected a single StrokeRect, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn rect_stroke_alignment_inside_and_outside_shift_geometry() {
+        // sw = 4 → inside shifts in by 2 (x+2, w-4); outside shifts out by 2.
+        let doc_for = |align: &str| {
+            let src = format!(
+                r##"zenith version=1 {{
+  project id="proj.sa" name="SA"
+  tokens format="zenith-token-v1" {{
+    token id="color.stroke" type="color" value="#445566"
+    token id="size.sw" type="dimension" value=(px)4
+  }}
+  styles {{}}
+  document id="doc.sa" title="SA" {{
+    page id="page.sa" w=(px)200 h=(px)200 {{
+      rect id="rect.sa" x=(px)20 y=(px)20 w=(px)100 h=(px)100 stroke=(token)"color.stroke" stroke-width=(token)"size.sw" stroke-alignment="{align}"
+    }}
+  }}
+}}
+"##
+            );
+            let doc = parse(&src);
+            compile(&doc, &default_provider())
+        };
+
+        let stroke_xywh = |result: &CompileResult| -> (f64, f64, f64, f64) {
+            for c in &result.scene.commands {
+                if let SceneCommand::StrokeRect { x, y, w, h, .. } = c {
+                    return (*x, *y, *w, *h);
+                }
+            }
+            panic!("no StrokeRect emitted");
+        };
+
+        assert_eq!(
+            stroke_xywh(&doc_for("inside")),
+            (22.0, 22.0, 96.0, 96.0),
+            "inside must inset the box by sw/2 on each side (w - sw)"
+        );
+        assert_eq!(
+            stroke_xywh(&doc_for("outside")),
+            (18.0, 18.0, 104.0, 104.0),
+            "outside must outset by sw/2"
+        );
+        assert_eq!(
+            stroke_xywh(&doc_for("center")),
+            (20.0, 20.0, 100.0, 100.0),
+            "center must be unchanged"
+        );
     }
 
     // ── Code node: multi-line stacks DrawGlyphRun by line_height ─────────────

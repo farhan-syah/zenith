@@ -1,0 +1,18 @@
+zenith version=1 {
+  project id="proj.sa" name="Stroke Alignment Example"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#f8fafc"
+    token id="color.fill" type="color" value="#bfdbfe"
+    token id="color.stroke" type="color" value="#1e3a8a"
+    token id="size.sw" type="dimension" value=(px)10
+  }
+  styles {}
+  document id="doc.sa" title="Stroke Alignment Example" {
+    page id="page.sa" w=(px)360 h=(px)160 {
+      rect id="rect.bg" x=(px)0 y=(px)0 w=(px)360 h=(px)160 fill=(token)"color.bg"
+      rect id="rect.inside" x=(px)20 y=(px)40 w=(px)80 h=(px)80 fill=(token)"color.fill" stroke=(token)"color.stroke" stroke-width=(token)"size.sw" stroke-alignment="inside"
+      rect id="rect.center" x=(px)140 y=(px)40 w=(px)80 h=(px)80 fill=(token)"color.fill" stroke=(token)"color.stroke" stroke-width=(token)"size.sw" stroke-alignment="center"
+      rect id="rect.outside" x=(px)260 y=(px)40 w=(px)80 h=(px)80 fill=(token)"color.fill" stroke=(token)"color.stroke" stroke-width=(token)"size.sw" stroke-alignment="outside"
+    }
+  }
+}
