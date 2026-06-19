@@ -14,7 +14,7 @@ use zenith_core::{
     validate,
 };
 use zenith_render::render_png;
-use zenith_scene::compile;
+use zenith_scene::compile_page;
 
 // ── Error type ────────────────────────────────────────────────────────────────
 
@@ -58,16 +58,19 @@ pub struct PngArtifact {
 
 // ── Entry points ──────────────────────────────────────────────────────────────
 
-/// Parse `src`, validate it, compile the scene, and return the scene JSON plus
-/// the compile-stage diagnostics.
+/// Parse `src`, validate it, compile the requested `page` (1-based), and return
+/// the scene JSON plus the compile-stage diagnostics.
 ///
 /// Returns `Err` when:
 /// - The source fails to parse (exit code 2).
 /// - The document has validation errors (exit code 1).
+/// - The `page` is out of range (exit code 2).
 /// - Scene JSON serialisation fails (exit code 2).
-pub fn to_scene_json(src: &str) -> Result<SceneArtifact, RenderCmdErr> {
+pub fn to_scene_json(src: &str, page: usize) -> Result<SceneArtifact, RenderCmdErr> {
     let provider = default_provider();
-    let compile_result = parse_validate_compile(src, &provider)?;
+    let doc = parse_validate(src)?;
+    let page_index = resolve_page_index(&doc, page)?;
+    let compile_result = compile_page(&doc, &provider, page_index);
     let json = compile_result
         .scene
         .to_json()
@@ -85,12 +88,15 @@ pub fn to_scene_json(src: &str) -> Result<SceneArtifact, RenderCmdErr> {
 /// [`to_png_with_dir`] to source image bytes relative to the document's
 /// directory.
 ///
+/// `page` is the 1-based page number to render.
+///
 /// Returns `Err` when:
 /// - The source fails to parse (exit code 2).
 /// - The document has validation errors (exit code 1).
+/// - The `page` is out of range (exit code 2).
 /// - Rendering fails (exit code 2).
-pub fn to_png(src: &str) -> Result<PngArtifact, RenderCmdErr> {
-    to_png_with_dir(src, None)
+pub fn to_png(src: &str, page: usize) -> Result<PngArtifact, RenderCmdErr> {
+    to_png_with_dir(src, None, page)
 }
 
 /// Like [`to_png`], but sources image asset bytes from `project_dir` (the
@@ -101,14 +107,21 @@ pub fn to_png(src: &str) -> Result<PngArtifact, RenderCmdErr> {
 /// a warning and skips that asset (the matching image is then skipped at
 /// render time — never a panic). When `project_dir` is `None` no assets are
 /// loaded.
-pub fn to_png_with_dir(src: &str, project_dir: Option<&Path>) -> Result<PngArtifact, RenderCmdErr> {
+///
+/// `page` is the 1-based page number to render.
+pub fn to_png_with_dir(
+    src: &str,
+    project_dir: Option<&Path>,
+    page: usize,
+) -> Result<PngArtifact, RenderCmdErr> {
     let fonts = default_provider();
     let doc = parse_validate(src)?;
+    let page_index = resolve_page_index(&doc, page)?;
     let assets = match project_dir {
         Some(dir) => build_asset_provider(&doc, dir),
         None => BytesAssetProvider::new(),
     };
-    let compile_result = compile(&doc, &fonts);
+    let compile_result = compile_page(&doc, &fonts, page_index);
     let png = render_png(&compile_result.scene, &fonts, &assets)
         .map_err(|e| RenderCmdErr::new(format!("render error: {e}"), 2))?;
     Ok(PngArtifact {
@@ -174,15 +187,19 @@ fn parse_validate(src: &str) -> Result<Document, RenderCmdErr> {
     Ok(doc)
 }
 
-/// Parse → validate → compile, returning `CompileResult`.
+/// Resolve a 1-based `page` number to a 0-based page index within `doc`.
 ///
-/// The `provider` is the font registry used for compilation.
-fn parse_validate_compile(
-    src: &str,
-    provider: &dyn zenith_core::FontProvider,
-) -> Result<zenith_scene::CompileResult, RenderCmdErr> {
-    let doc = parse_validate(src)?;
-    Ok(compile(&doc, provider))
+/// Returns `Err` (exit code 2) when the document has no pages or when `page`
+/// is outside `1..=pages.len()`.
+fn resolve_page_index(doc: &Document, page: usize) -> Result<usize, RenderCmdErr> {
+    let n = doc.body.pages.len();
+    if doc.body.pages.is_empty() || page < 1 || page > n {
+        return Err(RenderCmdErr::new(
+            format!("page {page} out of range; document has {n} page(s)"),
+            2,
+        ));
+    }
+    Ok(page - 1)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -240,7 +257,7 @@ mod tests {
 
     #[test]
     fn to_png_returns_png_magic_bytes() {
-        let artifact = to_png(VALID_DOC).expect("render must succeed");
+        let artifact = to_png(VALID_DOC, 1).expect("render must succeed");
         let png = &artifact.png;
         assert!(
             png.len() >= 4,
@@ -256,13 +273,13 @@ mod tests {
 
     #[test]
     fn to_png_is_non_empty() {
-        let artifact = to_png(VALID_DOC).expect("render must succeed");
+        let artifact = to_png(VALID_DOC, 1).expect("render must succeed");
         assert!(!artifact.png.is_empty(), "PNG output must not be empty");
     }
 
     #[test]
     fn to_png_surfaces_compile_diagnostics() {
-        let artifact = to_png(UNKNOWN_NODE_DOC).expect("render must succeed");
+        let artifact = to_png(UNKNOWN_NODE_DOC, 1).expect("render must succeed");
         assert!(
             artifact
                 .diagnostics
@@ -279,7 +296,7 @@ mod tests {
 
     #[test]
     fn to_scene_json_surfaces_compile_diagnostics() {
-        let artifact = to_scene_json(UNKNOWN_NODE_DOC).expect("scene must succeed");
+        let artifact = to_scene_json(UNKNOWN_NODE_DOC, 1).expect("scene must succeed");
         assert!(
             artifact
                 .diagnostics
@@ -291,7 +308,7 @@ mod tests {
 
     #[test]
     fn to_png_with_validation_error_returns_err() {
-        let result = to_png(INVALID_DOC);
+        let result = to_png(INVALID_DOC, 1);
         assert!(
             result.is_err(),
             "document with validation errors must not render"
@@ -305,7 +322,7 @@ mod tests {
 
     #[test]
     fn to_scene_json_contains_schema_field() {
-        let json = to_scene_json(VALID_DOC)
+        let json = to_scene_json(VALID_DOC, 1)
             .expect("scene JSON must succeed")
             .json;
         assert!(
@@ -317,14 +334,51 @@ mod tests {
 
     #[test]
     fn to_scene_json_with_validation_error_returns_err() {
-        let result = to_scene_json(INVALID_DOC);
+        let result = to_scene_json(INVALID_DOC, 1);
         assert!(result.is_err(), "invalid doc must not produce scene JSON");
     }
 
     #[test]
     fn to_png_deterministic_two_runs_equal() {
-        let png1 = to_png(VALID_DOC).expect("run 1").png;
-        let png2 = to_png(VALID_DOC).expect("run 2").png;
+        let png1 = to_png(VALID_DOC, 1).expect("run 1").png;
+        let png2 = to_png(VALID_DOC, 1).expect("run 2").png;
         assert_eq!(png1, png2, "two renders of the same doc must be identical");
+    }
+
+    /// A two-page document used to exercise the 1-based page selector.
+    const TWO_PAGE_DOC: &str = r##"zenith version=1 {
+  project id="proj.mp" name="MP"
+  tokens format="zenith-token-v1" {
+    token id="color.p1" type="color" value="#252525"
+    token id="color.p2" type="color" value="#dcdcdc"
+  }
+  styles {}
+  document id="doc.mp" title="MP" {
+    page id="page.p1" w=(px)100 h=(px)100 {
+      rect id="rect.p1" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fill=(token)"color.p1"
+    }
+    page id="page.p2" w=(px)100 h=(px)100 {
+      rect id="rect.p2" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fill=(token)"color.p2"
+    }
+  }
+}
+"##;
+
+    #[test]
+    fn to_png_page_two_is_ok() {
+        let result = to_png(TWO_PAGE_DOC, 2);
+        assert!(result.is_ok(), "rendering page 2 must succeed");
+    }
+
+    #[test]
+    fn to_png_page_out_of_range_is_err_exit_2() {
+        let err = to_png(TWO_PAGE_DOC, 3).expect_err("page 3 must be out of range");
+        assert_eq!(err.exit_code, 2, "out-of-range page must exit with code 2");
+    }
+
+    #[test]
+    fn to_png_page_zero_is_err_exit_2() {
+        let err = to_png(TWO_PAGE_DOC, 0).expect_err("page 0 is invalid (1-based)");
+        assert_eq!(err.exit_code, 2, "page 0 must exit with code 2");
     }
 }

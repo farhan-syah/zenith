@@ -5,6 +5,8 @@
 //! Rect, ellipse, line, text, code, and group nodes are compiled; the page
 //! background is emitted first; unknown nodes produce an advisory diagnostic
 //! and are skipped.
+//!
+//! [`compile`] renders page 0; [`compile_page`] renders a chosen page by index.
 
 use std::collections::BTreeMap;
 
@@ -78,8 +80,8 @@ fn style_prop<'a>(
 
 /// Compile `doc` into a [`CompileResult`], using `fonts` to shape text nodes.
 ///
-/// Only the first page is compiled.  If the document has no pages an empty
-/// scene is returned with an advisory diagnostic.
+/// [`compile_page`] renders a chosen page; this wrapper renders page 0.  If the
+/// document has no pages an empty scene is returned with an advisory diagnostic.
 ///
 /// Pass `&zenith_core::default_provider()` to use the bundled Noto Sans
 /// font, which is sufficient for basic text rendering.
@@ -90,6 +92,25 @@ fn style_prop<'a>(
 /// `unimplemented!`, or performs unchecked indexing.  All failure paths push a
 /// diagnostic and continue.
 pub fn compile(doc: &Document, fonts: &dyn FontProvider) -> CompileResult {
+    compile_page(doc, fonts, 0)
+}
+
+/// Compile the page at `page_index` (0-based) of `doc` into a [`CompileResult`],
+/// using `fonts` to shape text nodes.
+///
+/// If the document has no pages an empty scene is returned with a
+/// `scene.no_pages` advisory; if `page_index` is out of range (but pages exist)
+/// an empty scene is returned with a `scene.page_out_of_range` advisory.
+///
+/// Pass `&zenith_core::default_provider()` to use the bundled Noto Sans
+/// font, which is sufficient for basic text rendering.
+///
+/// # No-panic guarantee
+///
+/// This function never calls `unwrap`, `expect`, `panic!`, `todo!`,
+/// `unimplemented!`, or performs unchecked indexing (page lookup uses `.get()`).
+/// All failure paths push a diagnostic and continue.
+pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize) -> CompileResult {
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
 
     // ── Step 1: resolve tokens ────────────────────────────────────────────
@@ -105,14 +126,27 @@ pub fn compile(doc: &Document, fonts: &dyn FontProvider) -> CompileResult {
         .map(|s| (s.id.as_str(), s))
         .collect();
 
-    // ── Step 2: select the first page ────────────────────────────────────
-    let Some(page) = doc.body.pages.first() else {
-        diagnostics.push(Diagnostic::advisory(
-            "scene.no_pages",
-            "document has no pages; an empty scene is returned",
-            None,
-            Some(doc.body.id.clone()),
-        ));
+    // ── Step 2: select the requested page ────────────────────────────────
+    let Some(page) = doc.body.pages.get(page_index) else {
+        if doc.body.pages.is_empty() {
+            diagnostics.push(Diagnostic::advisory(
+                "scene.no_pages",
+                "document has no pages; an empty scene is returned",
+                None,
+                Some(doc.body.id.clone()),
+            ));
+        } else {
+            diagnostics.push(Diagnostic::advisory(
+                "scene.page_out_of_range",
+                format!(
+                    "page index {} is out of range; document has {} page(s)",
+                    page_index,
+                    doc.body.pages.len()
+                ),
+                None,
+                Some(doc.body.id.clone()),
+            ));
+        }
         return CompileResult {
             scene: Scene::new(0.0, 0.0),
             diagnostics,
@@ -3846,5 +3880,120 @@ mod tests {
             font_id.contains("noto-sans-mono"),
             "default code font must be mono; got font_id {font_id}"
         );
+    }
+
+    // ── Multi-page page selection ─────────────────────────────────────────
+
+    /// A two-page document. Page 1 has a full-bleed rect filled `#252525`
+    /// (r=0x25); page 2 a full-bleed rect filled `#dcdcdc` (r=0xdc). The page
+    /// fill color uniquely identifies which page was compiled.
+    const TWO_PAGE_DOC: &str = r##"zenith version=1 {
+  project id="proj.mp" name="MP"
+  tokens format="zenith-token-v1" {
+    token id="color.p1" type="color" value="#252525"
+    token id="color.p2" type="color" value="#dcdcdc"
+  }
+  styles {}
+  document id="doc.mp" title="MP" {
+    page id="page.p1" w=(px)100 h=(px)100 {
+      rect id="rect.p1" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fill=(token)"color.p1"
+    }
+    page id="page.p2" w=(px)200 h=(px)200 {
+      rect id="rect.p2" x=(px)0 y=(px)0 w=(px)200 h=(px)200 fill=(token)"color.p2"
+    }
+  }
+}
+"##;
+
+    /// The `FillRect` color red-channel values present in a scene.
+    fn fill_reds(result: &CompileResult) -> Vec<u8> {
+        result
+            .scene
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                SceneCommand::FillRect { color, .. } => Some(color.r),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn compile_page_selects_second_page() {
+        let doc = parse(TWO_PAGE_DOC);
+        let result = compile_page(&doc, &default_provider(), 1);
+
+        // Page 2 size is 200×200 (page 1 is 100×100).
+        assert_eq!(result.scene.width, 200.0, "must be page 2's width");
+        assert_eq!(result.scene.height, 200.0, "must be page 2's height");
+
+        let reds = fill_reds(&result);
+        assert!(
+            reds.contains(&0xdc),
+            "page-2 fill (#dc...) must be present; got {reds:?}"
+        );
+        assert!(
+            !reds.contains(&0x25),
+            "page-1-only fill (#25...) must be absent; got {reds:?}"
+        );
+    }
+
+    #[test]
+    fn compile_page_out_of_range_is_empty_with_advisory() {
+        let doc = parse(TWO_PAGE_DOC);
+        let result = compile_page(&doc, &default_provider(), 9);
+
+        assert_eq!(result.scene.width, 0.0, "out-of-range scene must be 0 wide");
+        assert_eq!(
+            result.scene.height, 0.0,
+            "out-of-range scene must be 0 tall"
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "scene.page_out_of_range"),
+            "out-of-range page must emit scene.page_out_of_range; got {:?}",
+            result
+                .diagnostics
+                .iter()
+                .map(|d| d.code.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn compile_no_pages_still_yields_no_pages_advisory() {
+        let src = r##"zenith version=1 {
+  project id="proj.np" name="NP"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.np" title="NP" {}
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "scene.no_pages"),
+            "empty document must emit scene.no_pages"
+        );
+    }
+
+    #[test]
+    fn compile_equals_compile_page_zero() {
+        let doc = parse(TWO_PAGE_DOC);
+        let via_compile = compile(&doc, &default_provider());
+        let via_page0 = compile_page(&doc, &default_provider(), 0);
+
+        // compile renders page 1 (index 0): same dimensions and fills.
+        assert_eq!(via_compile.scene.width, via_page0.scene.width);
+        assert_eq!(via_compile.scene.height, via_page0.scene.height);
+        assert_eq!(fill_reds(&via_compile), fill_reds(&via_page0));
+        // And it is page 1, not page 2.
+        assert!(fill_reds(&via_compile).contains(&0x25));
     }
 }

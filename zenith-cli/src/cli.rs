@@ -99,6 +99,10 @@ pub struct RenderArgs {
     #[arg(long, value_name = "OUT")]
     pub png: Option<PathBuf>,
 
+    /// 1-based page number to render (default: 1).
+    #[arg(long, value_name = "N", default_value_t = 1)]
+    pub page: usize,
+
     /// Emit machine-readable JSON (diagnostics + output path) to stdout.
     #[arg(long)]
     pub json: bool,

@@ -1,0 +1,21 @@
+zenith version=1 {
+  project id="proj.multipage" name="Multi-Page Zenith"
+  tokens format="zenith-token-v1" {
+    token id="color.page1" type="color" value="#2563eb"
+    token id="color.page2" type="color" value="#dc2626"
+    token id="color.ink" type="color" value="#ffffff"
+    token id="font.body" type="fontFamily" value="Noto Sans"
+    token id="size.heading" type="dimension" value=(px)42
+  }
+  styles {}
+  document id="doc.multipage" title="Multi-Page Zenith" {
+    page id="page.one" w=(px)480 h=(px)160 {
+      rect id="rect.bg1" x=(px)0 y=(px)0 w=(px)480 h=(px)160 fill=(token)"color.page1"
+      text id="text.one" x=(px)24 y=(px)24 w=(px)432 h=(px)112 fill=(token)"color.ink" font-family=(token)"font.body" font-size=(token)"size.heading" { span "Page One" }
+    }
+    page id="page.two" w=(px)480 h=(px)160 {
+      rect id="rect.bg2" x=(px)0 y=(px)0 w=(px)480 h=(px)160 fill=(token)"color.page2"
+      text id="text.two" x=(px)24 y=(px)24 w=(px)432 h=(px)112 fill=(token)"color.ink" font-family=(token)"font.body" font-size=(token)"size.heading" { span "Page Two" }
+    }
+  }
+}

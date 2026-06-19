@@ -19,7 +19,7 @@ fn assert_example_renders(name: &str) {
     let src = std::fs::read_to_string(&fixture)
         .unwrap_or_else(|e| panic!("could not read {}: {}", fixture.display(), e));
 
-    let png = to_png_with_dir(&src, Some(&examples_dir))
+    let png = to_png_with_dir(&src, Some(&examples_dir), 1)
         .unwrap_or_else(|e| panic!("render failed (exit {}): {}", e.exit_code, e.message))
         .png;
 
@@ -39,7 +39,7 @@ fn assert_example_renders(name: &str) {
     );
 
     // Determinism: two renders must be byte-identical.
-    let png2 = to_png_with_dir(&src, Some(&examples_dir))
+    let png2 = to_png_with_dir(&src, Some(&examples_dir), 1)
         .unwrap_or_else(|e| panic!("second render failed (exit {}): {}", e.exit_code, e.message))
         .png;
     assert_eq!(

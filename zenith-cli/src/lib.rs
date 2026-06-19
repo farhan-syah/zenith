@@ -111,7 +111,7 @@ pub fn run() -> ExitCode {
 
             // --scene ─────────────────────────────────────────────────────────
             if let Some(scene_out) = &args.scene {
-                match commands::render::to_scene_json(&src) {
+                match commands::render::to_scene_json(&src, args.page) {
                     Ok(artifact) => {
                         if let Err(e) = std::fs::write(scene_out, artifact.json.as_bytes()) {
                             eprintln!("error writing scene to '{}': {}", scene_out.display(), e);
@@ -139,7 +139,7 @@ pub fn run() -> ExitCode {
             if let Some(png_out) = &args.png {
                 // Source image asset bytes relative to the .zen file's parent
                 // directory so `image` nodes render their raster.
-                match commands::render::to_png_with_dir(&src, args.path.parent()) {
+                match commands::render::to_png_with_dir(&src, args.path.parent(), args.page) {
                     Ok(artifact) => {
                         if let Err(e) = write_bytes(png_out, &artifact.png) {
                             eprintln!("error writing PNG to '{}': {}", png_out.display(), e);
