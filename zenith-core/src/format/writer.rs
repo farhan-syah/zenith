@@ -24,8 +24,8 @@ use std::fmt::Write as _;
 use crate::ast::{
     AssetBlock, AssetDecl, Dimension, Document, DocumentBody, EllipseNode, FrameNode, GroupNode,
     ImageNode, LineNode, Node, ObjectPosition, Page, Point, PolygonNode, PolylineNode, Project,
-    PropertyValue, RectNode, TextNode, TextSpan, Token, TokenBlock, TokenLiteral, TokenType,
-    TokenValue, Unit, UnknownValue,
+    PropertyValue, RectNode, StyleBlock, TextNode, TextSpan, Token, TokenBlock, TokenLiteral,
+    TokenType, TokenValue, Unit, UnknownValue,
 };
 use crate::error::FormatError;
 
@@ -207,7 +207,7 @@ fn write_document(doc: &Document, out: &mut String) {
     }
     write_asset_block(&doc.assets, out, 1);
     write_token_block(&doc.tokens, out, 1);
-    write_style_block(&doc.styles.styles, out, 1);
+    write_style_block(&doc.styles, out, 1);
     write_document_body(&doc.body, out, 1);
 
     out.push('}');
@@ -364,15 +364,51 @@ fn write_token(token: &Token, out: &mut String, depth: usize) {
 // Styles
 // ---------------------------------------------------------------------------
 
-fn write_style_block(styles: &[crate::ast::Style], out: &mut String, depth: usize) {
+fn write_style_block(block: &StyleBlock, out: &mut String, depth: usize) {
     indent(out, depth);
     out.push_str("styles {\n");
 
-    for style in styles {
+    for style in &block.styles {
+        let has_body = !style.properties.is_empty() || !style.unknown_props.is_empty();
         indent(out, depth + 1);
         out.push_str("style id=\"");
         out.push_str(&style.id);
-        out.push_str("\"\n");
+        out.push('"');
+
+        if has_body {
+            out.push_str(" {\n");
+
+            // Recognized properties in BTreeMap (sorted) key order — deterministic.
+            for (key, value) in &style.properties {
+                indent(out, depth + 2);
+                out.push_str(key);
+                out.push(' ');
+                out.push_str(&fmt_property_value(value));
+                out.push('\n');
+            }
+
+            // Unknown properties in sorted key order.
+            for (key, prop) in &style.unknown_props {
+                indent(out, depth + 2);
+                out.push_str(key);
+                out.push(' ');
+                // Emit the raw value as a properly escaped KDL string literal.
+                out.push('"');
+                for ch in prop.raw.chars() {
+                    match ch {
+                        '\\' => out.push_str("\\\\"),
+                        '"' => out.push_str("\\\""),
+                        other => out.push(other),
+                    }
+                }
+                out.push_str("\"\n");
+            }
+
+            indent(out, depth + 1);
+            out.push_str("}\n");
+        } else {
+            out.push('\n');
+        }
     }
 
     indent(out, depth);
@@ -917,6 +953,11 @@ mod tests {
         for token in &mut doc.tokens.tokens {
             token.source_span = None;
         }
+        // Styles
+        doc.styles.source_span = None;
+        for style in &mut doc.styles.styles {
+            style.source_span = None;
+        }
         // Pages and nodes
         for page in &mut doc.body.pages {
             page.source_span = None;
@@ -1397,6 +1438,159 @@ mod tests {
             String::from_utf8(s1).unwrap(),
             String::from_utf8(s2).unwrap(),
             "image format must be idempotent"
+        );
+    }
+
+    // ── Style block parse + format tests ──────────────────────────────────
+
+    /// Source document with style properties to test parsing and formatting.
+    const WITH_STYLES: &str = r##"zenith version=1 {
+  project id="proj.styles" name="Styles Test"
+  tokens format="zenith-token-v1" {
+    token id="color.text.primary" type="color" value="#111827"
+    token id="size.text.title" type="dimension" value=(pt)24
+    token id="font.family.body" type="fontFamily" value="Noto Sans"
+  }
+  styles {
+    style id="style.text.title" {
+      fill (token)"color.text.primary"
+      font-family (token)"font.family.body"
+      font-size (token)"size.text.title"
+    }
+  }
+  document id="doc.styles" {
+    page id="page.one" w=(px)640 h=(px)360 {
+    }
+  }
+}
+"##;
+
+    /// Style properties are parsed into `Style.properties` with correct canonical keys.
+    #[test]
+    fn style_properties_parsed() {
+        use crate::ast::PropertyValue;
+        let adapter = KdlAdapter;
+        let doc = adapter.parse(WITH_STYLES.as_bytes()).expect("parse");
+
+        assert_eq!(doc.styles.styles.len(), 1);
+        let style = &doc.styles.styles[0];
+        assert_eq!(style.id, "style.text.title");
+        assert_eq!(style.properties.len(), 3);
+
+        assert_eq!(
+            style.properties.get("fill"),
+            Some(&PropertyValue::TokenRef("color.text.primary".to_owned())),
+            "fill must be a TokenRef to color.text.primary"
+        );
+        assert_eq!(
+            style.properties.get("font-family"),
+            Some(&PropertyValue::TokenRef("font.family.body".to_owned())),
+            "font-family must be a TokenRef to font.family.body"
+        );
+        assert_eq!(
+            style.properties.get("font-size"),
+            Some(&PropertyValue::TokenRef("size.text.title".to_owned())),
+            "font-size must be a TokenRef to size.text.title"
+        );
+    }
+
+    /// Underscore variant keys are canonicalized to hyphenated forms.
+    #[test]
+    fn style_underscore_keys_canonicalized() {
+        use crate::ast::PropertyValue;
+        let src = r##"zenith version=1 {
+  project id="proj.usk" name="USK"
+  tokens format="zenith-token-v1" {
+    token id="size.sw" type="dimension" value=(px)2
+  }
+  styles {
+    style id="style.usk" {
+      stroke_width (token)"size.sw"
+    }
+  }
+  document id="doc.usk" {
+    page id="page.usk" w=(px)100 h=(px)100 {
+    }
+  }
+}
+"##;
+        let adapter = KdlAdapter;
+        let doc = adapter.parse(src.as_bytes()).expect("parse");
+
+        let style = &doc.styles.styles[0];
+        assert!(
+            style.properties.contains_key("stroke-width"),
+            "stroke_width must be stored under canonical key stroke-width"
+        );
+        assert!(
+            !style.properties.contains_key("stroke_width"),
+            "underscore key must not appear in properties map"
+        );
+        assert_eq!(
+            style.properties.get("stroke-width"),
+            Some(&PropertyValue::TokenRef("size.sw".to_owned()))
+        );
+    }
+
+    /// Unknown style child names are captured in `unknown_props`.
+    #[test]
+    fn style_unknown_child_captured() {
+        let src = r##"zenith version=1 {
+  project id="proj.unk" name="UNK"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+    style id="style.unk" {
+      bogus "some-value"
+    }
+  }
+  document id="doc.unk" {
+    page id="page.unk" w=(px)100 h=(px)100 {
+    }
+  }
+}
+"##;
+        let adapter = KdlAdapter;
+        let doc = adapter.parse(src.as_bytes()).expect("parse");
+
+        let style = &doc.styles.styles[0];
+        assert!(style.properties.is_empty(), "no recognized props expected");
+        assert!(
+            style.unknown_props.contains_key("bogus"),
+            "unknown prop 'bogus' must be captured in unknown_props"
+        );
+    }
+
+    /// Parse → format → parse round-trips correctly (spans stripped for equality).
+    #[test]
+    fn styles_round_trip() {
+        let adapter = KdlAdapter;
+        let doc_orig = adapter
+            .parse(WITH_STYLES.as_bytes())
+            .expect("original parse");
+        let formatted = format_document(&doc_orig).expect("format");
+        let doc_reparsed = adapter.parse(&formatted).expect("re-parse after format");
+
+        let orig_stripped = strip_spans(doc_orig);
+        let reparsed_stripped = strip_spans(doc_reparsed);
+        assert_eq!(
+            orig_stripped.styles, reparsed_stripped.styles,
+            "styles must survive round-trip (spans excluded)"
+        );
+    }
+
+    /// Format twice → identical bytes (idempotency).
+    #[test]
+    fn styles_format_idempotent() {
+        let adapter = KdlAdapter;
+        let doc = adapter.parse(WITH_STYLES.as_bytes()).expect("parse");
+        let s1 = format_document(&doc).expect("format 1");
+        let doc2 = adapter.parse(&s1).expect("parse after first format");
+        let s2 = format_document(&doc2).expect("format 2");
+        assert_eq!(
+            String::from_utf8(s1).unwrap(),
+            String::from_utf8(s2).unwrap(),
+            "styles format must be idempotent"
         );
     }
 }

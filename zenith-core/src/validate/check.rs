@@ -26,6 +26,7 @@ use std::collections::{BTreeMap, HashSet};
 use crate::ast::asset::{AssetDecl, AssetKind};
 use crate::ast::document::Document;
 use crate::ast::node::{Node, PolygonNode, PolylineNode};
+use crate::ast::style::StyleBlock;
 use crate::ast::token::TokenType;
 use crate::ast::value::{PropertyValue, Unit};
 use crate::diagnostics::{Diagnostic, Severity};
@@ -73,6 +74,11 @@ pub fn validate(doc: &Document) -> ValidationReport {
     let declared_asset_ids: HashSet<String> =
         doc.assets.assets.iter().map(|d| d.id.clone()).collect();
 
+    // Declared style ids, collected once so the node walk can validate that
+    // every `style="..."` node attribute references a declared style.
+    let declared_style_ids: HashSet<String> =
+        doc.styles.styles.iter().map(|s| s.id.clone()).collect();
+
     // ── Token IDs ─────────────────────────────────────────────────────────
     for token in &doc.tokens.tokens {
         register_id(&token.id, &mut seen_ids, &mut diagnostics);
@@ -82,6 +88,14 @@ pub fn validate(doc: &Document) -> ValidationReport {
     for style in &doc.styles.styles {
         register_id(&style.id, &mut seen_ids, &mut diagnostics);
     }
+
+    // ── Style property validation ─────────────────────────────────────────
+    validate_style_block(
+        &doc.styles,
+        resolved_tokens,
+        &mut referenced_token_ids,
+        &mut diagnostics,
+    );
 
     // ── Asset IDs and per-declaration checks ──────────────────────────────
     for decl in &doc.assets.assets {
@@ -130,6 +144,7 @@ pub fn validate(doc: &Document) -> ValidationReport {
                 &mut referenced_token_ids,
                 resolved_tokens,
                 &declared_asset_ids,
+                &declared_style_ids,
                 &mut diagnostics,
             );
         }
@@ -174,11 +189,19 @@ fn walk_node(
     referenced_token_ids: &mut HashSet<String>,
     resolved_tokens: &BTreeMap<String, ResolvedToken>,
     declared_asset_ids: &HashSet<String>,
+    declared_style_ids: &HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match node {
         Node::Rect(r) => {
             register_id(&r.id, seen_ids, diagnostics);
+            check_style_ref(
+                &r.id,
+                r.style.as_deref(),
+                declared_style_ids,
+                r.source_span,
+                diagnostics,
+            );
 
             // Required geometry: x, y, w, h must all be present.
             check_optional_dim(&r.id, "x", r.x.as_ref(), r.source_span, diagnostics);
@@ -241,6 +264,13 @@ fn walk_node(
 
         Node::Ellipse(e) => {
             register_id(&e.id, seen_ids, diagnostics);
+            check_style_ref(
+                &e.id,
+                e.style.as_deref(),
+                declared_style_ids,
+                e.source_span,
+                diagnostics,
+            );
 
             // Required geometry: x, y, w, h must all be present.
             check_optional_dim(&e.id, "x", e.x.as_ref(), e.source_span, diagnostics);
@@ -276,6 +306,13 @@ fn walk_node(
 
         Node::Line(l) => {
             register_id(&l.id, seen_ids, diagnostics);
+            check_style_ref(
+                &l.id,
+                l.style.as_deref(),
+                declared_style_ids,
+                l.source_span,
+                diagnostics,
+            );
 
             // Required geometry: x1, y1, x2, y2 must all be present.
             check_optional_dim(&l.id, "x1", l.x1.as_ref(), l.source_span, diagnostics);
@@ -322,6 +359,13 @@ fn walk_node(
 
         Node::Text(t) => {
             register_id(&t.id, seen_ids, diagnostics);
+            check_style_ref(
+                &t.id,
+                t.style.as_deref(),
+                declared_style_ids,
+                t.source_span,
+                diagnostics,
+            );
 
             // Required geometry.
             check_optional_dim(&t.id, "x", t.x.as_ref(), t.source_span, diagnostics);
@@ -375,6 +419,13 @@ fn walk_node(
 
         Node::Frame(f) => {
             register_id(&f.id, seen_ids, diagnostics);
+            check_style_ref(
+                &f.id,
+                f.style.as_deref(),
+                declared_style_ids,
+                f.source_span,
+                diagnostics,
+            );
 
             // Frames REQUIRE all four geometry dimensions (unlike groups).
             check_optional_dim(&f.id, "x", f.x.as_ref(), f.source_span, diagnostics);
@@ -405,6 +456,7 @@ fn walk_node(
                     referenced_token_ids,
                     resolved_tokens,
                     declared_asset_ids,
+                    declared_style_ids,
                     diagnostics,
                 );
             }
@@ -412,6 +464,13 @@ fn walk_node(
 
         Node::Group(g) => {
             register_id(&g.id, seen_ids, diagnostics);
+            check_style_ref(
+                &g.id,
+                g.style.as_deref(),
+                declared_style_ids,
+                g.source_span,
+                diagnostics,
+            );
 
             // Groups have NO required geometry — x/y/w/h are all advisory.
 
@@ -438,6 +497,7 @@ fn walk_node(
                     referenced_token_ids,
                     resolved_tokens,
                     declared_asset_ids,
+                    declared_style_ids,
                     diagnostics,
                 );
             }
@@ -445,6 +505,13 @@ fn walk_node(
 
         Node::Image(img) => {
             register_id(&img.id, seen_ids, diagnostics);
+            check_style_ref(
+                &img.id,
+                img.style.as_deref(),
+                declared_style_ids,
+                img.source_span,
+                diagnostics,
+            );
 
             // Required geometry: x, y, w, h must all be present (mirror rect).
             check_optional_dim(&img.id, "x", img.x.as_ref(), img.source_span, diagnostics);
@@ -504,6 +571,7 @@ fn walk_node(
                 seen_ids,
                 referenced_token_ids,
                 resolved_tokens,
+                declared_style_ids,
                 diagnostics,
             );
         }
@@ -514,6 +582,7 @@ fn walk_node(
                 seen_ids,
                 referenced_token_ids,
                 resolved_tokens,
+                declared_style_ids,
                 diagnostics,
             );
         }
@@ -541,9 +610,17 @@ fn check_polygon(
     seen_ids: &mut HashSet<String>,
     referenced_token_ids: &mut HashSet<String>,
     resolved_tokens: &BTreeMap<String, ResolvedToken>,
+    declared_style_ids: &HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     register_id(&poly.id, seen_ids, diagnostics);
+    check_style_ref(
+        &poly.id,
+        poly.style.as_deref(),
+        declared_style_ids,
+        poly.source_span,
+        diagnostics,
+    );
 
     // Validate each point's x and y (both must be present with a known unit).
     for (idx, pt) in poly.points.iter().enumerate() {
@@ -645,9 +722,17 @@ fn check_polyline(
     seen_ids: &mut HashSet<String>,
     referenced_token_ids: &mut HashSet<String>,
     resolved_tokens: &BTreeMap<String, ResolvedToken>,
+    declared_style_ids: &HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     register_id(&poly.id, seen_ids, diagnostics);
+    check_style_ref(
+        &poly.id,
+        poly.style.as_deref(),
+        declared_style_ids,
+        poly.source_span,
+        diagnostics,
+    );
 
     // Validate each point's x and y.
     for (idx, pt) in poly.points.iter().enumerate() {
@@ -971,6 +1056,98 @@ fn validate_asset_decl(decl: &AssetDecl, diagnostics: &mut Vec<Diagnostic>) {
             decl.source_span,
             Some(decl.id.clone()),
         ));
+    }
+}
+
+// ── Style helpers ─────────────────────────────────────────────────────────────
+
+/// Check that a node's `style` attribute references a declared style id.
+///
+/// Called for every node kind that carries a `style` field.
+fn check_style_ref(
+    node_id: &str,
+    style_opt: Option<&str>,
+    declared_style_ids: &HashSet<String>,
+    span: Option<crate::ast::Span>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(sid) = style_opt
+        && !declared_style_ids.contains(sid)
+    {
+        diagnostics.push(Diagnostic::error(
+            "style.unknown_reference",
+            format!(
+                "node '{}': references style '{}' which is not declared in the styles block",
+                node_id, sid
+            ),
+            span,
+            Some(node_id.to_owned()),
+        ));
+    }
+}
+
+/// Validate the contents of the `styles` block:
+/// - Each `(key, value)` in `Style.properties` is type-checked against the
+///   expected token category and tracked as a token reference.
+/// - Each entry in `Style.unknown_props` produces a `style.unknown_property`
+///   Warning.
+fn validate_style_block(
+    block: &StyleBlock,
+    resolved_tokens: &BTreeMap<String, ResolvedToken>,
+    referenced_token_ids: &mut HashSet<String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for style in &block.styles {
+        // Check recognized properties.
+        for (key, value) in &style.properties {
+            let expect = style_prop_expect(key);
+            if let Some(expect) = expect {
+                check_visual_prop(
+                    &style.id,
+                    key,
+                    Some(value),
+                    expect,
+                    referenced_token_ids,
+                    resolved_tokens,
+                    diagnostics,
+                );
+            } else {
+                // stroke-alignment and font-weight: no strict type check;
+                // still track token refs so they count as used.
+                if let PropertyValue::TokenRef(tid) = value {
+                    referenced_token_ids.insert(tid.clone());
+                }
+            }
+        }
+
+        // Warn on unknown properties.
+        for prop_name in style.unknown_props.keys() {
+            diagnostics.push(Diagnostic::warning(
+                "style.unknown_property",
+                format!(
+                    "style '{}': unknown property '{}' (not a recognized visual property; \
+                     this property will not be applied to nodes that reference this style)",
+                    style.id, prop_name
+                ),
+                style.source_span,
+                Some(style.id.clone()),
+            ));
+        }
+    }
+}
+
+/// Map a canonical style property key to its expected token type.
+///
+/// Returns `None` for keys that have no strict type expectation in v0
+/// (`stroke-alignment`, `font-weight`).
+fn style_prop_expect(key: &str) -> Option<VisualExpect> {
+    match key {
+        "fill" | "stroke" => Some(VisualExpect::Color),
+        "stroke-width" | "font-size" | "line-height" | "radius" => Some(VisualExpect::Dimension),
+        "font-family" => Some(VisualExpect::FontFamily),
+        // stroke-alignment: plain enum string, not type-checked.
+        // font-weight: fontWeight token type — no VisualExpect variant for it; skip check.
+        _ => None,
     }
 }
 
@@ -2769,5 +2946,165 @@ mod tests {
             .expect("must exist");
         assert_eq!(diag.severity, Severity::Warning);
         assert!(!report.has_errors());
+    }
+
+    // ── Style validation tests ─────────────────────────────────────────────
+
+    use crate::ast::style::{Style, UnknownStyleProp};
+
+    fn doc_with_styles(tokens: Vec<Token>, styles: Vec<Style>, pages: Vec<Page>) -> Document {
+        Document {
+            version: 1,
+            project: None,
+            assets: AssetBlock::default(),
+            tokens: TokenBlock {
+                format: "zenith-token-v1".to_owned(),
+                tokens,
+            },
+            styles: StyleBlock {
+                styles,
+                source_span: None,
+            },
+            body: DocumentBody {
+                id: "doc.main".to_owned(),
+                title: None,
+                pages,
+            },
+        }
+    }
+
+    fn style_with_props(id: &str, props: Vec<(&str, PropertyValue)>) -> Style {
+        Style {
+            id: id.to_owned(),
+            properties: props.into_iter().map(|(k, v)| (k.to_owned(), v)).collect(),
+            unknown_props: BTreeMap::new(),
+            source_span: None,
+        }
+    }
+
+    /// A node that references a non-declared style id → `style.unknown_reference` error.
+    #[test]
+    fn node_unknown_style_reference() {
+        let rect = match minimal_rect("rect.one", None) {
+            Node::Rect(mut r) => {
+                r.style = Some("style.missing".to_owned());
+                Node::Rect(r)
+            }
+            other => other,
+        };
+        let doc = doc_with_styles(
+            vec![],
+            vec![], // no styles declared
+            vec![minimal_page("page.one", vec![rect])],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "style.unknown_reference"),
+            "expected style.unknown_reference; codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    /// A style property that references a missing token → `token.unknown_reference` error.
+    #[test]
+    fn style_prop_unknown_token() {
+        let style = style_with_props(
+            "style.s",
+            vec![("fill", PropertyValue::TokenRef("color.missing".to_owned()))],
+        );
+        let doc = doc_with_styles(
+            vec![], // no tokens declared
+            vec![style],
+            vec![minimal_page("page.one", vec![])],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "token.unknown_reference"),
+            "expected token.unknown_reference; codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    /// A style property with a raw literal → `token.raw_visual_literal` error.
+    #[test]
+    fn style_raw_literal_fill() {
+        let style = style_with_props(
+            "style.s",
+            vec![("fill", PropertyValue::Literal("#ff0000".to_owned()))],
+        );
+        let doc = doc_with_styles(vec![], vec![style], vec![minimal_page("page.one", vec![])]);
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "token.raw_visual_literal"),
+            "expected token.raw_visual_literal; codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    /// Unknown style property children → `style.unknown_property` warning.
+    #[test]
+    fn style_unknown_property_warns() {
+        let style = Style {
+            id: "style.s".to_owned(),
+            properties: BTreeMap::new(),
+            unknown_props: {
+                let mut m = BTreeMap::new();
+                m.insert(
+                    "bogus-prop".to_owned(),
+                    UnknownStyleProp {
+                        raw: "whatever".to_owned(),
+                    },
+                );
+                m
+            },
+            source_span: None,
+        };
+        let doc = doc_with_styles(vec![], vec![style], vec![minimal_page("page.one", vec![])]);
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "style.unknown_property"),
+            "expected style.unknown_property warning; codes: {:?}",
+            codes(&report)
+        );
+        let diag = report
+            .diagnostics
+            .iter()
+            .find(|d| d.code == "style.unknown_property")
+            .expect("must exist");
+        assert_eq!(diag.severity, Severity::Warning);
+        assert!(
+            !report.has_errors(),
+            "unknown prop must only warn, not error"
+        );
+    }
+
+    /// A token referenced ONLY by a style (not by any node) must NOT be flagged `token.unused`.
+    #[test]
+    fn token_used_only_by_style_not_unused() {
+        let style = style_with_props(
+            "style.s",
+            vec![("fill", PropertyValue::TokenRef("color.used".to_owned()))],
+        );
+        let doc = doc_with_styles(
+            vec![color_token("color.used")],
+            vec![style],
+            // No nodes reference color.used — only the style does.
+            vec![minimal_page("page.one", vec![])],
+        );
+        let report = validate(&doc);
+        // Should NOT contain token.unused for color.used.
+        let unused: Vec<_> = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "token.unused")
+            .collect();
+        assert!(
+            unused.is_empty(),
+            "token referenced by style must not be flagged token.unused; codes: {:?}",
+            codes(&report)
+        );
     }
 }

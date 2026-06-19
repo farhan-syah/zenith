@@ -20,8 +20,9 @@ pub use asset::{AssetData, AssetProvider, BytesAssetProvider};
 pub use ast::{
     AssetBlock, AssetDecl, AssetKind, Dimension, Document, DocumentBody, EllipseNode, FrameNode,
     GroupNode, ImageNode, LineNode, Node, ObjectPosition, Page, Point, PolygonNode, PolylineNode,
-    Project, PropertyValue, RectNode, Span, StyleBlock, TextNode, TextSpan, Token, TokenBlock,
-    TokenLiteral, TokenType, TokenValue, Unit, UnknownNode, UnknownProperty, UnknownValue,
+    Project, PropertyValue, RectNode, Span, Style, StyleBlock, TextNode, TextSpan, Token,
+    TokenBlock, TokenLiteral, TokenType, TokenValue, Unit, UnknownNode, UnknownProperty,
+    UnknownStyleProp, UnknownValue,
 };
 pub use diagnostics::{Diagnostic, Severity};
 pub use error::{FormatError, ParseError, ParseErrorCode};

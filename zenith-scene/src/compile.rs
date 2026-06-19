@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use zenith_core::{
     Diagnostic, Document, FontProvider, FontStyle, FrameNode, GroupNode, ImageNode, Node,
     ObjectPosition, Point, PolygonNode, PolylineNode, PropertyValue, ResolvedToken, ResolvedValue,
-    Span, Unit, resolve_tokens,
+    Span, Style, Unit, resolve_tokens,
 };
 use zenith_layout::{RustybuzzEngine, ShapeRequest, TextLayoutEngine};
 
@@ -61,6 +61,21 @@ pub struct CompileResult {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
+// ── Style cascade helper ──────────────────────────────────────────────────────
+
+/// Look up a style property value by (style_ref, style_map, key).
+///
+/// Returns `None` when there is no style reference, the style id is not in the
+/// map, or the style does not carry the requested key.
+fn style_prop<'a>(
+    style_ref: &Option<String>,
+    style_map: &'a BTreeMap<&str, &Style>,
+    key: &str,
+) -> Option<&'a PropertyValue> {
+    let sid = style_ref.as_deref()?;
+    style_map.get(sid)?.properties.get(key)
+}
+
 /// Compile `doc` into a [`CompileResult`], using `fonts` to shape text nodes.
 ///
 /// Only the first page is compiled.  If the document has no pages an empty
@@ -81,6 +96,14 @@ pub fn compile(doc: &Document, fonts: &dyn FontProvider) -> CompileResult {
     let token_resolution = resolve_tokens(&doc.tokens);
     diagnostics.extend(token_resolution.diagnostics);
     let resolved = &token_resolution.resolved;
+
+    // ── Step 1b: build style lookup map ──────────────────────────────────
+    let style_map: BTreeMap<&str, &Style> = doc
+        .styles
+        .styles
+        .iter()
+        .map(|s| (s.id.as_str(), s))
+        .collect();
 
     // ── Step 2: select the first page ────────────────────────────────────
     let Some(page) = doc.body.pages.first() else {
@@ -163,6 +186,7 @@ pub fn compile(doc: &Document, fonts: &dyn FontProvider) -> CompileResult {
         compile_node(
             node,
             resolved,
+            &style_map,
             fonts,
             &engine,
             &mut scene.commands,
@@ -179,9 +203,11 @@ pub fn compile(doc: &Document, fonts: &dyn FontProvider) -> CompileResult {
 
 // ── Node dispatch ─────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn compile_node(
     node: &Node,
     resolved: &BTreeMap<String, ResolvedToken>,
+    style_map: &BTreeMap<&str, &Style>,
     fonts: &dyn FontProvider,
     engine: &RustybuzzEngine,
     commands: &mut Vec<SceneCommand>,
@@ -254,8 +280,12 @@ fn compile_node(
             let x = x_raw + ctx.dx;
             let y = y_raw + ctx.dy;
 
-            // Resolve fill color.
-            let Some(fill_prop) = &rect.fill else {
+            // Resolve fill color — node-local prop overrides style cascade.
+            let fill_prop = rect
+                .fill
+                .as_ref()
+                .or_else(|| style_prop(&rect.style, style_map, "fill"));
+            let Some(fill_prop) = fill_prop else {
                 // No fill → nothing to draw for a fill-only skeleton.
                 return;
             };
@@ -337,8 +367,12 @@ fn compile_node(
             let x = x_raw + ctx.dx;
             let y = y_raw + ctx.dy;
 
-            // Resolve fill color.
-            let Some(fill_prop) = &ellipse.fill else {
+            // Resolve fill color — node-local prop overrides style cascade.
+            let fill_prop = ellipse
+                .fill
+                .as_ref()
+                .or_else(|| style_prop(&ellipse.style, style_map, "fill"));
+            let Some(fill_prop) = fill_prop else {
                 // No fill → nothing to draw for a fill-only primitive.
                 return;
             };
@@ -404,9 +438,13 @@ fn compile_node(
                 return;
             }
 
-            // Resolve font family.
-            // Priority: font_family property → default "Noto Sans".
-            let family_name: String = match &text.font_family {
+            // Resolve font family with style cascade.
+            // Priority: node-local font_family → style font-family → default "Noto Sans".
+            let font_family_prop = text
+                .font_family
+                .as_ref()
+                .or_else(|| style_prop(&text.style, style_map, "font-family"));
+            let family_name: String = match font_family_prop {
                 Some(PropertyValue::TokenRef(token_id)) => match resolved.get(token_id.as_str()) {
                     Some(rt) => match &rt.value {
                         ResolvedValue::FontFamily(name) => name.clone(),
@@ -419,14 +457,20 @@ fn compile_node(
             };
             let families = vec![family_name];
 
-            // Resolve font size in pixels; default to 16.0 if absent.
+            // Resolve font size in pixels with style cascade; default to 16.0 if absent.
+            let font_size_prop = text
+                .font_size
+                .clone()
+                .or_else(|| style_prop(&text.style, style_map, "font-size").cloned());
             let font_size: f32 =
-                resolve_property_dimension_px(&text.font_size, resolved, 16.0) as f32;
+                resolve_property_dimension_px(&font_size_prop, resolved, 16.0) as f32;
 
-            // Resolve fill color; default to opaque black.
-            let mut color = text
+            // Resolve fill color with style cascade; default to opaque black.
+            let fill_prop = text
                 .fill
                 .as_ref()
+                .or_else(|| style_prop(&text.style, style_map, "fill"));
+            let mut color = fill_prop
                 .and_then(|fp| resolve_property_color(fp, resolved, diagnostics, &text.id))
                 .unwrap_or(Color {
                     r: 0,
@@ -550,7 +594,12 @@ fn compile_node(
             let y2 = y2_raw + ctx.dy;
 
             // Stroke is optional in validation, but a stroke-less line draws nothing.
-            let Some(stroke_prop) = &line.stroke else {
+            // Cascade: node-local stroke overrides style stroke.
+            let stroke_prop = line
+                .stroke
+                .as_ref()
+                .or_else(|| style_prop(&line.style, style_map, "stroke"));
+            let Some(stroke_prop) = stroke_prop else {
                 return;
             };
             let Some(mut color) =
@@ -563,9 +612,12 @@ fn compile_node(
             let node_opacity = line.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
             color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
 
-            // Resolve stroke_width to px; default 1.0 when absent.
-            let stroke_width: f64 =
-                resolve_property_dimension_px(&line.stroke_width, resolved, 1.0);
+            // Resolve stroke_width to px with style cascade; default 1.0 when absent.
+            let sw = line
+                .stroke_width
+                .clone()
+                .or_else(|| style_prop(&line.style, style_map, "stroke-width").cloned());
+            let stroke_width: f64 = resolve_property_dimension_px(&sw, resolved, 1.0);
 
             commands.push(SceneCommand::StrokeLine {
                 x1,
@@ -578,11 +630,29 @@ fn compile_node(
         }
 
         Node::Frame(frame) => {
-            compile_frame(frame, resolved, fonts, engine, commands, diagnostics, ctx);
+            compile_frame(
+                frame,
+                resolved,
+                style_map,
+                fonts,
+                engine,
+                commands,
+                diagnostics,
+                ctx,
+            );
         }
 
         Node::Group(group) => {
-            compile_group(group, resolved, fonts, engine, commands, diagnostics, ctx);
+            compile_group(
+                group,
+                resolved,
+                style_map,
+                fonts,
+                engine,
+                commands,
+                diagnostics,
+                ctx,
+            );
         }
 
         Node::Image(image) => {
@@ -590,11 +660,11 @@ fn compile_node(
         }
 
         Node::Polygon(poly) => {
-            compile_polygon(poly, resolved, commands, diagnostics, ctx);
+            compile_polygon(poly, resolved, style_map, commands, diagnostics, ctx);
         }
 
         Node::Polyline(poly) => {
-            compile_polyline(poly, resolved, commands, diagnostics, ctx);
+            compile_polyline(poly, resolved, style_map, commands, diagnostics, ctx);
         }
 
         Node::Unknown(unknown) => {
@@ -614,9 +684,11 @@ fn compile_node(
 
 // NOTE: compile_frame → compile_node → compile_frame recursion has no depth
 // guard, consistent with the compile_group limitation in v0.
+#[allow(clippy::too_many_arguments)]
 fn compile_frame(
     frame: &FrameNode,
     resolved: &BTreeMap<String, ResolvedToken>,
+    style_map: &BTreeMap<&str, &Style>,
     fonts: &dyn FontProvider,
     engine: &RustybuzzEngine,
     commands: &mut Vec<SceneCommand>,
@@ -704,6 +776,7 @@ fn compile_frame(
         compile_node(
             child,
             resolved,
+            style_map,
             fonts,
             engine,
             commands,
@@ -719,9 +792,11 @@ fn compile_frame(
 // NOTE: compile_group → compile_node → compile_group recursion has no depth
 // guard.  Pathologically deep group trees can overflow the stack.  This is a
 // known v0 limitation; a guard will be added when nested documents are tested.
+#[allow(clippy::too_many_arguments)]
 fn compile_group(
     group: &GroupNode,
     resolved: &BTreeMap<String, ResolvedToken>,
+    style_map: &BTreeMap<&str, &Style>,
     fonts: &dyn FontProvider,
     engine: &RustybuzzEngine,
     commands: &mut Vec<SceneCommand>,
@@ -765,6 +840,7 @@ fn compile_group(
         compile_node(
             child,
             resolved,
+            style_map,
             fonts,
             engine,
             commands,
@@ -944,6 +1020,7 @@ fn resolve_flat_points(
 fn compile_polygon(
     poly: &PolygonNode,
     resolved: &BTreeMap<String, ResolvedToken>,
+    style_map: &BTreeMap<&str, &Style>,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
     ctx: RenderCtx,
@@ -972,8 +1049,12 @@ fn compile_polygon(
     let node_opacity = poly.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
     let even_odd = poly.fill_rule.as_deref() == Some("evenodd");
 
-    // FILL (drawn first, stroke on top).
-    if let Some(fill_prop) = &poly.fill
+    // FILL (drawn first, stroke on top) — node-local overrides style cascade.
+    let fill_prop = poly
+        .fill
+        .as_ref()
+        .or_else(|| style_prop(&poly.style, style_map, "fill"));
+    if let Some(fill_prop) = fill_prop
         && let Some(mut color) = resolve_property_color(fill_prop, resolved, diagnostics, &poly.id)
     {
         color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
@@ -984,13 +1065,21 @@ fn compile_polygon(
         });
     }
 
-    // STROKE (drawn on top of fill).
-    if let Some(stroke_prop) = &poly.stroke
+    // STROKE (drawn on top of fill) — node-local overrides style cascade.
+    let stroke_prop = poly
+        .stroke
+        .as_ref()
+        .or_else(|| style_prop(&poly.style, style_map, "stroke"));
+    if let Some(stroke_prop) = stroke_prop
         && let Some(mut color) =
             resolve_property_color(stroke_prop, resolved, diagnostics, &poly.id)
     {
         color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
-        let stroke_width = resolve_property_dimension_px(&poly.stroke_width, resolved, 1.0);
+        let sw = poly
+            .stroke_width
+            .clone()
+            .or_else(|| style_prop(&poly.style, style_map, "stroke-width").cloned());
+        let stroke_width = resolve_property_dimension_px(&sw, resolved, 1.0);
         commands.push(SceneCommand::StrokePolyline {
             points: flat_points,
             color,
@@ -1010,6 +1099,7 @@ fn compile_polygon(
 fn compile_polyline(
     poly: &PolylineNode,
     resolved: &BTreeMap<String, ResolvedToken>,
+    style_map: &BTreeMap<&str, &Style>,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
     ctx: RenderCtx,
@@ -1038,8 +1128,12 @@ fn compile_polyline(
     let node_opacity = poly.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
     let even_odd = poly.fill_rule.as_deref() == Some("evenodd");
 
-    // FILL (drawn first; FillPolygon renderer closes the path).
-    if let Some(fill_prop) = &poly.fill
+    // FILL (drawn first; FillPolygon renderer closes the path) — style cascade.
+    let fill_prop = poly
+        .fill
+        .as_ref()
+        .or_else(|| style_prop(&poly.style, style_map, "fill"));
+    if let Some(fill_prop) = fill_prop
         && let Some(mut color) = resolve_property_color(fill_prop, resolved, diagnostics, &poly.id)
     {
         color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
@@ -1050,13 +1144,21 @@ fn compile_polyline(
         });
     }
 
-    // STROKE — open path (closed: false).
-    if let Some(stroke_prop) = &poly.stroke
+    // STROKE — open path (closed: false) — style cascade.
+    let stroke_prop = poly
+        .stroke
+        .as_ref()
+        .or_else(|| style_prop(&poly.style, style_map, "stroke"));
+    if let Some(stroke_prop) = stroke_prop
         && let Some(mut color) =
             resolve_property_color(stroke_prop, resolved, diagnostics, &poly.id)
     {
         color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
-        let stroke_width = resolve_property_dimension_px(&poly.stroke_width, resolved, 1.0);
+        let sw = poly
+            .stroke_width
+            .clone()
+            .or_else(|| style_prop(&poly.style, style_map, "stroke-width").cloned());
+        let stroke_width = resolve_property_dimension_px(&sw, resolved, 1.0);
         commands.push(SceneCommand::StrokePolyline {
             points: flat_points,
             color,
@@ -2821,5 +2923,209 @@ mod tests {
             fill_a.map(|a| (a as i32 - 128).abs() <= 1).unwrap_or(false),
             "cascaded opacity 0.5 must halve fill alpha to ≈128; got {fill_a:?}"
         );
+    }
+
+    // ── Style cascade tests ───────────────────────────────────────────────
+
+    /// A rect with no local fill but a style that provides fill → FillRect emitted.
+    #[test]
+    fn rect_inherits_fill_from_style() {
+        let src = r##"zenith version=1 {
+  project id="proj.sc1" name="SC1"
+  tokens format="zenith-token-v1" {
+    token id="color.panel" type="color" value="#3b82f6"
+  }
+  styles {
+    style id="style.panel" {
+      fill (token)"color.panel"
+    }
+  }
+  document id="doc.sc1" title="SC1" {
+    page id="page.sc1" w=(px)320 h=(px)200 {
+      rect id="rect.sc1" x=(px)0 y=(px)0 w=(px)100 h=(px)100 style="style.panel"
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+
+        // PushClip, FillRect (from style fill), PopClip
+        let cmds = &result.scene.commands;
+        assert_eq!(cmds.len(), 3, "expected 3 commands; got: {:?}", cmds);
+
+        match &cmds[1] {
+            SceneCommand::FillRect { color, .. } => {
+                // #3b82f6 → r=0x3b=59, g=0x82=130, b=0xf6=246
+                assert_eq!(color.r, 0x3b, "r must be 0x3b from style fill");
+                assert_eq!(color.g, 0x82, "g must be 0x82 from style fill");
+                assert_eq!(color.b, 0xf6, "b must be 0xf6 from style fill");
+            }
+            other => panic!("expected FillRect from style cascade, got {other:?}"),
+        }
+    }
+
+    /// A rect with BOTH local fill AND a style fill → local fill wins.
+    #[test]
+    fn node_local_fill_overrides_style() {
+        let src = r##"zenith version=1 {
+  project id="proj.sc2" name="SC2"
+  tokens format="zenith-token-v1" {
+    token id="color.style" type="color" value="#ff0000"
+    token id="color.local" type="color" value="#00ff00"
+  }
+  styles {
+    style id="style.red" {
+      fill (token)"color.style"
+    }
+  }
+  document id="doc.sc2" title="SC2" {
+    page id="page.sc2" w=(px)320 h=(px)200 {
+      rect id="rect.sc2" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fill=(token)"color.local" style="style.red"
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+
+        let cmds = &result.scene.commands;
+        assert_eq!(cmds.len(), 3, "expected 3 commands; got: {:?}", cmds);
+
+        match &cmds[1] {
+            SceneCommand::FillRect { color, .. } => {
+                // Must be local (green #00ff00), NOT the style (red #ff0000).
+                assert_eq!(color.r, 0x00, "local fill r=0 must override style r=255");
+                assert_eq!(color.g, 0xff, "local fill g=255 must override style g=0");
+                assert_eq!(color.b, 0x00, "local fill b=0 must override style b=0");
+            }
+            other => panic!("expected FillRect with local color, got {other:?}"),
+        }
+    }
+
+    /// A text node with style providing font-size → DrawGlyphRun uses the style size.
+    #[test]
+    fn text_inherits_font_from_style() {
+        let src = r##"zenith version=1 {
+  project id="proj.sc3" name="SC3"
+  tokens format="zenith-token-v1" {
+    token id="color.ink" type="color" value="#111827"
+    token id="size.title" type="dimension" value=(px)32
+  }
+  styles {
+    style id="style.title" {
+      fill (token)"color.ink"
+      font-size (token)"size.title"
+    }
+  }
+  document id="doc.sc3" title="SC3" {
+    page id="page.sc3" w=(px)640 h=(px)360 {
+      text id="text.sc3" x=(px)10 y=(px)20 w=(px)400 h=(px)50 style="style.title" {
+        span "Hello"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        let unshaped: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "scene.text_unshaped")
+            .collect();
+        assert!(
+            unshaped.is_empty(),
+            "no text_unshaped diagnostics expected; got: {:?}",
+            result.diagnostics
+        );
+
+        let cmds = &result.scene.commands;
+        match cmds
+            .iter()
+            .find(|c| matches!(c, SceneCommand::DrawGlyphRun { .. }))
+        {
+            Some(SceneCommand::DrawGlyphRun {
+                font_size, color, ..
+            }) => {
+                assert_eq!(*font_size, 32.0, "font_size must be 32px from style");
+                assert_eq!(
+                    color.r, 0x11,
+                    "fill must come from style (color.ink r=0x11)"
+                );
+            }
+            _ => panic!("expected DrawGlyphRun from style cascade"),
+        }
+    }
+
+    /// A polygon with no local fill/stroke but a style providing both → both emitted.
+    #[test]
+    fn polygon_inherits_stroke_from_style() {
+        let src = r##"zenith version=1 {
+  project id="proj.sc4" name="SC4"
+  tokens format="zenith-token-v1" {
+    token id="color.stroke" type="color" value="#ef4444"
+    token id="size.sw" type="dimension" value=(px)2
+  }
+  styles {
+    style id="style.outlined" {
+      stroke (token)"color.stroke"
+      stroke-width (token)"size.sw"
+    }
+  }
+  document id="doc.sc4" title="SC4" {
+    page id="page.sc4" w=(px)320 h=(px)200 {
+      polygon id="poly.sc4" style="style.outlined" {
+        point x=(px)50 y=(px)10
+        point x=(px)90 y=(px)90
+        point x=(px)10 y=(px)90
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+
+        // PushClip, StrokePolyline (no fill), PopClip
+        let cmds = &result.scene.commands;
+        assert_eq!(cmds.len(), 3, "expected 3 commands; got: {:?}", cmds);
+
+        match &cmds[1] {
+            SceneCommand::StrokePolyline {
+                color,
+                stroke_width,
+                closed,
+                ..
+            } => {
+                // #ef4444 → r=0xef=239
+                assert_eq!(color.r, 0xef, "stroke r must be 0xef from style");
+                assert!(
+                    (*stroke_width - 2.0).abs() < 0.01,
+                    "stroke-width must be 2px from style"
+                );
+                assert!(closed, "polygon stroke must be closed");
+            }
+            other => panic!("expected StrokePolyline from style cascade, got {other:?}"),
+        }
     }
 }

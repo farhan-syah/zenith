@@ -90,3 +90,8 @@ fn polyline_zen_renders_to_valid_png() {
 fn star_zen_renders_to_valid_png() {
     assert_example_renders("star");
 }
+
+#[test]
+fn styled_zen_renders_to_valid_png() {
+    assert_example_renders("styled");
+}

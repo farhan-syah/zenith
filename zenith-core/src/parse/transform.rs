@@ -16,7 +16,7 @@ use crate::ast::{
         PolygonNode, PolylineNode, RectNode, TextNode, TextSpan, UnknownNode, UnknownProperty,
         UnknownValue,
     },
-    style::{Style, StyleBlock},
+    style::{Style, StyleBlock, UnknownStyleProp},
     token::{Token, TokenBlock, TokenLiteral, TokenType, TokenValue},
     value::{Dimension, PropertyValue, Unit},
 };
@@ -500,17 +500,97 @@ fn transform_token(node: &KdlNode) -> Result<Token, ParseError> {
 // Styles
 // ---------------------------------------------------------------------------
 
+/// Canonical hyphenated keys for recognized style visual properties.
+///
+/// Underscore variants are normalized to these forms during parsing.
+const STYLE_RECOGNIZED_KEYS: &[&str] = &[
+    "fill",
+    "stroke",
+    "stroke-width",
+    "stroke-alignment",
+    "font-family",
+    "font-size",
+    "font-weight",
+    "line-height",
+    "radius",
+];
+
+/// Map underscore-spelled style child names to their canonical hyphenated form.
+///
+/// Returns `None` if the name is not in the recognized set (after
+/// normalization).
+fn canonicalize_style_key(name: &str) -> Option<&'static str> {
+    // Normalize underscore to hyphen for comparison.
+    let normalized: &str = match name {
+        "stroke_width" => "stroke-width",
+        "stroke_alignment" => "stroke-alignment",
+        "font_family" => "font-family",
+        "font_size" => "font-size",
+        "font_weight" => "font-weight",
+        "line_height" => "line-height",
+        other => other,
+    };
+    STYLE_RECOGNIZED_KEYS
+        .iter()
+        .copied()
+        .find(|&k| k == normalized)
+}
+
 fn transform_styles(node: &KdlNode) -> Result<StyleBlock, ParseError> {
+    let source_span = node_span(node);
     let mut style_list: Vec<Style> = Vec::new();
+
     if let Some(children) = node.children() {
         for child in children.nodes() {
             if child.name().value() == "style" {
                 let id = required_string_prop(child, "id")?.to_owned();
-                style_list.push(Style { id });
+                let style_source_span = node_span(child);
+
+                let mut properties: BTreeMap<String, PropertyValue> = BTreeMap::new();
+                let mut unknown_props: BTreeMap<String, UnknownStyleProp> = BTreeMap::new();
+
+                // Each child node of the `style` node is a property declaration.
+                // Its NAME is the property key; its FIRST positional argument
+                // is the value (e.g. `fill (token)"color.text.primary"`).
+                if let Some(prop_nodes) = child.children() {
+                    for prop_node in prop_nodes.nodes() {
+                        let prop_name = prop_node.name().value();
+                        if let Some(canonical) = canonicalize_style_key(prop_name) {
+                            // Read the first positional (unnamed) entry as a PropertyValue.
+                            let first_positional =
+                                prop_node.entries().iter().find(|e| e.name().is_none());
+                            if let Some(entry) = first_positional
+                                && let Ok(pv) = entry_to_property_value(entry)
+                            {
+                                properties.insert(canonical.to_owned(), pv);
+                            }
+                        } else {
+                            // Unrecognized property: preserve for validator warnings.
+                            let raw = prop_node
+                                .entries()
+                                .iter()
+                                .find(|e| e.name().is_none())
+                                .map(|e| kdl_value_to_literal_string(e.value()))
+                                .unwrap_or_default();
+                            unknown_props.insert(prop_name.to_owned(), UnknownStyleProp { raw });
+                        }
+                    }
+                }
+
+                style_list.push(Style {
+                    id,
+                    properties,
+                    unknown_props,
+                    source_span: style_source_span,
+                });
             }
         }
     }
-    Ok(StyleBlock { styles: style_list })
+
+    Ok(StyleBlock {
+        styles: style_list,
+        source_span,
+    })
 }
 
 // ---------------------------------------------------------------------------

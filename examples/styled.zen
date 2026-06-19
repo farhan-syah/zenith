@@ -1,0 +1,29 @@
+zenith version=1 {
+  project id="proj.styled" name="Styled Example"
+  tokens format="zenith-token-v1" {
+    token id="color.surface.panel" type="color" value="#f1f5f9"
+    token id="color.rule.muted" type="color" value="#cbd5e1"
+    token id="color.text.primary" type="color" value="#1e293b"
+    token id="size.stroke.rule" type="dimension" value=(px)1
+    token id="size.text.title" type="dimension" value=(pt)20
+  }
+  styles {
+    style id="style.panel" {
+      fill (token)"color.surface.panel"
+      stroke (token)"color.rule.muted"
+      stroke-width (token)"size.stroke.rule"
+    }
+    style id="style.text.title" {
+      fill (token)"color.text.primary"
+      font-size (token)"size.text.title"
+    }
+  }
+  document id="doc.styled" title="Styled Example" {
+    page id="page.styled" w=(px)320 h=(px)200 {
+      rect id="panel.rect" x=(px)20 y=(px)20 w=(px)280 h=(px)160 style="style.panel"
+      text id="title.text" x=(px)40 y=(px)60 w=(px)240 h=(px)50 style="style.text.title" {
+        span "Styled Zenith"
+      }
+    }
+  }
+}

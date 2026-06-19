@@ -17,6 +17,6 @@ pub use node::{
     UnknownValue,
 };
 pub use span::Span;
-pub use style::{Style, StyleBlock};
+pub use style::{Style, StyleBlock, UnknownStyleProp};
 pub use token::{Token, TokenBlock, TokenLiteral, TokenType, TokenValue};
 pub use value::{Dimension, PropertyValue, Unit};
