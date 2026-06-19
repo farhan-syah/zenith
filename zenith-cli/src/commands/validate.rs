@@ -3,8 +3,11 @@
 //! The public entry point [`run`] operates entirely on in-memory source text;
 //! the caller is responsible for all filesystem I/O.
 
-use zenith_core::{KdlAdapter, KdlSource, validate};
+use std::path::Path;
 
+use zenith_core::{KdlAdapter, KdlSource, Severity, validate};
+
+use crate::commands::render::collect_missing_asset_diagnostics;
 use crate::commands::serialize_pretty;
 use crate::json_types::{DiagnosticJson, ValidateOutput};
 
@@ -23,11 +26,16 @@ pub struct CmdOutput {
 
 /// Validate `src` and return formatted output.
 ///
+/// When `project_dir` is `Some` (the `.zen` file's parent directory), each
+/// declared asset's file is checked for existence and a hard `asset.missing`
+/// Error diagnostic is added for any that are absent. When `None`, no asset
+/// files are checked.
+///
 /// - Parse errors produce `exit_code = 2`.
 /// - Documents with at least one error-severity diagnostic produce
 ///   `exit_code = 1`.
 /// - Clean documents produce `exit_code = 0`.
-pub fn run(src: &str, json: bool) -> CmdOutput {
+pub fn run(src: &str, project_dir: Option<&Path>, json: bool) -> CmdOutput {
     // Parse ─────────────────────────────────────────────────────────────────
     let doc = match KdlAdapter.parse(src.as_bytes()) {
         Ok(d) => d,
@@ -55,22 +63,21 @@ pub fn run(src: &str, json: bool) -> CmdOutput {
     };
 
     // Validate ───────────────────────────────────────────────────────────────
-    let report = validate(&doc);
-    let has_errors = report.has_errors();
+    let mut diagnostics = validate(&doc).diagnostics;
+    if let Some(dir) = project_dir {
+        diagnostics.extend(collect_missing_asset_diagnostics(&doc, dir));
+    }
+    let has_errors = diagnostics.iter().any(|d| d.severity == Severity::Error);
 
     let stdout = if json {
         let out = ValidateOutput {
             schema: "zenith-validate-v1",
             valid: !has_errors,
-            diagnostics: report
-                .diagnostics
-                .iter()
-                .map(DiagnosticJson::from)
-                .collect(),
+            diagnostics: diagnostics.iter().map(DiagnosticJson::from).collect(),
         };
         serialize_pretty(&out)
     } else {
-        format_human(&report.diagnostics)
+        format_human(&diagnostics)
     };
 
     CmdOutput {
@@ -131,13 +138,13 @@ mod tests {
 
     #[test]
     fn valid_doc_exits_zero() {
-        let out = run(VALID_DOC, false);
+        let out = run(VALID_DOC, None, false);
         assert_eq!(out.exit_code, 0, "stdout: {}", out.stdout);
     }
 
     #[test]
     fn valid_doc_human_output_is_ok() {
-        let out = run(VALID_DOC, false);
+        let out = run(VALID_DOC, None, false);
         assert!(
             out.stdout.contains("ok"),
             "expected 'ok' in human output; got: {}",
@@ -147,13 +154,13 @@ mod tests {
 
     #[test]
     fn duplicate_id_exits_one() {
-        let out = run(DUP_ID_DOC, false);
+        let out = run(DUP_ID_DOC, None, false);
         assert_eq!(out.exit_code, 1, "stdout: {}", out.stdout);
     }
 
     #[test]
     fn duplicate_id_reports_id_duplicate_code() {
-        let out = run(DUP_ID_DOC, false);
+        let out = run(DUP_ID_DOC, None, false);
         assert!(
             out.stdout.contains("id.duplicate") || out.stdout.contains("token.duplicate_id"),
             "expected duplicate diagnostic code; got: {}",
@@ -163,7 +170,7 @@ mod tests {
 
     #[test]
     fn valid_doc_json_has_schema_field() {
-        let out = run(VALID_DOC, true);
+        let out = run(VALID_DOC, None, true);
         assert!(
             out.stdout.contains("zenith-validate-v1"),
             "JSON must contain schema field; got: {}",
@@ -173,7 +180,7 @@ mod tests {
 
     #[test]
     fn valid_doc_json_valid_true() {
-        let out = run(VALID_DOC, true);
+        let out = run(VALID_DOC, None, true);
         assert!(
             out.stdout.contains(r#""valid": true"#),
             "valid doc JSON must have valid=true; got: {}",
@@ -183,7 +190,7 @@ mod tests {
 
     #[test]
     fn parse_error_exits_two() {
-        let out = run("not kdl !!!{{{", false);
+        let out = run("not kdl !!!{{{", None, false);
         assert_eq!(out.exit_code, 2, "stdout: {}", out.stdout);
     }
 }

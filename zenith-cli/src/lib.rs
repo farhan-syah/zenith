@@ -44,7 +44,7 @@ pub fn run() -> ExitCode {
                     return ExitCode::from(2);
                 }
             };
-            let out = commands::validate::run(&src, args.json);
+            let out = commands::validate::run(&src, args.path.parent(), args.json);
             println!("{}", out.stdout);
             ExitCode::from(out.exit_code)
         }

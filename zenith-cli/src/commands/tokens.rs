@@ -60,6 +60,8 @@ fn token_type_str(tt: &zenith_core::TokenType) -> &'static str {
         zenith_core::TokenType::Number => "number",
         zenith_core::TokenType::FontFamily => "fontFamily",
         zenith_core::TokenType::FontWeight => "fontWeight",
+        zenith_core::TokenType::Gradient => "gradient",
+        zenith_core::TokenType::Shadow => "shadow",
         zenith_core::TokenType::Unknown(_) => "unknown",
     }
 }
@@ -82,6 +84,27 @@ fn resolved_value_str(rv: &ResolvedValue) -> String {
         ResolvedValue::Number(n) => n.to_string(),
         ResolvedValue::FontFamily(s) => s.clone(),
         ResolvedValue::FontWeight(w) => w.to_string(),
+        ResolvedValue::Gradient(g) => {
+            let stops: Vec<String> = g
+                .stops
+                .iter()
+                .map(|(offset, color_token)| format!("{offset}:{color_token}"))
+                .collect();
+            format!("linear-gradient({}deg, {})", g.angle_deg, stops.join(", "))
+        }
+        ResolvedValue::Shadow(s) => {
+            let layers: Vec<String> = s
+                .layers
+                .iter()
+                .map(|layer| {
+                    format!(
+                        "{}px {}px {}px {}",
+                        layer.dx, layer.dy, layer.blur, layer.color_token
+                    )
+                })
+                .collect();
+            format!("shadow({})", layers.join(", "))
+        }
     }
 }
 

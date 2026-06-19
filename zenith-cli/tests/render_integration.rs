@@ -194,3 +194,83 @@ fn unlocked_wrong_sha256_renders_ok() {
         result.err().map(|e| e.message)
     );
 }
+
+// ── asset.missing diagnostics ─────────────────────────────────────────────────
+
+/// A `.zen` document referencing an asset whose file does not exist under the
+/// project directory. The `src` points at a deterministic, never-present path
+/// inside `examples/`.
+fn missing_asset_doc() -> String {
+    r##"zenith version=1 {
+  project id="proj.missing" name="Missing Asset"
+  assets {
+    asset id="asset.absent" kind="image" src="assets/__zenith_does_not_exist__.png"
+  }
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#f8fafc"
+  }
+  styles {
+  }
+  document id="doc.missing" title="Missing Asset" {
+    page id="page.missing" w=(px)320 h=(px)200 background=(token)"color.bg" {
+      image id="img.absent" asset="asset.absent" x=(px)40 y=(px)40 w=(px)160 h=(px)120 fit="stretch"
+    }
+  }
+}
+"##
+    .to_owned()
+}
+
+#[test]
+fn render_missing_asset_yields_asset_missing_error_diagnostic() {
+    // Render still returns Ok (the artifact carries the Error); the lib.rs gate
+    // is what blocks the PNG write.
+    let src = missing_asset_doc();
+    let artifact = to_png_with_dir(&src, Some(&examples_dir()), 1, false)
+        .expect("render must not hard-fail; the missing asset is carried as a diagnostic");
+    let has_missing = artifact
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "asset.missing" && d.severity == zenith_core::Severity::Error);
+    assert!(
+        has_missing,
+        "artifact must carry an asset.missing Error diagnostic; got: {:?}",
+        artifact
+            .diagnostics
+            .iter()
+            .map(|d| d.code.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn validate_missing_asset_reports_error_exit_1() {
+    let src = missing_asset_doc();
+    let out = zenith_cli::commands::validate::run(&src, Some(&examples_dir()), false);
+    assert_eq!(
+        out.exit_code, 1,
+        "a missing asset must make validate report a hard error; stdout: {}",
+        out.stdout
+    );
+    assert!(
+        out.stdout.contains("asset.missing"),
+        "validate output must mention asset.missing; got: {}",
+        out.stdout
+    );
+}
+
+#[test]
+fn validate_missing_asset_json_reports_error() {
+    let src = missing_asset_doc();
+    let out = zenith_cli::commands::validate::run(&src, Some(&examples_dir()), true);
+    assert!(
+        out.stdout.contains("asset.missing"),
+        "validate --json output must include asset.missing; got: {}",
+        out.stdout
+    );
+    assert!(
+        out.stdout.contains(r#""valid": false"#),
+        "validate --json must mark the doc invalid; got: {}",
+        out.stdout
+    );
+}

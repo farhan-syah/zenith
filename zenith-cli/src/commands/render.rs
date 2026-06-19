@@ -88,10 +88,12 @@ pub fn to_scene_json(
         .scene
         .to_json()
         .map_err(|e| RenderCmdErr::new(format!("scene serialisation error: {e}"), 2))?;
-    Ok(SceneArtifact {
-        json,
-        diagnostics: compile_result.diagnostics,
-    })
+    let mut diagnostics = match project_dir {
+        Some(dir) => collect_missing_asset_diagnostics(&doc, dir),
+        None => Vec::new(),
+    };
+    diagnostics.extend(compile_result.diagnostics);
+    Ok(SceneArtifact { json, diagnostics })
 }
 
 /// Parse `src`, validate it, compile the scene, and return PNG bytes.
@@ -117,8 +119,9 @@ pub fn to_png(src: &str, page: usize) -> Result<PngArtifact, RenderCmdErr> {
 ///
 /// For each `image`- or `svg`-kind `AssetDecl`, the `src` is resolved relative
 /// to `project_dir` and read into a [`BytesAssetProvider`]. A read failure
-/// prints a warning and skips that asset (the node is then skipped at render
-/// time — never a panic). When `project_dir` is `None` no assets are loaded.
+/// silently skips that asset; the missing file is instead surfaced as a hard
+/// `asset.missing` Error diagnostic on the returned artifact (which trips the
+/// render gate). When `project_dir` is `None` no assets are loaded.
 ///
 /// When `locked` is set, every image and SVG asset's bytes are verified against
 /// their declared `sha256` and any mismatch, missing hash, or read failure is a
@@ -142,10 +145,12 @@ pub fn to_png_with_dir(
     let compile_result = compile_page(&doc, &fonts, page_index);
     let png = render_png(&compile_result.scene, &fonts, &assets)
         .map_err(|e| RenderCmdErr::new(format!("render error: {e}"), 2))?;
-    Ok(PngArtifact {
-        png,
-        diagnostics: compile_result.diagnostics,
-    })
+    let mut diagnostics = match project_dir {
+        Some(dir) => collect_missing_asset_diagnostics(&doc, dir),
+        None => Vec::new(),
+    };
+    diagnostics.extend(compile_result.diagnostics);
+    Ok(PngArtifact { png, diagnostics })
 }
 
 /// Parse `src`, validate it, and render EVERY page to PNG, returning one
@@ -171,15 +176,18 @@ pub fn to_png_all_pages(
         Some(dir) => build_asset_provider(&doc, dir, locked)?,
         None => BytesAssetProvider::new(),
     };
+    let missing = match project_dir {
+        Some(dir) => collect_missing_asset_diagnostics(&doc, dir),
+        None => Vec::new(),
+    };
     let mut artifacts = Vec::with_capacity(page_count);
     for page_index in 0..page_count {
         let compile_result = compile_page(&doc, &fonts, page_index);
         let png = render_png(&compile_result.scene, &fonts, &assets)
             .map_err(|e| RenderCmdErr::new(format!("render error on page {page_index}: {e}"), 2))?;
-        artifacts.push(PngArtifact {
-            png,
-            diagnostics: compile_result.diagnostics,
-        });
+        let mut diagnostics = missing.clone();
+        diagnostics.extend(compile_result.diagnostics);
+        artifacts.push(PngArtifact { png, diagnostics });
     }
     Ok(artifacts)
 }
@@ -196,8 +204,10 @@ pub fn to_png_all_pages(
 /// matches that family resolves to the actual face instead of falling back
 /// to Noto.
 ///
-/// Non-locked failures (unreadable file, unparseable font) emit a warning
-/// to stderr and skip the asset. When `locked` is `true`, the same conditions
+/// Non-locked failures (unreadable file, unparseable font) silently skip the
+/// asset; a missing file is instead reported as a hard `asset.missing` Error
+/// diagnostic by [`collect_missing_asset_diagnostics`]. When `locked` is `true`,
+/// the same conditions
 /// are hard errors (exit code 2), and every font asset's bytes are verified
 /// against its declared `sha256` exactly like image and SVG assets.
 fn build_font_provider(
@@ -229,12 +239,8 @@ fn build_font_provider(
                         2,
                     ));
                 }
-                eprintln!(
-                    "warning: could not read font asset '{}' from '{}': {} — skipping",
-                    decl.id,
-                    path.display(),
-                    e
-                );
+                // Missing/unreadable file is surfaced as a hard `asset.missing`
+                // diagnostic by `collect_missing_asset_diagnostics`; skip here.
                 continue;
             }
         };
@@ -274,8 +280,9 @@ fn build_font_provider(
 /// `image`- and `svg`-kind assets are loaded; `font`-kind assets are handled
 /// separately by [`build_font_provider`].
 ///
-/// When `locked` is `false` (the default), a read failure skips the asset with
-/// a warning and no hash is checked. When `locked` is `true`, every image or
+/// When `locked` is `false` (the default), a read failure silently skips the
+/// asset and no hash is checked (a missing file is surfaced separately as a hard
+/// `asset.missing` diagnostic). When `locked` is `true`, every image or
 /// SVG asset must read successfully and its bytes must match its declared
 /// `sha256` (compared case-insensitively, trimmed); a read failure, a missing
 /// hash, or a mismatch is a hard error (exit code 2).
@@ -304,13 +311,8 @@ fn build_asset_provider(
                         2,
                     ));
                 }
-                eprintln!(
-                    "warning: could not read asset '{}' ({}) from '{}': {} — skipping",
-                    decl.id,
-                    decl.kind.kind_str(),
-                    path.display(),
-                    e
-                );
+                // Missing/unreadable file is surfaced as a hard `asset.missing`
+                // diagnostic by `collect_missing_asset_diagnostics`; skip here.
                 continue;
             }
         };
@@ -322,6 +324,32 @@ fn build_asset_provider(
         provider.register(&decl.id, decl.kind.clone(), bytes.into());
     }
     Ok(provider)
+}
+
+/// Collect a hard `asset.missing` diagnostic for every declared asset whose
+/// file does not exist on disk under `project_dir`.
+///
+/// All asset kinds are checked (image, svg, font). Declarations are iterated in
+/// declaration order, so the resulting diagnostics are deterministic. The
+/// returned diagnostics are `Severity::Error`, so once prepended to a render
+/// artifact's diagnostics they trip the render gate and block output.
+pub(crate) fn collect_missing_asset_diagnostics(
+    doc: &Document,
+    project_dir: &Path,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for decl in &doc.assets.assets {
+        let path = project_dir.join(&decl.src);
+        if !path.exists() {
+            diagnostics.push(Diagnostic::error(
+                "asset.missing",
+                format!("asset '{}' file not found: '{}'", decl.id, path.display()),
+                decl.source_span,
+                Some(decl.id.clone()),
+            ));
+        }
+    }
+    diagnostics
 }
 
 // ── Shared pipeline helpers ───────────────────────────────────────────────────
@@ -642,6 +670,62 @@ mod tests {
             has_fit_error,
             "artifact must carry a text.fit_failed Error diagnostic; got: {:?}",
             artifact.diagnostics
+        );
+    }
+
+    /// A document referencing an asset whose file does not exist under the
+    /// project directory. Used to exercise the `asset.missing` hard diagnostic.
+    const MISSING_ASSET_DOC: &str = r##"zenith version=1 {
+  project id="proj.missing" name="Missing Asset"
+  assets {
+    asset id="asset.absent" kind="image" src="__zenith_does_not_exist__.png"
+  }
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#f8fafc"
+  }
+  styles {}
+  document id="doc.missing" title="Missing Asset" {
+    page id="page.missing" w=(px)100 h=(px)100 background=(token)"color.bg" {
+      image id="img.absent" asset="asset.absent" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fit="stretch"
+    }
+  }
+}
+"##;
+
+    #[test]
+    fn to_png_missing_asset_has_asset_missing_error_diagnostic() {
+        // A directory that is guaranteed not to contain the asset file. The
+        // render still returns Ok (the gate in lib.rs is what blocks the write);
+        // the artifact must carry the asset.missing Error diagnostic.
+        let dir = Path::new("/nonexistent-zenith-project-dir");
+        let artifact = to_png_with_dir(MISSING_ASSET_DOC, Some(dir), 1, false)
+            .expect("render must not hard-fail; missing asset is carried as a diagnostic");
+        let has_missing = artifact
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "asset.missing" && d.severity == zenith_core::Severity::Error);
+        assert!(
+            has_missing,
+            "artifact must carry an asset.missing Error diagnostic; got: {:?}",
+            artifact
+                .diagnostics
+                .iter()
+                .map(|d| d.code.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn to_scene_json_missing_asset_has_asset_missing_error_diagnostic() {
+        let dir = Path::new("/nonexistent-zenith-project-dir");
+        let artifact =
+            to_scene_json(MISSING_ASSET_DOC, Some(dir), 1).expect("scene JSON must succeed");
+        assert!(
+            artifact
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "asset.missing" && d.severity == zenith_core::Severity::Error),
+            "scene artifact must carry an asset.missing Error diagnostic"
         );
     }
 
