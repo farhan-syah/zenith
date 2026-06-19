@@ -95,7 +95,16 @@ fn apply_op(
             apply_set_text_align(node_id, align, doc, diagnostics, affected);
         }
         Op::MoveForward { node: node_id } => {
-            apply_move_forward(node_id, doc, diagnostics, affected);
+            apply_reorder(node_id, ReorderKind::Forward, doc, diagnostics, affected);
+        }
+        Op::MoveBackward { node: node_id } => {
+            apply_reorder(node_id, ReorderKind::Backward, doc, diagnostics, affected);
+        }
+        Op::MoveToFront { node: node_id } => {
+            apply_reorder(node_id, ReorderKind::ToFront, doc, diagnostics, affected);
+        }
+        Op::MoveToBack { node: node_id } => {
+            apply_reorder(node_id, ReorderKind::ToBack, doc, diagnostics, affected);
         }
         Op::SetFill {
             node: node_id,
@@ -186,16 +195,17 @@ fn apply_set_text_align(
     }
 }
 
-// ── MoveForward ───────────────────────────────────────────────────────────────
+// ── Reorder ops ───────────────────────────────────────────────────────────────
 
-fn apply_move_forward(
+fn apply_reorder(
     node_id: &str,
+    kind: ReorderKind,
     doc: &mut Document,
     diagnostics: &mut Vec<Diagnostic>,
     affected: &mut Vec<String>,
 ) {
     for page in doc.body.pages.iter_mut() {
-        match move_forward_in(&mut page.children, node_id) {
+        match reorder_in(&mut page.children, node_id, kind) {
             MoveOutcome::NotFound => {
                 // Try the next page.
             }
@@ -203,11 +213,19 @@ fn apply_move_forward(
                 record_affected(node_id, affected);
                 return;
             }
-            MoveOutcome::AlreadyFront => {
-                // Already last (front) — no-op; emit an advisory.
+            MoveOutcome::NoChange => {
+                // Already at the target extreme — emit a kind-specific advisory.
+                let msg = match kind {
+                    ReorderKind::Forward | ReorderKind::ToFront => {
+                        format!("node {:?} is already at the front of its parent", node_id)
+                    }
+                    ReorderKind::Backward | ReorderKind::ToBack => {
+                        format!("node {:?} is already at the back of its parent", node_id)
+                    }
+                };
                 diagnostics.push(Diagnostic::advisory(
                     "tx.noop",
-                    format!("node {:?} is already at the front of its parent", node_id),
+                    msg,
                     None,
                     Some(node_id.to_owned()),
                 ));
@@ -268,7 +286,7 @@ fn find_node_any_mut<'doc>(doc: &'doc mut Document, id: &str) -> Option<&'doc mu
 /// Two-phase: shared scan to find the index, then exclusive borrow to act.
 ///
 /// No recursion-depth guard (accepted v0 limit, consistent with
-/// `move_forward_in` and `subtree_contains`).
+/// `reorder_in` and `subtree_contains`).
 fn find_in_children_any_mut<'a>(children: &'a mut [Node], id: &str) -> Option<&'a mut Node> {
     // Phase 1: find the index and how to reach it.
     // `Direct(i)` — id matches children[i] itself.
@@ -656,33 +674,69 @@ fn apply_set_points(
     }
 }
 
-// ── MoveForward internals ─────────────────────────────────────────────────────
+// ── Reorder internals ────────────────────────────────────────────────────────
 
-/// Outcome of attempting to move a node one step forward (up in z-order)
-/// within its parent's children list, searching recursively through groups.
+/// Which z-order reorder to perform.
+#[derive(Copy, Clone)]
+enum ReorderKind {
+    Forward,
+    Backward,
+    ToFront,
+    ToBack,
+}
+
+/// Outcome of a reorder attempt.
 enum MoveOutcome {
     NotFound,
-    AlreadyFront,
+    /// The node is already at the target extreme for this operation; no change made.
+    NoChange,
     Moved,
 }
 
-/// Move the node with `id` one step later in whatever children vec directly
-/// contains it (page children or a group's children). Recurses into groups.
-fn move_forward_in(children: &mut [Node], id: &str) -> MoveOutcome {
+/// Reorder the node with `id` within whatever children slice directly contains
+/// it, according to `kind`. Recurses into `Group` and `Frame` containers.
+fn reorder_in(children: &mut [Node], id: &str, kind: ReorderKind) -> MoveOutcome {
     if let Some(i) = children.iter().position(|n| node_id_of(n) == Some(id)) {
-        if i + 1 >= children.len() {
-            return MoveOutcome::AlreadyFront;
+        let len = children.len();
+        match kind {
+            ReorderKind::Forward => {
+                if i + 1 >= len {
+                    return MoveOutcome::NoChange;
+                }
+                children.swap(i, i + 1);
+            }
+            ReorderKind::Backward => {
+                if i == 0 {
+                    return MoveOutcome::NoChange;
+                }
+                children.swap(i, i - 1);
+            }
+            ReorderKind::ToFront => {
+                if i + 1 >= len {
+                    return MoveOutcome::NoChange;
+                }
+                // rotate_left(1) on children[i..] moves element at index i to
+                // the last position, shifting i+1..len-1 one step left.
+                children[i..].rotate_left(1);
+            }
+            ReorderKind::ToBack => {
+                if i == 0 {
+                    return MoveOutcome::NoChange;
+                }
+                // rotate_right(1) on children[..=i] moves element at index i
+                // to index 0, shifting 0..i-1 one step right.
+                children[..=i].rotate_right(1);
+            }
         }
-        children.swap(i, i + 1);
         return MoveOutcome::Moved;
     }
     for child in children.iter_mut() {
         match child {
-            Node::Frame(f) => match move_forward_in(&mut f.children, id) {
+            Node::Frame(f) => match reorder_in(&mut f.children, id, kind) {
                 MoveOutcome::NotFound => {}
                 other => return other,
             },
-            Node::Group(g) => match move_forward_in(&mut g.children, id) {
+            Node::Group(g) => match reorder_in(&mut g.children, id, kind) {
                 MoveOutcome::NotFound => {}
                 other => return other,
             },
@@ -1640,5 +1694,241 @@ mod tests {
             "expected tx.invalid_value diagnostic"
         );
         assert_eq!(result.source_after, result.source_before);
+    }
+
+    // ── MoveBackward / MoveToFront / MoveToBack test documents ───────────────
+
+    /// Three rects a (index 0, bottom), b (index 1), c (index 2, top).
+    const THREE_RECT_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" { }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      rect id="a" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+      rect id="b" x=(px)10 y=(px)0 w=(px)100 h=(px)100
+      rect id="c" x=(px)20 y=(px)0 w=(px)100 h=(px)100
+    }
+  }
+}"##;
+
+    /// Group containing two rects: x (bottom) then y (top).
+    const GROUP_TWO_RECT_BACKWARD_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" { }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      group id="grp1" {
+        rect id="x" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+        rect id="y" x=(px)10 y=(px)0 w=(px)100 h=(px)100
+      }
+    }
+  }
+}"##;
+
+    // ── MoveBackward tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn move_backward_reorders() {
+        // Doc: a (bottom) then b (top). MoveBackward on b → b moves before a.
+        let doc = parse(TWO_RECT_DOC);
+        let tx = Transaction {
+            ops: vec![Op::MoveBackward {
+                node: "b".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Accepted);
+        assert_eq!(result.affected_node_ids, vec!["b".to_owned()]);
+
+        // In source_after, b should appear before a.
+        let pos_a = result
+            .source_after
+            .find("id=\"a\"")
+            .expect("a in source_after");
+        let pos_b = result
+            .source_after
+            .find("id=\"b\"")
+            .expect("b in source_after");
+        assert!(pos_b < pos_a, "b should appear before a in source_after");
+    }
+
+    #[test]
+    fn move_backward_already_at_back_noop() {
+        // Doc: a (bottom) then b. MoveBackward on "a" → already at back → noop advisory.
+        let doc = parse(TWO_RECT_DOC);
+        let tx = Transaction {
+            ops: vec![Op::MoveBackward {
+                node: "a".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Accepted);
+        assert!(
+            result.affected_node_ids.is_empty(),
+            "affected must be empty for noop; got: {:?}",
+            result.affected_node_ids
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.noop" && d.message.contains("back")),
+            "expected tx.noop advisory mentioning \"back\"; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    #[test]
+    fn move_backward_nested_child() {
+        // Group with x (bottom) then y (top). MoveBackward on y → recursion into
+        // group, y swaps with x.
+        let doc = parse(GROUP_TWO_RECT_BACKWARD_DOC);
+        let tx = Transaction {
+            ops: vec![Op::MoveBackward {
+                node: "y".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Accepted);
+        assert_eq!(result.affected_node_ids, vec!["y".to_owned()]);
+
+        // In source_after, y should appear before x.
+        let pos_x = result
+            .source_after
+            .find("id=\"x\"")
+            .expect("x in source_after");
+        let pos_y = result
+            .source_after
+            .find("id=\"y\"")
+            .expect("y in source_after");
+        assert!(pos_y < pos_x, "y should appear before x in source_after");
+    }
+
+    // ── MoveToFront tests ─────────────────────────────────────────────────────
+
+    #[test]
+    fn move_to_front_moves_to_top() {
+        // THREE_RECT_DOC: a (0), b (1), c (2). MoveToFront on "a" → order becomes b, c, a.
+        let doc = parse(THREE_RECT_DOC);
+        let tx = Transaction {
+            ops: vec![Op::MoveToFront {
+                node: "a".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Accepted);
+        assert_eq!(result.affected_node_ids, vec!["a".to_owned()]);
+
+        // In source_after: b appears before c, c appears before a.
+        let pos_a = result
+            .source_after
+            .find("id=\"a\"")
+            .expect("a in source_after");
+        let pos_b = result
+            .source_after
+            .find("id=\"b\"")
+            .expect("b in source_after");
+        let pos_c = result
+            .source_after
+            .find("id=\"c\"")
+            .expect("c in source_after");
+        assert!(pos_b < pos_c, "b should appear before c in source_after");
+        assert!(pos_c < pos_a, "c should appear before a in source_after");
+    }
+
+    #[test]
+    fn move_to_front_already_front_noop() {
+        // THREE_RECT_DOC: c is already the last (topmost). MoveToFront on "c" → noop.
+        let doc = parse(THREE_RECT_DOC);
+        let tx = Transaction {
+            ops: vec![Op::MoveToFront {
+                node: "c".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Accepted);
+        assert!(
+            result.affected_node_ids.is_empty(),
+            "affected must be empty for noop; got: {:?}",
+            result.affected_node_ids
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.noop" && d.message.contains("front")),
+            "expected tx.noop advisory mentioning \"front\"; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    // ── MoveToBack tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn move_to_back_moves_to_bottom() {
+        // THREE_RECT_DOC: a (0), b (1), c (2). MoveToBack on "c" → order becomes c, a, b.
+        let doc = parse(THREE_RECT_DOC);
+        let tx = Transaction {
+            ops: vec![Op::MoveToBack {
+                node: "c".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Accepted);
+        assert_eq!(result.affected_node_ids, vec!["c".to_owned()]);
+
+        // In source_after: c appears before a, a appears before b.
+        let pos_a = result
+            .source_after
+            .find("id=\"a\"")
+            .expect("a in source_after");
+        let pos_b = result
+            .source_after
+            .find("id=\"b\"")
+            .expect("b in source_after");
+        let pos_c = result
+            .source_after
+            .find("id=\"c\"")
+            .expect("c in source_after");
+        assert!(pos_c < pos_a, "c should appear before a in source_after");
+        assert!(pos_a < pos_b, "a should appear before b in source_after");
+    }
+
+    // ── from_json round-trip: reorder ops ─────────────────────────────────────
+
+    #[test]
+    fn from_json_reorder_ops_round_trip() {
+        let json = r#"{"ops":[
+            {"op":"move_backward","node":"x"},
+            {"op":"move_to_front","node":"x"},
+            {"op":"move_to_back","node":"x"}
+        ]}"#;
+        let tx = Transaction::from_json(json).expect("parse JSON");
+        assert_eq!(
+            tx,
+            Transaction {
+                ops: vec![
+                    Op::MoveBackward {
+                        node: "x".to_owned()
+                    },
+                    Op::MoveToFront {
+                        node: "x".to_owned()
+                    },
+                    Op::MoveToBack {
+                        node: "x".to_owned()
+                    },
+                ],
+            }
+        );
     }
 }

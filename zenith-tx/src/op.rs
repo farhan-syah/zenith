@@ -62,6 +62,27 @@ pub enum Op {
         /// The stable node `id` to target.
         node: String,
     },
+    /// Move a node one sibling position toward the beginning (back/bottom of z-order).
+    ///
+    /// Has no effect if the node is already first in its parent's children.
+    MoveBackward {
+        /// The stable node `id` to target.
+        node: String,
+    },
+    /// Move a node to the topmost position (last child) in its parent's children.
+    ///
+    /// Has no effect if the node is already the last sibling (frontmost/topmost).
+    MoveToFront {
+        /// The stable node `id` to target.
+        node: String,
+    },
+    /// Move a node to the bottommost position (first child) in its parent's children.
+    ///
+    /// Has no effect if the node is already the first sibling (backmost/bottommost).
+    MoveToBack {
+        /// The stable node `id` to target.
+        node: String,
+    },
     /// Set the `fill` property on a node that supports fill.
     ///
     /// The `fill` value is a token id (e.g. `"color.accent"`); the engine
