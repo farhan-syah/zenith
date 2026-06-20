@@ -111,8 +111,10 @@ fn synth_footnote_text(fnote: &FootnoteNode, marker: &str, x: f64, y: f64, w: f6
         // The zone is reserved bottom-up; the footnote text may exceed its (open)
         // box without a hard fail, so use "visible" to avoid an overflow warning.
         overflow: Some("visible".to_owned()),
+        overflow_wrap: None,
         style: fnote.style.clone(),
         fill: fnote.fill.clone(),
+        contrast_bg: None,
         font_family: fnote.font_family.clone(),
         font_size: fnote.font_size.clone(),
         font_weight: None,
@@ -126,6 +128,7 @@ fn synth_footnote_text(fnote: &FootnoteNode, marker: &str, x: f64, y: f64, w: f6
         hyphenate: None,
         widow_orphan: None,
         tab_leader: None,
+        text_exclusion: None,
         spans,
         source_span: fnote.source_span,
         unknown_props: BTreeMap::new(),
@@ -212,6 +215,8 @@ pub(super) fn compile_footnote_zone(
             &mut scratch_diags,
             chains,
             markers,
+            // Footnotes never use text-runaround exclusion.
+            &BTreeMap::new(),
             RenderCtx::measure(),
         );
         // A footnote that measured to zero height (e.g. all-empty content) still
@@ -299,6 +304,8 @@ pub(super) fn compile_footnote_zone(
             diagnostics,
             chains,
             markers,
+            // Footnotes never use text-runaround exclusion.
+            &BTreeMap::new(),
             ctx,
         );
         cursor_y += h + FOOTNOTE_GAP;

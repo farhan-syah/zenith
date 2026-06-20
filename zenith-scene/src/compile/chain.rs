@@ -310,12 +310,16 @@ fn distribute_chains(
         // Absent → `None` → packing + flattening are byte-identical to before.
         let hyph_ctx = if src.hyphenate == Some(true) {
             en_us_hyphenator().map(|dict| HyphenationContext {
-                dict,
+                dict: Some(dict),
                 engine,
                 fonts,
                 families: &families,
                 hyphen: "-",
                 direction,
+                // Chain-member break-word is a documented v0 follow-up (like the
+                // chain drop-cap/runaround deferrals); the chain path keeps the
+                // existing hyphenation-only behavior, byte-identical to before.
+                break_word: false,
             })
         } else {
             None

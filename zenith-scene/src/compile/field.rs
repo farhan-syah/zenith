@@ -39,6 +39,12 @@ pub(crate) struct FieldCtx<'a> {
     /// into this map emits that marker as an inline superscript run. Empty when
     /// the page declares no footnotes.
     pub(super) footnote_markers: &'a BTreeMap<String, String>,
+    /// This page's node id → ABSOLUTE page-coordinate bounding box `(x, y, w, h)`
+    /// in pixels, accumulating group/instance translation (frames do not
+    /// translate). Drives text-runaround exclusion lookup in `compile_text`. Only
+    /// nodes with a fully-resolvable x/y/w/h rect are included. Empty when no node
+    /// on the page has a resolvable box.
+    pub(super) node_boxes: &'a BTreeMap<String, (f64, f64, f64, f64)>,
 }
 
 /// Resolve a [`FieldNode`] against the page context into a concrete single-line
@@ -104,8 +110,10 @@ pub(super) fn resolve_field_to_text(field: &FieldNode, ctx: &FieldCtx) -> Option
         align: Some(default_align.to_owned()),
         direction: None,
         overflow: Some("clip".to_owned()),
+        overflow_wrap: None,
         style: field.style.clone(),
         fill: field.fill.clone(),
+        contrast_bg: None,
         font_family: field.font_family.clone(),
         font_size: field.font_size.clone(),
         font_weight: None,
@@ -119,6 +127,7 @@ pub(super) fn resolve_field_to_text(field: &FieldNode, ctx: &FieldCtx) -> Option
         hyphenate: None,
         widow_orphan: None,
         tab_leader: None,
+        text_exclusion: None,
         spans: vec![TextSpan {
             text,
             fill: None,
@@ -160,6 +169,96 @@ fn index_nodes(children: &[Node], page_index_1based: usize, map: &mut BTreeMap<S
             Node::Group(g) => index_nodes(&g.children, page_index_1based, map),
             _ => {}
         }
+    }
+}
+
+/// Build a single page's `node id → ABSOLUTE bounding box (x, y, w, h)` map in
+/// pixels for text-runaround exclusion lookup.
+///
+/// Walks the page's children recursively, accumulating the translation offset of
+/// each ancestor container: a `group` (and an `instance`, which compiles as a
+/// translated synthetic group) shifts its children by its own `x`/`y`; a `frame`
+/// is clip-only and does NOT translate (matching the render-offset semantics in
+/// [`super::container`]). A node's absolute box is `(dx + node_x, dy + node_y,
+/// node_w, node_h)`. Only nodes whose x/y/w/h ALL resolve to pixels are recorded
+/// (a node without a complete rect — `line`/`polygon`/`polyline`, or any node
+/// missing a dimension — is skipped: it cannot serve as a rectangular exclusion).
+/// Deterministic: source-order walk; the FIRST occurrence of an id wins.
+pub(super) fn build_node_boxes(page: &zenith_core::Page) -> BTreeMap<String, (f64, f64, f64, f64)> {
+    let mut map: BTreeMap<String, (f64, f64, f64, f64)> = BTreeMap::new();
+    collect_node_boxes(&page.children, 0.0, 0.0, &mut map);
+    map
+}
+
+/// Recursive worker for [`build_node_boxes`]. `dx`/`dy` are the accumulated
+/// ancestor translation in pixels.
+fn collect_node_boxes(
+    children: &[Node],
+    dx: f64,
+    dy: f64,
+    map: &mut BTreeMap<String, (f64, f64, f64, f64)>,
+) {
+    use zenith_core::dim_to_px;
+    for child in children {
+        if let Some(id) = node_id(child)
+            && let Some((x, y, w, h)) = node_rect(child)
+        {
+            map.entry(id.to_owned()).or_insert((dx + x, dy + y, w, h));
+        }
+        match child {
+            // A frame is clip-only: its children are NOT translated by its origin.
+            Node::Frame(f) => collect_node_boxes(&f.children, dx, dy, map),
+            // A group translates its children by its own x/y (absent/bad-unit → 0).
+            Node::Group(g) => {
+                let gx = g.x.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+                let gy = g.y.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+                collect_node_boxes(
+                    &g.children,
+                    dx + gx.unwrap_or(0.0),
+                    dy + gy.unwrap_or(0.0),
+                    map,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+/// A node's LOCAL `(x, y, w, h)` rectangle in pixels, when all four resolve.
+///
+/// Returns `None` for a node kind without a rectangular box (`line`/`polygon`/
+/// `polyline`/`footnote`/`unknown`) or one missing any of x/y/w/h.
+fn node_rect(node: &Node) -> Option<(f64, f64, f64, f64)> {
+    use zenith_core::dim_to_px;
+    let rect = |x: &Option<zenith_core::Dimension>,
+                y: &Option<zenith_core::Dimension>,
+                w: &Option<zenith_core::Dimension>,
+                h: &Option<zenith_core::Dimension>|
+     -> Option<(f64, f64, f64, f64)> {
+        let x = x.as_ref().and_then(|d| dim_to_px(d.value, &d.unit))?;
+        let y = y.as_ref().and_then(|d| dim_to_px(d.value, &d.unit))?;
+        let w = w.as_ref().and_then(|d| dim_to_px(d.value, &d.unit))?;
+        let h = h.as_ref().and_then(|d| dim_to_px(d.value, &d.unit))?;
+        Some((x, y, w, h))
+    };
+    match node {
+        Node::Rect(n) => rect(&n.x, &n.y, &n.w, &n.h),
+        Node::Ellipse(n) => rect(&n.x, &n.y, &n.w, &n.h),
+        Node::Text(n) => rect(&n.x, &n.y, &n.w, &n.h),
+        Node::Code(n) => rect(&n.x, &n.y, &n.w, &n.h),
+        Node::Frame(n) => rect(&n.x, &n.y, &n.w, &n.h),
+        Node::Group(n) => rect(&n.x, &n.y, &n.w, &n.h),
+        Node::Image(n) => rect(&n.x, &n.y, &n.w, &n.h),
+        Node::Field(n) => rect(&n.x, &n.y, &n.w, &n.h),
+        // An `instance` has no intrinsic w/h (its box is the expanded subtree),
+        // and line/polygon/polyline have no rectangular box — none can serve as a
+        // rectangular exclusion, so they are skipped.
+        Node::Instance(_)
+        | Node::Line(_)
+        | Node::Polygon(_)
+        | Node::Polyline(_)
+        | Node::Footnote(_)
+        | Node::Unknown(_) => None,
     }
 }
 
@@ -258,6 +357,7 @@ mod tests {
             margin_outer: Some(px(100.0)),
             margin_top: Some(px(80.0)),
             margin_bottom: Some(px(80.0)),
+            baseline_grid: None,
             parity: None,
             master: None,
             safe_zones: Vec::new(),

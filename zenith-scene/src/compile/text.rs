@@ -87,6 +87,49 @@ pub(super) struct WordMetrics {
     pub(super) space_advance: f64,
 }
 
+/// Snap a text node's first-line baseline and inter-line advance onto the page
+/// baseline grid of pitch `g`.
+///
+/// Given the natural (post-`ctx.dy`) `text_y`, the resolved `ascent`, and the
+/// resolved `line_height`, returns `(snapped_text_y, effective_line_height)`:
+/// the first baseline moves DOWN to the next grid line at/below its natural
+/// position, and the advance inflates to the smallest multiple of `g` that is
+/// ≥ `line_height`, so corresponding lines align horizontally across columns.
+/// Because the emit computes `baseline_y = text_y + ascent + i*line_height`,
+/// substituting these two values places every baseline on the grid with no
+/// change to the emit code. Caller must ensure `g.is_finite() && g > 0.0`.
+fn snap_to_baseline_grid(text_y: f64, ascent: f64, line_height: f64, g: f64) -> (f64, f64) {
+    let natural_baseline = text_y + ascent;
+    let snapped_baseline = (natural_baseline / g).ceil() * g;
+    let effective_line_height = (line_height / g).ceil() * g;
+    let snapped_text_y = snapped_baseline - ascent;
+    (snapped_text_y, effective_line_height)
+}
+
+/// Build the `baseline-grid.snap_failed` advisory for a text node whose resolved
+/// line-height exceeds the grid pitch (a single line cannot fit one grid cell,
+/// so the effective advance inflates to a multiple of `g` and leading grows).
+/// Emitted ONCE per affected node; the caller only calls this when
+/// `line_height > g`.
+fn baseline_grid_snap_failed_diag(
+    node_id: &str,
+    line_height: f64,
+    g: f64,
+    span: Option<zenith_core::Span>,
+) -> Diagnostic {
+    let multiple = (line_height / g).ceil();
+    let effective = multiple * g;
+    Diagnostic::warning(
+        "baseline-grid.snap_failed",
+        format!(
+            "text node '{node_id}' line-height {line_height}px exceeds baseline-grid \
+             pitch {g}px; lines snap to {effective}px ({multiple}× grid)"
+        ),
+        span,
+        Some(node_id.to_owned()),
+    )
+}
+
 /// A span already resolved to color/decoration/weight/style, ready for the
 /// per-word re-shaping the wrap + chain paths perform. Mirrors the private
 /// `ShapedSpan` fields the wrap path consumes.
@@ -247,7 +290,12 @@ pub(super) fn en_us_hyphenator() -> Option<&'static Standard> {
 /// weight/style/size come from each [`WordToken::src`], so a chain or wrapped
 /// node hyphenates with that word's exact style.
 pub(super) struct HyphenationContext<'a> {
-    pub(super) dict: &'static Standard,
+    /// The en-US dictionary, or `None` when only break-word is requested (or the
+    /// embedded blob failed to load). The hyphenation branch in
+    /// [`pack_lines_core`] runs only when this is `Some`; the break-word branch is
+    /// independent of it, so a node that requests ONLY `overflow-wrap="break-word"`
+    /// still gets a context (with `dict: None`).
+    pub(super) dict: Option<&'static Standard>,
     pub(super) engine: &'a RustybuzzEngine,
     pub(super) fonts: &'a dyn FontProvider,
     pub(super) families: &'a [String],
@@ -255,6 +303,10 @@ pub(super) struct HyphenationContext<'a> {
     pub(super) hyphen: &'a str,
     /// Base writing direction for re-shaping fragments (matches the node).
     pub(super) direction: TextDirection,
+    /// When `true`, the packer may break an unbreakable token that is wider than
+    /// the line box at a CHARACTER boundary (`overflow-wrap="break-word"`). When
+    /// `false`, the break-word branch never runs (byte-identical to before).
+    pub(super) break_word: bool,
 }
 
 /// A word split at a hyphenation point: the head (`fragment-`, including the
@@ -314,12 +366,15 @@ fn reshape_fragment(
 /// letter breaks; the head/tail slices are taken on byte boundaries the
 /// dictionary returns, which always fall between characters.
 fn try_hyphenate(word: &WordToken, avail: f64, ctx: &HyphenationContext) -> Option<HyphenSplit> {
+    // No dictionary (break-word-only context, or the blob failed to load) → no
+    // hyphenation; the caller falls back to wrapping the whole word.
+    let dict = ctx.dict?;
     let text = word.src.text.as_str();
     // A break shorter than this many bytes on either side is never useful.
     if text.len() < 4 {
         return None;
     }
-    let breaks = ctx.dict.hyphenate(text).breaks;
+    let breaks = dict.hyphenate(text).breaks;
     // Walk break points from LAST to FIRST: the longest head that still fits is
     // the most text we can place, minimizing wasted space.
     for &b in breaks.iter().rev() {
@@ -345,6 +400,64 @@ fn try_hyphenate(word: &WordToken, avail: f64, ctx: &HyphenationContext) -> Opti
         return Some(HyphenSplit { head, tail });
     }
     None
+}
+
+/// Split `word` at the LONGEST char-boundary prefix whose re-shaped advance fits
+/// within `avail` pixels (`>= 1` char in the head), for `overflow-wrap="break-word"`.
+/// Returns `(head, tail)` re-shaped as plain fragments (NO hyphen glyph), or
+/// `None` when not even one character fits or a shaping failure occurs — in which
+/// case the caller leaves the word whole (it overflows as today).
+///
+/// Determinism + safety: the candidate split points are the word's own
+/// `char_indices` (so every slice falls on a UTF-8 char boundary — no panic, no
+/// mojibake on multi-byte chars), walked in order; the chosen point is a pure
+/// function of `avail`. O(n) in the word's char count.
+fn try_break_word(
+    word: &WordToken,
+    avail: f64,
+    ctx: &HyphenationContext,
+) -> Option<(WordToken, WordToken)> {
+    let text = word.src.text.as_str();
+    // Track the largest fitting prefix found so far (byte offset of the split and
+    // the re-shaped head). Grow from 1 char up, keeping the last that fits.
+    let mut best: Option<(usize, WordToken)> = None;
+    // Candidate split byte offsets are the START of each char AFTER the first, so
+    // the head always has at least one char; the final candidate is `text.len()`
+    // but a full-word "split" is useless (empty tail), so it is excluded.
+    let mut boundaries: Vec<usize> = text.char_indices().map(|(b, _)| b).skip(1).collect();
+    // `char_indices` never yields `text.len()`; an empty `boundaries` means the
+    // word is a single char and cannot be split.
+    if boundaries.is_empty() {
+        return None;
+    }
+    // Walk boundaries in order; keep the LARGEST prefix whose head fits `avail`.
+    // Once a prefix overflows, all longer prefixes also overflow (advance grows
+    // monotonically), so we can stop at the first overflow.
+    boundaries.push(text.len()); // sentinel guards the very last char block
+    for &b in &boundaries {
+        let Some(head_txt) = text.get(..b) else {
+            continue;
+        };
+        if head_txt.is_empty() {
+            continue;
+        }
+        let Some(head) = reshape_fragment(head_txt, word, None, ctx) else {
+            // Shaping failure on this prefix: stop and use the best-so-far.
+            break;
+        };
+        if head.advance > avail {
+            break;
+        }
+        // The tail must be non-empty for this to be a real split.
+        if b >= text.len() {
+            break;
+        }
+        best = Some((b, head));
+    }
+    let (b, head) = best?;
+    let tail_txt = text.get(b..)?;
+    let tail = reshape_fragment(tail_txt, word, None, ctx)?;
+    Some((head, tail))
 }
 
 /// Flatten packed lines back into a single ordered word stream for re-wrapping in
@@ -406,12 +519,68 @@ pub(super) fn pack_lines(
     space_advance: f64,
     hyph: Option<&HyphenationContext>,
 ) -> Vec<Line> {
-    let profile = WidthProfile {
-        narrow_w: box_w,
-        narrow_count: 0,
-        full_w: box_w,
-    };
-    pack_lines_core(tokens, profile, space_advance, hyph)
+    // `min_line_width = NEG_INFINITY` disables the blocked-line skip (a width is
+    // never `< -inf`), so uniform packing is byte-identical to before. `max_lines`
+    // is unused when no line is ever blocked; a large cap keeps it inert. The
+    // forced-break sentinel is inert for callers that do not read it back.
+    let mut forced_break = false;
+    pack_lines_core(
+        tokens,
+        |_| box_w,
+        space_advance,
+        hyph,
+        f64::NEG_INFINITY,
+        usize::MAX,
+        &mut forced_break,
+    )
+}
+
+/// Like [`pack_lines`] but also reports (via `forced_break`) whether the packer
+/// performed a forced character-boundary break for `overflow-wrap="break-word"`.
+/// The single-box wrap path uses this to emit ONE `text.forced_break` advisory.
+pub(super) fn pack_lines_reporting(
+    tokens: Vec<WordToken>,
+    box_w: f64,
+    space_advance: f64,
+    hyph: Option<&HyphenationContext>,
+    forced_break: &mut bool,
+) -> Vec<Line> {
+    pack_lines_core(
+        tokens,
+        |_| box_w,
+        space_advance,
+        hyph,
+        f64::NEG_INFINITY,
+        usize::MAX,
+        forced_break,
+    )
+}
+
+/// Greedy-pack word tokens into per-line bands for text runaround.
+///
+/// `band_width(i)` returns the available width for line `i`; a band narrower than
+/// `min_line_width` is BLOCKED — an empty [`Line`] is emitted at that index so the
+/// baseline advances past it (text flows above/below the exclusion) without
+/// consuming the pending word. No hyphenation is performed (v0 runaround, like the
+/// drop-cap path). `max_lines` bounds the blocked-skip loop so an all-blocked tail
+/// cannot loop forever; once the cap is reached remaining words are clipped.
+pub(super) fn pack_lines_runaround(
+    tokens: Vec<WordToken>,
+    band_width: impl Fn(usize) -> f64,
+    space_advance: f64,
+    min_line_width: f64,
+    max_lines: usize,
+) -> Vec<Line> {
+    let mut forced_break = false;
+    pack_lines_core(
+        tokens,
+        band_width,
+        space_advance,
+        None,
+        min_line_width,
+        max_lines,
+        &mut forced_break,
+    )
 }
 
 /// Per-line width profile for the drop-cap wrap-around.
@@ -450,14 +619,33 @@ pub(super) fn pack_lines_variable(
     space_advance: f64,
 ) -> Vec<Line> {
     // The drop-cap path does not hyphenate (a documented v0 follow-up like the
-    // chain/flow drop-cap combination), so it threads `None`.
-    pack_lines_core(tokens, profile, space_advance, None)
+    // chain/flow drop-cap combination), so it threads `None`. Drop-cap widths are
+    // always meaningful, so `min_line_width = NEG_INFINITY` disables the
+    // blocked-line skip and packing stays byte-identical to before.
+    let mut forced_break = false;
+    pack_lines_core(
+        tokens,
+        |i| profile.width_for(i),
+        space_advance,
+        None,
+        f64::NEG_INFINITY,
+        usize::MAX,
+        &mut forced_break,
+    )
 }
 
-/// The single greedy packer shared by [`pack_lines`] and [`pack_lines_variable`].
+/// The single greedy packer shared by [`pack_lines`], [`pack_lines_variable`],
+/// and [`pack_lines_runaround`]. The per-line width comes from `width_for(i)` (a
+/// constant for uniform packing, the drop-cap profile, or the runaround band).
 ///
-/// Beyond the original greedy fill it adds two OPT-IN behaviours that leave the
+/// Beyond the original greedy fill it adds three OPT-IN behaviours that leave the
 /// default path byte-identical:
+///
+/// 0. **Blocked-line skip (runaround).** When the line about to receive its first
+///    word has `width_for(i) < min_line_width`, an empty [`Line`] is pushed and
+///    the next index is tried, without consuming the word, so text flows above
+///    and below an exclusion band. `min_line_width = f64::NEG_INFINITY` makes this
+///    unreachable (uniform/drop-cap callers), and `max_lines` bounds the skip.
 ///
 /// 1. **Paragraph breaks.** Each word carries a paragraph index
 ///    ([`WordSource::paragraph`]); a word whose paragraph differs from the line
@@ -472,11 +660,23 @@ pub(super) fn pack_lines_variable(
 ///    re-queued as the first word of the next line. If no break fits, the word
 ///    flows whole to the next line exactly as before. `hyph == None` skips this
 ///    entirely, so the default path is byte-identical.
+///
+/// 3. **Break-word.** When `hyph` is `Some(ctx)` with `ctx.break_word`, a word
+///    that still does not fit AFTER the hyphenation attempt (failed/disabled) is
+///    broken at a CHARACTER boundary ([`try_break_word`]) so an unbreakable token
+///    wider than the box no longer overflows: the head joins the current line,
+///    the line closes, and the tail is re-queued, repeating until the tail fits.
+///    `forced_break` is set to `true` when at least one such break occurs so the
+///    caller can emit ONE `text.forced_break` advisory. `ctx.break_word == false`
+///    (or `hyph == None`) skips this entirely, so the default path is byte-identical.
 fn pack_lines_core(
     tokens: Vec<WordToken>,
-    profile: WidthProfile,
+    width_for: impl Fn(usize) -> f64,
     space_advance: f64,
     hyph: Option<&HyphenationContext>,
+    min_line_width: f64,
+    max_lines: usize,
+    forced_break: &mut bool,
 ) -> Vec<Line> {
     let mut lines: Vec<Line> = Vec::new();
     let mut cur: Vec<WordToken> = Vec::new();
@@ -488,10 +688,32 @@ fn pack_lines_core(
     let mut queue: std::collections::VecDeque<WordToken> = tokens.into();
 
     while let Some(tok) = queue.pop_front() {
+        // Blocked-line skip (runaround only). When the line about to receive its
+        // FIRST word (`cur` empty) has a band narrower than one usable line, emit
+        // an empty `Line` so the baseline advances past the exclusion band and
+        // re-evaluate at the next index WITHOUT consuming the word. Bounded by
+        // `max_lines` so an all-blocked tail clips rather than looping forever.
+        // With `min_line_width = NEG_INFINITY` (uniform/drop-cap callers) this
+        // branch is unreachable, so packing stays byte-identical.
+        if cur.is_empty() {
+            while width_for(lines.len()) < min_line_width {
+                if lines.len() >= max_lines {
+                    // Cap reached: drop the pending word (and the rest of the
+                    // queue) rather than spin. The text simply clips here.
+                    return lines;
+                }
+                lines.push(Line {
+                    words: Vec::new(),
+                    content_w: 0.0,
+                    paragraph: tok.src.paragraph,
+                });
+            }
+        }
+
         // The width budget for the line currently being filled is the width for
         // the line this word would land on (the next line index when `cur` is
         // empty, else the current one — `lines.len()` is that index).
-        let box_w = profile.width_for(lines.len());
+        let box_w = width_for(lines.len());
 
         // Paragraph boundary: a word from a later paragraph than the line being
         // filled forces a break first (single-paragraph docs never hit this).
@@ -521,6 +743,50 @@ fn pack_lines_core(
                     continue;
                 }
             }
+
+            // Break-word does NOT break here: a word that merely overflows the
+            // REMAINING space on a non-empty line must wrap WHOLE to the next
+            // line (CSS `overflow-wrap: break-word` only breaks a token that
+            // cannot fit a line by itself). The overflow flush below re-queues
+            // this word onto a fresh line; the empty-line break case then splits
+            // it ONLY if it is wider than the full box width.
+        }
+
+        // Break-word on an EMPTY line: the word alone is wider than the whole box
+        // (the URL case). Break it at a character boundary, place the head, close
+        // the line, and re-queue the tail. Repeat (via the queue) until the tail
+        // fits. Bounded by `max_lines` so a pathological zero-width box cannot
+        // loop forever. Skipped entirely when break-word is off → byte-identical.
+        if cur.is_empty()
+            && tok.advance > box_w
+            && let Some(ctx) = hyph
+            && ctx.break_word
+        {
+            if lines.len() >= max_lines {
+                // Cap reached: stop rather than spin on a degenerate box.
+                let advance = tok.advance;
+                let paragraph = tok.src.paragraph;
+                lines.push(Line {
+                    words: vec![tok],
+                    content_w: advance,
+                    paragraph,
+                });
+                return lines;
+            }
+            if let Some((head, tail)) = try_break_word(&tok, box_w, ctx) {
+                *forced_break = true;
+                let head_para = head.src.paragraph;
+                let head_advance = head.advance;
+                lines.push(Line {
+                    words: vec![head],
+                    content_w: head_advance,
+                    paragraph: head_para,
+                });
+                queue.push_front(tail);
+                continue;
+            }
+            // Not even one char fits `box_w` (zero/near-zero width): leave the
+            // word whole so it overflows as today rather than dropping it.
         }
 
         if overflow || para_break {
@@ -531,6 +797,14 @@ fn pack_lines_core(
                 paragraph: cur_para,
             });
             line_w = 0.0;
+            // Re-queue this word and restart the loop so the blocked-line skip at
+            // the top re-evaluates the NEWLY-opened line index against its band
+            // (it may itself be blocked by the exclusion). For uniform/drop-cap
+            // callers (`min_line_width = NEG_INFINITY`) the skip is inert and the
+            // word is simply placed on the next iteration, byte-identical to the
+            // original fall-through.
+            queue.push_front(tok);
+            continue;
         }
 
         if cur.is_empty() {
@@ -787,6 +1061,7 @@ fn render_chain_member(
     font_size: f32,
     text_x: f64,
     text_y: f64,
+    baseline_grid: Option<f64>,
     resolved: &BTreeMap<String, ResolvedToken>,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
@@ -799,6 +1074,39 @@ fn render_chain_member(
     let box_h_opt: Option<f64> = text.h.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
     let align = text.align.as_deref().unwrap_or("start");
     let deco_thickness = (font_size as f64 / 14.0).max(1.0);
+
+    // ── Baseline-grid snap (chain member) ────────────────────────────────
+    // Chain members share the page grid so columns align (this is what makes a
+    // three-column chain on a 14px grid line up). Compute the snap from this
+    // member box's own `text_y` and the shared grid `g`, with the same drop-cap
+    // guard as the single-box path (drop cap + baseline-grid is a v0 follow-up).
+    // With no grid this leaves `emit_text_y`/`emit_metrics` untouched
+    // (byte-identical to before).
+    let mut emit_text_y = text_y;
+    let mut emit_metrics = assignment.metrics;
+    let drop_cap_active = matches!(text.drop_cap_lines, Some(n) if n >= 1);
+    if let Some(g) = baseline_grid
+        && g.is_finite()
+        && g > 0.0
+        && !drop_cap_active
+    {
+        let (snapped_text_y, effective_line_height) = snap_to_baseline_grid(
+            text_y,
+            assignment.metrics.ascent,
+            assignment.metrics.line_height,
+            g,
+        );
+        emit_text_y = snapped_text_y;
+        emit_metrics.line_height = effective_line_height;
+        if assignment.metrics.line_height > g && !assignment.lines.is_empty() {
+            diagnostics.push(baseline_grid_snap_failed_diag(
+                &text.id,
+                assignment.metrics.line_height,
+                g,
+                text.source_span,
+            ));
+        }
+    }
 
     // overflow="fit": this member's assigned content must fit its own box. For
     // a continuation/last member this catches an article that overruns even the
@@ -866,10 +1174,12 @@ fn render_chain_member(
     emit_lines(
         &assignment.lines,
         text_x,
-        text_y,
+        // Baseline-grid snap (no-op when no grid is active): the first baseline
+        // lands on the shared page grid so columns align across members.
+        emit_text_y,
         box_w,
         align,
-        assignment.metrics,
+        emit_metrics,
         font_size,
         deco_thickness,
         // Only the FINAL chain member leaves its last line ragged under
@@ -888,7 +1198,7 @@ fn render_chain_member(
         commands.push(SceneCommand::PopTransform);
     }
 
-    assignment.lines.len() as f64 * assignment.metrics.line_height
+    assignment.lines.len() as f64 * emit_metrics.line_height
 }
 
 // ── Glyph conversion helper ───────────────────────────────────────────────────
@@ -1405,6 +1715,7 @@ pub(super) fn compile_text(
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
     footnote_markers: &BTreeMap<String, String>,
+    node_boxes: &BTreeMap<String, (f64, f64, f64, f64)>,
     ctx: RenderCtx,
 ) -> f64 {
     // Skip invisible text nodes.
@@ -1465,6 +1776,7 @@ pub(super) fn compile_text(
             fs,
             text_x,
             text_y,
+            ctx.baseline_grid,
             resolved,
             commands,
             diagnostics,
@@ -1937,17 +2249,71 @@ pub(super) fn compile_text(
             node_direction,
         );
 
+        // ── Baseline-grid snap (single-box wrap path) ────────────────────
+        // When the page declares a positive baseline grid `g` AND no drop cap
+        // is active on this node, snap the first baseline down to the grid and
+        // inflate the inter-line advance to a multiple of `g`. Drop-cap +
+        // baseline-grid is a documented v0 follow-up (skip the snap when a drop
+        // cap is active, exactly like the existing drop-cap/chain deferral).
+        // `text_y` here is already in the post-`ctx.dy` space, the same space
+        // the grid origin is measured in. With no grid this leaves `emit_text_y`
+        // = `text_y` and `emit_metrics` = `metrics` (byte-identical to before).
+        let mut emit_text_y = text_y;
+        let mut emit_metrics = metrics;
+        if let Some(g) = ctx.baseline_grid
+            && g.is_finite()
+            && g > 0.0
+            && dropcap_initial.is_none()
+        {
+            let (snapped_text_y, effective_line_height) =
+                snap_to_baseline_grid(text_y, metrics.ascent, metrics.line_height, g);
+            emit_text_y = snapped_text_y;
+            emit_metrics.line_height = effective_line_height;
+            // Advisory: a single line is taller than one grid cell, so leading
+            // grows to a multiple of `g`. Emit ONCE per node (not per line).
+            if metrics.line_height > g {
+                diagnostics.push(baseline_grid_snap_failed_diag(
+                    &text.id,
+                    metrics.line_height,
+                    g,
+                    text.source_span,
+                ));
+            }
+        }
+
+        // ── Text-runaround exclusion resolution ──────────────────────────
+        // Resolve `text-exclusion` against this page's node boxes using the
+        // EFFECTIVE (post-baseline-snap) `emit_text_y` and line height, so the
+        // band geometry composes with the baseline grid. An id naming no node box
+        // → advisory + NO exclusion (uniform path, byte-identical). A drop cap
+        // present → no exclusion (drop-cap + runaround is a v0 follow-up). When
+        // the attribute is absent, `exclusion` stays `None` and the body packs/
+        // emits exactly as before (byte-identical). Resolved here ONCE.
+        let exclusion: Option<(f64, f64, f64, f64)> = match &text.text_exclusion {
+            None => None,
+            Some(target) => match node_boxes.get(target) {
+                // Drop cap + runaround is a documented v0 follow-up: skip the
+                // exclusion and keep the existing drop-cap path.
+                Some(_) if dropcap_initial.is_some() => None,
+                Some(rect) => Some(*rect),
+                None => {
+                    diagnostics.push(Diagnostic::warning(
+                        "text-exclusion.unresolved_ref",
+                        format!(
+                            "text node '{}' references unknown exclusion node '{}'",
+                            text.id, target
+                        ),
+                        text.source_span,
+                        Some(text.id.clone()),
+                    ));
+                    None
+                }
+            },
+        };
+
         // Shape the cap now that the body `line_height` is known.
         let dropcap: Option<DropCap> = dropcap_initial.as_ref().and_then(|(init, n)| {
-            shape_drop_cap(
-                init,
-                &families,
-                base_weight,
-                metrics.line_height,
-                *n,
-                engine,
-                fonts,
-            )
+            shape_drop_cap(init, &families, base_weight, metrics.line_height, *n, engine, fonts)
         });
 
         if let Some(cap) = &dropcap {
@@ -1965,9 +2331,6 @@ pub(super) fn compile_text(
             let lines = pack_lines_variable(tokens, profile, metrics.space_advance);
             fit_line_count = lines.len();
 
-            // Drop-cap baseline: the cap's top sits at the box top, so its
-            // baseline is one cap-ascent below `text_y`. Emit it ONCE at the
-            // box left edge, in the node's resolved color/family.
             commands.push(SceneCommand::DrawGlyphRun {
                 x: text_x,
                 y: text_y + cap.ascent,
@@ -1999,23 +2362,126 @@ pub(super) fn compile_text(
                 TextDirection::Ltr,
                 commands,
             );
+        } else if let Some((ex, ey, ew, eh)) = exclusion {
+            // ── TEXT RUNAROUND (largest-area / jump) ──────────────────────
+            // For each prospective line `i`, its vertical span is
+            // `[lh_y(i), lh_y(i+1))` where `lh_y(i) = emit_text_y + i*lh`. A line
+            // whose band overlaps the exclusion `[ey, ey+eh)` flows into the
+            // LARGER free horizontal segment (left or right of the rect); a line
+            // with neither segment ≥ MIN_W is BLOCKED (empty), so text flows
+            // above and below a full-width exclusion. Hyphenation is disabled in
+            // v0 runaround (like the drop-cap path).
+            let lh = emit_metrics.line_height;
+            // A line narrower than one space is useless → treat as blocked.
+            let min_w = metrics.space_advance.max(1.0);
+            // Half-open vertical-overlap test + larger-segment selection.
+            let band_for = move |i: usize| -> (f64, f64) {
+                let line_top = emit_text_y + (i as f64) * lh;
+                let line_bottom = line_top + lh;
+                // No overlap with the exclusion band → full measure.
+                if line_bottom <= ey || line_top >= ey + eh {
+                    return (0.0, box_w);
+                }
+                let left_w = (ex - text_x).max(0.0);
+                let right_w = ((text_x + box_w) - (ex + ew)).max(0.0);
+                if left_w >= right_w && left_w >= min_w {
+                    (0.0, left_w)
+                } else if right_w >= min_w {
+                    ((ex + ew) - text_x, right_w)
+                } else {
+                    // Neither segment is wide enough → blocked line.
+                    (0.0, 0.0)
+                }
+            };
+
+            // Bound the blocked-skip loop: at most the number of lines that fit
+            // the box height (when known) plus slack, else a safe constant cap.
+            let max_lines = match box_h_opt {
+                Some(box_h) if lh > 0.0 => ((box_h / lh).ceil() as usize).saturating_add(4),
+                _ => 4096,
+            };
+
+            let lines = pack_lines_runaround(
+                tokens,
+                |i| band_for(i).1,
+                metrics.space_advance,
+                min_w,
+                max_lines,
+            );
+            fit_line_count = lines.len();
+
+            // Per-line geometry: blocked lines emit as empty `Line`s (no words),
+            // so the baseline advances past them with no glyphs — producing the
+            // above/below flow naturally.
+            emit_lines_profiled(
+                &lines,
+                |i| {
+                    let (dx, w) = band_for(i);
+                    (text_x + dx, w)
+                },
+                emit_text_y,
+                align,
+                emit_metrics,
+                font_size,
+                deco_thickness,
+                false,
+                node_direction,
+                commands,
+            );
         } else {
-            // Opt-in hyphenation: build a context only when `hyphenate=#true`
-            // AND the embedded dictionary is available. Absent → `None` → the
-            // packer is byte-identical to before.
-            let hyph_ctx = if text.hyphenate == Some(true) {
-                en_us_hyphenator().map(|dict| HyphenationContext {
-                    dict,
+            // Opt-in hyphenation and/or break-word: build a context when EITHER
+            // `hyphenate=#true` OR `overflow-wrap="break-word"` is set. The
+            // dictionary is loaded regardless (it is needed only by the
+            // hyphenation branch; break-word is independent of it), so a
+            // break-word-only node still gets a context even if the dict is `None`.
+            // When NEITHER is requested the context is `None` → the packer is
+            // byte-identical to before.
+            let want_hyphenate = text.hyphenate == Some(true);
+            let want_break_word = text.overflow_wrap.as_deref() == Some("break-word");
+            let hyph_ctx = if want_hyphenate || want_break_word {
+                Some(HyphenationContext {
+                    // `dict` is consulted only by the hyphenation branch (which
+                    // also requires `want_hyphenate` via a `None` early-return in
+                    // `try_hyphenate`); a break-word-only node leaves it `None`.
+                    dict: if want_hyphenate {
+                        en_us_hyphenator()
+                    } else {
+                        None
+                    },
                     engine,
                     fonts,
                     families: &families,
                     hyphen: "-",
                     direction: node_direction,
+                    break_word: want_break_word,
                 })
             } else {
                 None
             };
-            let lines = pack_lines(tokens, box_w, metrics.space_advance, hyph_ctx.as_ref());
+            let mut forced_break = false;
+            let lines = pack_lines_reporting(
+                tokens,
+                box_w,
+                metrics.space_advance,
+                hyph_ctx.as_ref(),
+                &mut forced_break,
+            );
+
+            // One advisory per node when a forced character-boundary break
+            // occurred (break-word split an overlong token). Mirrors the
+            // `text.overflow` warning construction in this file.
+            if forced_break {
+                diagnostics.push(Diagnostic::warning(
+                    "text.forced_break",
+                    format!(
+                        "text node '{}' has a token wider than its column; forced a \
+                         character-boundary break (consider editing the copy)",
+                        text.id
+                    ),
+                    text.source_span,
+                    Some(text.id.clone()),
+                ));
+            }
 
             // Record the actual line count for the overflow="fit" check below.
             fit_line_count = lines.len();
@@ -2023,10 +2489,12 @@ pub(super) fn compile_text(
             emit_lines(
                 &lines,
                 text_x,
-                text_y,
+                // Baseline-grid snap (no-op when no grid is active): the first
+                // baseline lands on the grid and the advance is a multiple of g.
+                emit_text_y,
                 box_w,
                 align,
-                metrics,
+                emit_metrics,
                 font_size,
                 deco_thickness,
                 // Single-box wrap: the batch's last line IS the paragraph's last
@@ -2615,4 +3083,286 @@ mod rtl_tests {
         let xs = emit_line(TextDirection::Rtl, "center");
         assert_eq!(xs, vec![165.0, 200.0, 225.0]);
     }
+}
+
+#[cfg(test)]
+mod packer_tests {
+    use super::*;
+
+    /// A single-run [`WordToken`] of the given `advance` (deterministic).
+    fn word(advance: f64) -> WordToken {
+        WordToken {
+            runs: vec![ZenithGlyphRun {
+                font_id: "test-font".to_owned(),
+                font_size: 16.0,
+                ascent: 12.0,
+                descent: 4.0,
+                line_height: 18.0,
+                advance_width: advance as f32,
+                glyphs: Vec::new(),
+            }],
+            advance,
+            color: Color::srgb(0, 0, 0, 255),
+            underline: false,
+            strikethrough: false,
+            baseline_dy: 0.0,
+            src: WordSource {
+                text: String::new(),
+                weight: 400,
+                style: FontStyle::Normal,
+                font_size: 16.0,
+                paragraph: 0,
+                hyphen_part: None,
+            },
+        }
+    }
+
+    fn tokens(advances: &[f64]) -> Vec<WordToken> {
+        advances.iter().copied().map(word).collect()
+    }
+
+    /// A line's (content_w, word advances) for comparison.
+    fn shape(lines: &[Line]) -> Vec<(f64, Vec<f64>)> {
+        lines
+            .iter()
+            .map(|l| (l.content_w, l.words.iter().map(|w| w.advance).collect()))
+            .collect()
+    }
+
+    /// The closure refactor must leave uniform packing byte-identical: packing the
+    /// same tokens via `pack_lines` (the closure path with `NEG_INFINITY` sentinel)
+    /// must produce the same lines as an independent reference greedy pack.
+    #[test]
+    fn pack_uniform_byte_identical_after_refactor() {
+        // box_w = 70, space = 5. advances: 10,20,30,40,15.
+        // Reference greedy: 10 (+5+20=35) (+5+30=70) → line0 [10,20,30] content 70.
+        //   next: 40 (+5+15=60) → line1 [40,15] content 60.
+        let box_w = 70.0;
+        let space = 5.0;
+        let advances = [10.0, 20.0, 30.0, 40.0, 15.0];
+        let packed = pack_lines(tokens(&advances), box_w, space, None);
+        assert_eq!(
+            shape(&packed),
+            vec![(70.0, vec![10.0, 20.0, 30.0]), (60.0, vec![40.0, 15.0]),],
+            "uniform packing must be unchanged by the closure refactor"
+        );
+    }
+
+    /// A blocked band (width below `min_line_width`) yields an EMPTY line at that
+    /// index, advancing the baseline without consuming the pending word.
+    #[test]
+    fn runaround_blocked_band_emits_empty_line() {
+        // Line 0 blocked (width 0 < min 1), line 1+ full width 100.
+        let band = |i: usize| if i == 0 { 0.0 } else { 100.0 };
+        let lines = pack_lines_runaround(tokens(&[10.0, 20.0]), band, 5.0, 1.0, 16);
+        // line0 is empty (blocked), line1 packs both words: 10 +5+20 = 35.
+        assert_eq!(
+            shape(&lines),
+            vec![(0.0, vec![]), (35.0, vec![10.0, 20.0])],
+            "a blocked band must emit an empty line then flow below it"
+        );
+    }
+
+    /// A narrower band forces MORE line breaks than the full width would.
+    #[test]
+    fn runaround_narrow_band_breaks_more() {
+        // band width 30 on every line, space 5. advances 10,20,30.
+        // 10 (+5+20=35>30) → line0 [10]; 20 (+5+30=55>30) → line1 [20]; 30 → line2.
+        let lines = pack_lines_runaround(tokens(&[10.0, 20.0, 30.0]), |_| 30.0, 5.0, 1.0, 64);
+        assert_eq!(
+            shape(&lines),
+            vec![(10.0, vec![10.0]), (20.0, vec![20.0]), (30.0, vec![30.0])],
+        );
+    }
+
+    /// The `max_lines` cap stops an all-blocked tail from looping forever; the
+    /// pending words are clipped once the cap is hit.
+    #[test]
+    fn runaround_all_blocked_respects_max_lines() {
+        // Every band blocked → after `max_lines` empty lines, clip remaining words.
+        let lines = pack_lines_runaround(tokens(&[10.0, 20.0]), |_| 0.0, 5.0, 1.0, 3);
+        assert_eq!(lines.len(), 3, "blocked tail must be capped at max_lines");
+        assert!(
+            lines.iter().all(|l| l.words.is_empty()),
+            "all capped lines are empty (words clipped)"
+        );
+    }
+}
+
+#[cfg(test)]
+mod baseline_grid_unit_tests {
+    use super::*;
+
+    #[test]
+    fn snaps_first_baseline_down_to_next_grid_line() {
+        // g=14, ascent=12, text_y chosen so natural baseline = 350.0 (a multiple
+        // of 14 is 350=25*14) → snapped baseline stays 350; snapped_text_y=338.
+        let (ty, lh) = snap_to_baseline_grid(/* text_y */ 338.0, 12.0, 18.0, 14.0);
+        assert_eq!(ty + 12.0, 350.0, "baseline already on the grid stays put");
+        // 18 → ceil(18/14)=2 → 28.
+        assert_eq!(lh, 28.0);
+    }
+
+    #[test]
+    fn natural_baseline_355_snaps_to_364() {
+        // natural baseline = text_y(343) + ascent(12) = 355; next grid line ≥ 355
+        // is 364 (26*14). snapped_text_y = 364 - 12 = 352.
+        let (ty, lh) = snap_to_baseline_grid(343.0, 12.0, 14.0, 14.0);
+        assert_eq!(ty + 12.0, 364.0);
+        // line_height 14 == g → effective stays 14 (ceil(14/14)=1).
+        assert_eq!(lh, 14.0);
+    }
+
+    #[test]
+    fn effective_advance_is_smallest_multiple_ge_line_height() {
+        // line_height just under one cell → 1 cell; just over → 2 cells.
+        let (_, lh1) = snap_to_baseline_grid(0.0, 10.0, 13.9, 14.0);
+        assert_eq!(lh1, 14.0);
+        let (_, lh2) = snap_to_baseline_grid(0.0, 10.0, 14.1, 14.0);
+        assert_eq!(lh2, 28.0);
+    }
+
+    #[test]
+    fn snap_failed_diag_names_node_and_pitch() {
+        let d = baseline_grid_snap_failed_diag("col1", 18.0, 14.0, None);
+        assert_eq!(d.code, "baseline-grid.snap_failed");
+        assert!(d.message.contains("col1"), "message names the node id");
+        assert!(d.message.contains("18"), "message names line-height");
+        assert!(d.message.contains("14"), "message names the grid pitch");
+        assert!(
+            d.message.contains("28"),
+            "message names the snapped advance"
+        );
+    }
+}
+
+#[cfg(test)]
+mod break_word_tests {
+    use super::*;
+    use zenith_core::default_provider;
+
+    /// Shape `word` into a single [`WordToken`] using the real engine + bundled
+    /// fonts, so `try_break_word` exercises real glyph advances. The `src.text`
+    /// carries the original word so the splitter can slice it.
+    fn shape_word(word: &str, engine: &RustybuzzEngine, fonts: &dyn FontProvider) -> WordToken {
+        let families = vec!["Noto Sans".to_owned()];
+        let spans = [ResolvedSpan {
+            text: word.to_owned(),
+            color: Color::srgb(0, 0, 0, 255),
+            underline: false,
+            strikethrough: false,
+            weight: 400,
+            style: FontStyle::Normal,
+            font_size: 16.0,
+            baseline_dy: 0.0,
+        }];
+        let mut diags = Vec::new();
+        let (mut tokens, _m) = shape_words(
+            &spans,
+            &families,
+            16.0,
+            400,
+            engine,
+            fonts,
+            &mut diags,
+            "t",
+            None,
+            TextDirection::Ltr,
+        );
+        tokens.pop().expect("the word must shape to one token")
+    }
+
+    fn ctx<'a>(
+        engine: &'a RustybuzzEngine,
+        fonts: &'a dyn FontProvider,
+        families: &'a [String],
+    ) -> HyphenationContext<'a> {
+        HyphenationContext {
+            dict: None,
+            engine,
+            fonts,
+            families,
+            hyphen: "-",
+            direction: TextDirection::Ltr,
+            break_word: true,
+        }
+    }
+
+    /// `try_break_word` splits a long token so the head fits `avail`, the head has
+    /// at least one char, and head+tail char text reconstructs the original.
+    #[test]
+    fn splits_and_reconstructs_original_text() {
+        let engine = RustybuzzEngine::new();
+        let provider = default_provider();
+        let families = vec!["Noto Sans".to_owned()];
+        let original = "https://very-long.example.com/some/deep/path";
+        let word = shape_word(original, &engine, &provider);
+        let c = ctx(&engine, &provider, &families);
+
+        // Pick an `avail` far smaller than the whole word's advance.
+        let avail = word.advance / 3.0;
+        let (head, tail) = try_break_word(&word, avail, &c).expect("a prefix must fit");
+
+        assert!(head.advance <= avail, "head must fit avail");
+        assert!(
+            !head.src.text.is_empty() && head.src.text.chars().count() >= 1,
+            "head needs at least one char"
+        );
+        assert!(!tail.src.text.is_empty(), "tail must be non-empty");
+        assert_eq!(
+            format!("{}{}", head.src.text, tail.src.text),
+            original,
+            "head+tail must reconstruct the original token exactly"
+        );
+    }
+
+    /// A token containing multi-byte UTF-8 chars (an em-dash and an accented
+    /// char) is split only on char boundaries — no panic, no lost/mojibake bytes.
+    #[test]
+    fn respects_multibyte_char_boundaries() {
+        let engine = RustybuzzEngine::new();
+        let provider = default_provider();
+        let families = vec!["Noto Sans".to_owned()];
+        let original = "café—über—straße—long—compound—word";
+        let word = shape_word(original, &engine, &provider);
+        let c = ctx(&engine, &provider, &families);
+
+        let avail = word.advance / 2.0;
+        let (head, tail) = try_break_word(&word, avail, &c).expect("a prefix must fit");
+        // Reconstruction proves no byte was lost or duplicated and that both
+        // slices are valid UTF-8 (otherwise `src.text` would not equal a slice).
+        assert_eq!(format!("{}{}", head.src.text, tail.src.text), original);
+        // The split point is a valid char boundary of the original string.
+        assert!(
+            original.is_char_boundary(head.src.text.len()),
+            "split must land on a char boundary"
+        );
+    }
+
+    /// A box too narrow for even one character yields `None`, leaving the caller
+    /// to keep the word whole (it overflows as today).
+    #[test]
+    fn returns_none_when_no_char_fits() {
+        let engine = RustybuzzEngine::new();
+        let provider = default_provider();
+        let families = vec!["Noto Sans".to_owned()];
+        let word = shape_word("wide", &engine, &provider);
+        let c = ctx(&engine, &provider, &families);
+        assert!(
+            try_break_word(&word, 0.0, &c).is_none(),
+            "zero avail fits no char → None"
+        );
+    }
+
+    /// A single-character token cannot be split (no useful interior boundary).
+    #[test]
+    fn single_char_token_is_not_split() {
+        let engine = RustybuzzEngine::new();
+        let provider = default_provider();
+        let families = vec!["Noto Sans".to_owned()];
+        let word = shape_word("W", &engine, &provider);
+        let c = ctx(&engine, &provider, &families);
+        assert!(try_break_word(&word, 1000.0, &c).is_none());
+    }
+
 }

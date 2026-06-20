@@ -1748,6 +1748,255 @@ page id="page.flow5" w=(px)400 h=(px)400 {
 }
 
 // ══════════════════════════════════════════════════════════════════════
+// Frame grid-layout compile tests
+// ══════════════════════════════════════════════════════════════════════
+
+/// 2×3 grid, 6 children, gap=20, pad=0. Children tile row-major into a fixed
+/// `cols × rows` grid; horizontal and vertical gutters equal `gap`.
+#[test]
+fn grid_two_by_three_positions_children_with_gutters() {
+    // frame w=320 h=300, cols=2, rows=3, gap=20, pad=0.
+    //   col_w = (320 - (2-1)*20) / 2 = 150
+    //   row_h = (300 - (3-1)*20) / 3 = 260/3
+    let src = r##"zenith version=1 {
+  project id="proj.grid1" name="Grid1"
+  tokens format="zenith-token-v1" {
+token id="color.k" type="color" value="#000000"
+token id="space.gap" type="dimension" value=(px)20
+  }
+  styles {
+style id="style.grid" {
+  gap (token)"space.gap"
+}
+  }
+  document id="doc.grid1" title="Grid1" {
+page id="page.grid1" w=(px)400 h=(px)400 {
+  frame id="frame.grid" x=(px)0 y=(px)0 w=(px)320 h=(px)300 layout="grid" columns=2 rows=3 style="style.grid" {
+    rect id="r0" fill=(token)"color.k"
+    rect id="r1" fill=(token)"color.k"
+    rect id="r2" fill=(token)"color.k"
+    rect id="r3" fill=(token)"color.k"
+    rect id="r4" fill=(token)"color.k"
+    rect id="r5" fill=(token)"color.k"
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let rects = fill_rects(&result);
+    assert_eq!(
+        rects.len(),
+        6,
+        "expected six child FillRects; got {rects:?}"
+    );
+
+    let gap = 20.0;
+    let col_w = (320.0 - gap) / 2.0; // 150
+    let row_h = (300.0 - 2.0 * gap) / 3.0; // 260/3
+
+    // Expected origins, row-major.
+    for (i, (x, y, w, h)) in rects.iter().enumerate() {
+        let col = (i % 2) as f64;
+        let row = (i / 2) as f64;
+        let exp_x = col * (col_w + gap);
+        let exp_y = row * (row_h + gap);
+        assert!(
+            (*x - exp_x).abs() < 1e-9,
+            "cell {i}: x expected {exp_x}; got {x}"
+        );
+        assert!(
+            (*y - exp_y).abs() < 1e-9,
+            "cell {i}: y expected {exp_y}; got {y}"
+        );
+        assert!(
+            (*w - col_w).abs() < 1e-9,
+            "cell {i}: w expected {col_w}; got {w}"
+        );
+        assert!(
+            (*h - row_h).abs() < 1e-9,
+            "cell {i}: h expected {row_h}; got {h}"
+        );
+    }
+
+    // Horizontal gutter between col0 and col1 equals gap.
+    let (x0, _, w0, _) = rects[0];
+    let (x1, _, _, _) = rects[1];
+    assert!(
+        (x1 - (x0 + w0) - gap).abs() < 1e-9,
+        "horizontal gutter must equal gap ({gap})"
+    );
+    // Vertical gutter between row0 and row1 equals gap.
+    let (_, y0, _, h0) = rects[0];
+    let (_, y2, _, _) = rects[2];
+    assert!(
+        (y2 - (y0 + h0) - gap).abs() < 1e-9,
+        "vertical gutter must equal gap ({gap})"
+    );
+}
+
+/// `layout="grid"` with no `columns` → single column stack; the scene defaults
+/// to 1 column and validation emits a `grid.missing_columns` advisory.
+#[test]
+fn grid_default_columns_is_one() {
+    let src = r##"zenith version=1 {
+  project id="proj.grid2" name="Grid2"
+  tokens format="zenith-token-v1" {
+token id="color.k" type="color" value="#000000"
+  }
+  styles {}
+  document id="doc.grid2" title="Grid2" {
+page id="page.grid2" w=(px)400 h=(px)400 {
+  frame id="frame.grid" x=(px)0 y=(px)0 w=(px)300 h=(px)300 layout="grid" {
+    rect id="r0" fill=(token)"color.k"
+    rect id="r1" fill=(token)"color.k"
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+
+    let rects = fill_rects(&result);
+    assert_eq!(
+        rects.len(),
+        2,
+        "expected two child FillRects; got {rects:?}"
+    );
+    // Single column: both children share x and span the full content width.
+    let (x0, _, w0, _) = rects[0];
+    let (x1, _, w1, _) = rects[1];
+    assert_eq!(x0, 0.0, "single-column child0 x must be content_left (0)");
+    assert_eq!(x1, 0.0, "single-column child1 x must be content_left (0)");
+    assert_eq!(w0, 300.0, "single column width must be full content width");
+    assert_eq!(w1, 300.0, "single column width must be full content width");
+    // Stacked vertically (row1 below row0).
+    let (_, y0, _, _) = rects[0];
+    let (_, y1, _, _) = rects[1];
+    assert!(y1 > y0, "child1 must sit below child0 in a single column");
+
+    // The validator emits a grid.missing_columns advisory.
+    let report = zenith_core::validate(&doc);
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "grid.missing_columns"),
+        "expected grid.missing_columns advisory; codes: {:?}",
+        report
+            .diagnostics
+            .iter()
+            .map(|d| &d.code)
+            .collect::<Vec<_>>()
+    );
+}
+
+/// `rows` omitted → derived as `ceil(n / cols)`; the last row is positioned
+/// correctly (3 children, 2 cols → 2 rows; child index 2 starts row 1).
+#[test]
+fn grid_derived_rows_from_child_count() {
+    let src = r##"zenith version=1 {
+  project id="proj.grid3" name="Grid3"
+  tokens format="zenith-token-v1" {
+token id="color.k" type="color" value="#000000"
+  }
+  styles {}
+  document id="doc.grid3" title="Grid3" {
+page id="page.grid3" w=(px)400 h=(px)400 {
+  frame id="frame.grid" x=(px)0 y=(px)0 w=(px)300 h=(px)300 layout="grid" columns=2 {
+    rect id="r0" fill=(token)"color.k"
+    rect id="r1" fill=(token)"color.k"
+    rect id="r2" fill=(token)"color.k"
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let rects = fill_rects(&result);
+    assert_eq!(
+        rects.len(),
+        3,
+        "expected three child FillRects; got {rects:?}"
+    );
+
+    // n=3, cols=2 → effective_rows = ceil(3/2) = 2. gap=0, pad=0.
+    //   col_w = 300/2 = 150, row_h = 300/2 = 150.
+    let (x0, y0, w0, h0) = rects[0];
+    let (x1, y1, _, _) = rects[1];
+    let (x2, y2, _, _) = rects[2];
+    assert_eq!((x0, y0, w0, h0), (0.0, 0.0, 150.0, 150.0));
+    // r1 is col1 of row0.
+    assert_eq!((x1, y1), (150.0, 0.0));
+    // r2 wraps to the last row (row1, col0).
+    assert_eq!((x2, y2), (0.0, 150.0));
+}
+
+/// A non-grid frame (absolute and flow) emits the identical command stream
+/// regardless of the grid fields existing on the AST — default-off identity.
+#[test]
+fn non_grid_frame_byte_identical() {
+    // Absolute frame: child keeps its own coords.
+    let abs_src = r##"zenith version=1 {
+  project id="proj.grid4" name="Grid4"
+  tokens format="zenith-token-v1" {
+token id="color.k" type="color" value="#000000"
+  }
+  styles {}
+  document id="doc.grid4" title="Grid4" {
+page id="page.grid4" w=(px)200 h=(px)200 {
+  frame id="frame.abs" x=(px)20 y=(px)30 w=(px)160 h=(px)160 {
+    rect id="rect.a" x=(px)50 y=(px)60 w=(px)40 h=(px)30 fill=(token)"color.k"
+  }
+}
+  }
+}
+"##;
+    let abs = compile(&parse(abs_src), &default_provider());
+    // The child kept its own absolute coords (no grid injection).
+    assert_eq!(fill_rects(&abs), vec![(50.0, 60.0, 40.0, 30.0)]);
+
+    // Flow frame: still stacks vertically, unaffected by grid code.
+    let flow_src = r##"zenith version=1 {
+  project id="proj.grid5" name="Grid5"
+  tokens format="zenith-token-v1" {
+token id="color.k" type="color" value="#000000"
+  }
+  styles {}
+  document id="doc.grid5" title="Grid5" {
+page id="page.grid5" w=(px)200 h=(px)200 {
+  frame id="frame.flow" x=(px)0 y=(px)0 w=(px)160 h=(px)160 layout="flow" {
+    rect id="rect.a" h=(px)30 fill=(token)"color.k"
+    rect id="rect.b" h=(px)30 fill=(token)"color.k"
+  }
+}
+  }
+}
+"##;
+    let flow = compile(&parse(flow_src), &default_provider());
+    let rects = fill_rects(&flow);
+    assert_eq!(rects.len(), 2);
+    // Stacked (flow), NOT side-by-side (grid would tile horizontally).
+    assert_eq!(rects[0].0, rects[1].0, "flow children share x (stacked)");
+    assert!(rects[1].1 > rects[0].1, "flow child2 below child1");
+}
+
+// ══════════════════════════════════════════════════════════════════════
 // Image node compile tests
 // ══════════════════════════════════════════════════════════════════════
 
@@ -6805,5 +7054,501 @@ page id="page.b" w=(px)1200 h=(px)2000 {{
     assert_eq!(
         r1, r2,
         "widow/orphan-off chain render must be deterministic"
+    );
+}
+
+// ── Page baseline-grid snap ───────────────────────────────────────────
+
+/// A page with one multi-line wrapping text node. `grid_attr` is spliced onto
+/// the `page` line verbatim (e.g. `baseline-grid=(px)14`), or empty for the
+/// no-grid baseline. The narrow box (`w=(px)150`) forces several wrapped lines.
+fn baseline_grid_doc(grid_attr: &str) -> Document {
+    let src = format!(
+        r##"zenith version=1 {{
+  project id="proj.bg" name="BG"
+  tokens format="zenith-token-v1" {{
+token id="font.body" type="fontFamily" value="Noto Sans"
+  }}
+  styles {{}}
+  document id="doc.bg" title="BG" {{
+page id="page.bg" w=(px)400 h=(px)600 {grid_attr} {{
+  text id="col1" x=(px)10 y=(px)25 w=(px)150 h=(px)500 font-family=(token)"font.body" font-size=(px)18 {{
+    span "The quick brown fox jumps over the lazy dog again and again across the line."
+  }}
+}}
+  }}
+}}
+"##
+    );
+    parse(&src)
+}
+
+/// Baseline y of every emitted glyph run, in command order.
+fn glyph_run_ys(cmds: &[SceneCommand]) -> Vec<f64> {
+    cmds.iter()
+        .filter_map(|c| match c {
+            SceneCommand::DrawGlyphRun { y, .. } => Some(*y),
+            _ => None,
+        })
+        .collect()
+}
+
+/// DISTINCT baseline y values (one per wrapped line), ascending. A line may emit
+/// several glyph runs (one per span fragment); they share one baseline y, so we
+/// dedup to get the per-line baselines.
+fn distinct_line_ys(cmds: &[SceneCommand]) -> Vec<f64> {
+    let mut ys = glyph_run_ys(cmds);
+    ys.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    ys.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+    ys
+}
+
+#[test]
+fn baseline_grid_none_is_byte_identical() {
+    // A page WITHOUT a baseline-grid attribute must compile byte-identically to
+    // itself (the default-off path is unchanged) and must emit NO snap diags.
+    let doc = baseline_grid_doc("");
+    let r1 = compile(&doc, &default_provider());
+    let r2 = compile(&doc, &default_provider());
+    assert_eq!(
+        r1.scene.commands, r2.scene.commands,
+        "grid-absent render must be deterministic / unchanged"
+    );
+    assert!(
+        !r1.diagnostics
+            .iter()
+            .any(|d| d.code == "baseline-grid.snap_failed"),
+        "no snap diagnostic without a grid"
+    );
+    // Sanity: the node actually wrapped into multiple lines.
+    assert!(
+        glyph_run_ys(&r1.scene.commands).len() >= 2,
+        "test text must wrap into multiple lines"
+    );
+}
+
+#[test]
+fn baseline_grid_snaps_first_baseline_to_grid() {
+    // With g=14, the first emitted baseline must land on a multiple of 14, and
+    // it must differ from the un-snapped baseline (proving the snap is active).
+    let g = 14.0;
+    let snapped = compile(
+        &baseline_grid_doc("baseline-grid=(px)14"),
+        &default_provider(),
+    );
+    let plain = compile(&baseline_grid_doc(""), &default_provider());
+
+    let snapped_ys = glyph_run_ys(&snapped.scene.commands);
+    let plain_ys = glyph_run_ys(&plain.scene.commands);
+    let first_snapped = *snapped_ys.first().expect("snapped node emits a run");
+    let first_plain = *plain_ys.first().expect("plain node emits a run");
+
+    // First baseline is the next grid line ≥ the natural baseline.
+    let rem = first_snapped % g;
+    assert!(
+        rem.abs() < 1e-6 || (g - rem).abs() < 1e-6,
+        "first baseline {first_snapped} must be a multiple of {g}"
+    );
+    assert!(
+        first_snapped >= first_plain - 1e-9,
+        "snapped baseline moves DOWN (≥ natural): {first_snapped} vs {first_plain}"
+    );
+    assert!(
+        first_snapped - first_plain < g + 1e-9,
+        "snap moves down by less than one full grid cell"
+    );
+}
+
+#[test]
+fn baseline_grid_uniform_advance_is_multiple_of_pitch() {
+    // Consecutive line baselines differ by ceil(line_height/g)*g — and since
+    // line_height (18px Noto) > g (14), that advance is 28 (2× grid).
+    let g = 14.0;
+    let r = compile(
+        &baseline_grid_doc("baseline-grid=(px)14"),
+        &default_provider(),
+    );
+    let ys = distinct_line_ys(&r.scene.commands);
+    assert!(ys.len() >= 2, "need ≥2 wrapped lines to check advance");
+    let advance = ys[1] - ys[0];
+    // The advance must be a positive multiple of g (the smallest multiple of g
+    // ≥ the resolved Noto line-height at 18px). It is uniform across all lines.
+    assert!(advance > 0.0, "advance must be positive; got {advance}");
+    let mult = advance / g;
+    assert!(
+        (mult - mult.round()).abs() < 1e-6 && mult.round() >= 1.0,
+        "advance {advance} must be a positive integer multiple of {g}"
+    );
+    // Every consecutive pair shares the same multiple-of-g advance.
+    for w in ys.windows(2) {
+        let d = w[1] - w[0];
+        assert!(
+            (d - advance).abs() < 1e-6,
+            "all line advances equal; got {d} vs {advance}"
+        );
+        let rem = d % g;
+        assert!(
+            rem.abs() < 1e-6 || (g - rem).abs() < 1e-6,
+            "advance {d} must be a multiple of {g}"
+        );
+    }
+}
+
+#[test]
+fn baseline_grid_snap_failed_when_line_height_exceeds_pitch() {
+    // line_height (18px Noto body) > g=14 → one advisory snap_failed diagnostic
+    // for the node. With a generous grid (g=40 ≥ line_height) → NO diagnostic.
+    let tight = compile(
+        &baseline_grid_doc("baseline-grid=(px)14"),
+        &default_provider(),
+    );
+    let tight_diags: Vec<_> = tight
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "baseline-grid.snap_failed")
+        .collect();
+    assert_eq!(
+        tight_diags.len(),
+        1,
+        "exactly one snap_failed advisory per affected node; got {:?}",
+        tight.diagnostics
+    );
+    assert!(
+        tight_diags[0].message.contains("col1"),
+        "diagnostic names the node id"
+    );
+
+    let loose = compile(
+        &baseline_grid_doc("baseline-grid=(px)40"),
+        &default_provider(),
+    );
+    assert!(
+        !loose
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "baseline-grid.snap_failed"),
+        "no snap_failed when line-height ≤ grid pitch"
+    );
+}
+
+// ── Text runaround (rectangular exclusion) ──────────────────────────────────
+
+/// Collect every `DrawGlyphRun` `(x, y)` in command order.
+fn glyph_run_positions(cmds: &[SceneCommand]) -> Vec<(f64, f64)> {
+    cmds.iter()
+        .filter_map(|c| match c {
+            SceneCommand::DrawGlyphRun { x, y, .. } => Some((*x, *y)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A page with one wrapping text node. `extra` is injected before the text node
+/// (e.g. an exclusion rect); `exclusion_attr` is appended to the text line.
+/// The long body forces the WRAP path (`total_advance > box_w`).
+fn runaround_doc(extra: &str, exclusion_attr: &str) -> Document {
+    let src = format!(
+        r##"zenith version=1 {{
+  project id="proj.ra" name="RA"
+  tokens format="zenith-token-v1" {{
+  }}
+  styles {{}}
+  document id="doc.ra" title="RA" {{
+    page id="page.ra" w=(px)600 h=(px)600 {{
+      {extra}
+      text id="body" x=(px)0 y=(px)0 w=(px)400 h=(px)560 font-size=(px)20 {exclusion_attr} {{
+        span "The quick brown fox jumps over the lazy dog and then keeps running far beyond the box edge to force wrapping across many lines of body text here"
+      }}
+    }}
+  }}
+}}
+"##
+    );
+    parse(&src)
+}
+
+/// A wrapping text node WITHOUT `text-exclusion` must emit a command stream
+/// identical to the same node with no exclusion attribute — the determinism gate.
+#[test]
+fn runaround_none_is_byte_identical() {
+    // Same body, no rect, no exclusion: the attribute path must be inert.
+    let a = compile(&runaround_doc("", ""), &default_provider());
+    let b = compile(&runaround_doc("", ""), &default_provider());
+    assert_eq!(
+        a.scene.commands, b.scene.commands,
+        "a node without text-exclusion must be deterministic and unchanged"
+    );
+    // Sanity: the body actually wrapped (more than one glyph-run line).
+    let ys: std::collections::BTreeSet<u64> = glyph_run_positions(&a.scene.commands)
+        .iter()
+        .map(|(_, y)| y.to_bits())
+        .collect();
+    assert!(ys.len() > 1, "body must wrap onto multiple lines");
+}
+
+/// An exclusion on the LEFT half over the top of the box shifts the affected
+/// lines' first glyph to at/after the exclusion's right edge; lines below the
+/// exclusion return to the box origin x.
+#[test]
+fn runaround_left_exclusion_shifts_lines_right() {
+    // Rect [0,0,200,120]: left half, top 120px. text_x=0, box_w=400.
+    // left_w = 0, right_w = 400-200 = 200 → right segment wins → origin = 200.
+    let rect = r##"rect id="ex" x=(px)0 y=(px)0 w=(px)200 h=(px)120 fill="#000000""##;
+    let result = compile(
+        &runaround_doc(rect, r#"text-exclusion="ex""#),
+        &default_provider(),
+    );
+    let pos = glyph_run_positions(&result.scene.commands);
+    assert!(!pos.is_empty(), "text must render");
+    // Lines whose baseline falls within the exclusion band start at x >= 200.
+    let mut saw_shifted = false;
+    let mut saw_returned = false;
+    for (x, y) in &pos {
+        if *y <= 120.0 {
+            assert!(
+                *x >= 200.0 - 0.5,
+                "a line in the exclusion band must start at/after the rect right edge (200); got x={x} y={y}"
+            );
+            saw_shifted = true;
+        } else if *x < 1.0 {
+            saw_returned = true;
+        }
+    }
+    assert!(saw_shifted, "at least one line must be shifted right");
+    assert!(
+        saw_returned,
+        "lines below the exclusion must return to text_x (0)"
+    );
+}
+
+/// An exclusion on the RIGHT keeps affected lines at origin `text_x` but packs
+/// them into the narrower LEFT segment → more line breaks within the band.
+#[test]
+fn runaround_right_exclusion_narrows_lines() {
+    // Rect [250,0,150,120]: right side. left_w = 250, right_w = 400-400 = 0.
+    // left >= right and left >= min → origin = text_x (0), width = 250.
+    let rect = r##"rect id="ex" x=(px)250 y=(px)0 w=(px)150 h=(px)120 fill="#000000""##;
+    let narrowed = compile(
+        &runaround_doc(rect, r#"text-exclusion="ex""#),
+        &default_provider(),
+    );
+    let uniform = compile(&runaround_doc("", ""), &default_provider());
+
+    // Affected lines keep origin x == 0. A wrapped line emits one run PER word,
+    // so the line ORIGIN is the MINIMUM x among runs sharing a baseline y.
+    let mut min_x_by_y: std::collections::BTreeMap<u64, f64> = std::collections::BTreeMap::new();
+    for (x, y) in glyph_run_positions(&narrowed.scene.commands) {
+        let e = min_x_by_y.entry(y.to_bits()).or_insert(f64::INFINITY);
+        *e = e.min(x);
+    }
+    for (y_bits, min_x) in &min_x_by_y {
+        let y = f64::from_bits(*y_bits);
+        if y <= 120.0 {
+            assert!(
+                *min_x < 1.0,
+                "a right-exclusion line must start at text_x (0); got min_x={min_x} y={y}"
+            );
+        }
+    }
+    // The narrower measure produces at least as many lines as the full width.
+    let n_narrow = glyph_run_positions(&narrowed.scene.commands).len();
+    let n_uniform = glyph_run_positions(&uniform.scene.commands).len();
+    assert!(
+        n_narrow >= n_uniform,
+        "narrowing the band must not reduce the line/run count ({n_narrow} vs {n_uniform})"
+    );
+}
+
+/// A FULL-WIDTH exclusion band leaves the lines in that band EMPTY (no glyph
+/// runs in the excluded y-range); text resumes below the band.
+#[test]
+fn runaround_full_width_exclusion_skips_lines() {
+    // Rect [0,100,400,120] spans the whole box width over y in [100,220].
+    // Both segments are 0 wide → those lines are BLOCKED (empty).
+    let rect = r##"rect id="ex" x=(px)0 y=(px)100 w=(px)400 h=(px)120 fill="#000000""##;
+    let result = compile(
+        &runaround_doc(rect, r#"text-exclusion="ex""#),
+        &default_provider(),
+    );
+    let pos = glyph_run_positions(&result.scene.commands);
+    // No glyph baseline may fall strictly inside the excluded band interior.
+    for (_, y) in &pos {
+        assert!(
+            !(*y > 100.0 && *y < 220.0),
+            "no glyph run may land inside a full-width exclusion band (100..220); got y={y}"
+        );
+    }
+    // Text must exist both above and below the band (flow resumes).
+    assert!(
+        pos.iter().any(|(_, y)| *y <= 100.0),
+        "text must flow above the band"
+    );
+    assert!(
+        pos.iter().any(|(_, y)| *y >= 220.0),
+        "text must resume below the band"
+    );
+}
+
+/// An unresolved `text-exclusion` emits the advisory AND renders byte-identically
+/// to the uniform (no-exclusion) stream.
+#[test]
+fn runaround_unresolved_ref_emits_advisory_and_renders_uniform() {
+    let bad = compile(
+        &runaround_doc("", r#"text-exclusion="nope""#),
+        &default_provider(),
+    );
+    let uniform = compile(&runaround_doc("", ""), &default_provider());
+
+    let advisories: Vec<_> = bad
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "text-exclusion.unresolved_ref")
+        .collect();
+    assert_eq!(
+        advisories.len(),
+        1,
+        "exactly one unresolved-ref advisory; got {:?}",
+        bad.diagnostics
+    );
+
+    assert_eq!(
+        bad.scene.commands, uniform.scene.commands,
+        "an unresolved exclusion must render the uniform stream (byte-identical)"
+    );
+}
+
+// ── overflow-wrap="break-word" ────────────────────────────────────────────
+
+/// Build a doc with a single text node holding one overlong unbreakable token in
+/// a narrow box. `attr` is spliced into the text node's property list (e.g.
+/// `overflow-wrap="break-word"` or empty for the default).
+fn break_word_doc(attr: &str) -> Document {
+    let src = format!(
+        r##"zenith version=1 {{
+  project id="proj.bw" name="BW"
+  tokens format="zenith-token-v1" {{}}
+  styles {{}}
+  document id="doc.bw" title="BW" {{
+page id="page.bw" w=(px)400 h=(px)400 {{
+  text id="col.bw" x=(px)10 y=(px)20 w=(px)120 h=(px)300 {attr} {{
+    span "https://very-long.example.com/some/very/deep/path/segment"
+  }}
+}}
+  }}
+}}
+"##
+    );
+    parse(&src)
+}
+
+/// The distinct baseline-y values of the emitted glyph runs (one per line).
+fn glyph_line_ys(result: &CompileResult) -> Vec<f64> {
+    let mut ys: Vec<f64> = result
+        .scene
+        .commands
+        .iter()
+        .filter_map(|c| match c {
+            SceneCommand::DrawGlyphRun { y, .. } => Some(*y),
+            _ => None,
+        })
+        .collect();
+    ys.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    ys.dedup();
+    ys
+}
+
+/// WITHOUT the attribute the overlong token is kept whole (one line) and the
+/// command stream is byte-identical to a node with NO attribute at all.
+#[test]
+fn overflow_wrap_none_is_byte_identical() {
+    let absent = compile(&break_word_doc(""), &default_provider());
+    let normal = compile(
+        &break_word_doc(r#"overflow-wrap="normal""#),
+        &default_provider(),
+    );
+    assert_eq!(
+        absent.scene.commands, normal.scene.commands,
+        "overflow-wrap=\"normal\" must match an absent attribute (byte-identical)"
+    );
+    // The overlong token stays on ONE line (no forced break).
+    assert_eq!(
+        glyph_line_ys(&absent).len(),
+        1,
+        "the overlong token must stay whole on one line by default"
+    );
+    assert!(
+        absent
+            .diagnostics
+            .iter()
+            .all(|d| d.code != "text.forced_break"),
+        "no forced_break advisory without break-word; got {:?}",
+        absent.diagnostics
+    );
+}
+
+/// WITH `overflow-wrap="break-word"` the single overlong token is split across
+/// >= 2 lines.
+#[test]
+fn break_word_splits_overlong_token() {
+    let absent = compile(&break_word_doc(""), &default_provider());
+    let broken = compile(
+        &break_word_doc(r#"overflow-wrap="break-word""#),
+        &default_provider(),
+    );
+
+    let whole_lines = glyph_line_ys(&absent).len();
+    let broken_lines = glyph_line_ys(&broken).len();
+    assert_eq!(whole_lines, 1, "control: default keeps the token whole");
+    assert!(
+        broken_lines >= 2,
+        "break-word must split the token across >= 2 lines; got {broken_lines}"
+    );
+}
+
+/// The `text.forced_break` advisory is present for the break case and ABSENT
+/// when the token fits the box.
+#[test]
+fn break_word_emits_forced_break_advisory() {
+    let broken = compile(
+        &break_word_doc(r#"overflow-wrap="break-word""#),
+        &default_provider(),
+    );
+    let forced: Vec<_> = broken
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "text.forced_break")
+        .collect();
+    assert_eq!(
+        forced.len(),
+        1,
+        "exactly one forced_break advisory expected; got {:?}",
+        broken.diagnostics
+    );
+    assert!(
+        forced[0].message.contains("col.bw"),
+        "advisory must name the node id"
+    );
+
+    // A node whose token FITS its box emits no advisory even with break-word on.
+    let fits_src = r##"zenith version=1 {
+  project id="proj.bwf" name="BWF"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.bwf" title="BWF" {
+page id="page.bwf" w=(px)400 h=(px)200 {
+  text id="col.bwf" x=(px)10 y=(px)20 w=(px)380 h=(px)100 overflow-wrap="break-word" {
+    span "short words fit fine"
+  }
+}
+  }
+}
+"##;
+    let fits = compile(&parse(fits_src), &default_provider());
+    assert!(
+        fits.diagnostics
+            .iter()
+            .all(|d| d.code != "text.forced_break"),
+        "no forced_break when the content fits; got {:?}",
+        fits.diagnostics
     );
 }

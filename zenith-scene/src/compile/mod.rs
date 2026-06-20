@@ -41,7 +41,9 @@ use crate::ir::{Rect, Scene, SceneCommand};
 
 use chain::{ChainAssignments, resolve_chains_document};
 use container::{compile_frame, compile_group, compile_instance};
-use field::{FieldCtx, build_page_index_map, compute_live_area, resolve_field_to_text};
+use field::{
+    FieldCtx, build_node_boxes, build_page_index_map, compute_live_area, resolve_field_to_text,
+};
 use image::compile_image;
 use leaf::{compile_ellipse, compile_line, compile_polygon, compile_polyline, compile_rect};
 use paint::{resolve_property_color, resolve_property_gradient};
@@ -74,6 +76,12 @@ pub(super) struct RenderCtx {
     pub(super) dx: f64,
     /// Accumulated y-translation in pixels.
     pub(super) dy: f64,
+    /// Resolved page baseline-grid pitch in pixels, when active on this page.
+    /// `Some(g)` with `g > 0.0` snaps text line baselines onto `{0, g, 2g, …}`
+    /// measured in the post-`dy` coordinate space; `None` → no grid (the snap is
+    /// skipped, byte-identical to before). Cascades unchanged to every child
+    /// context so all text on the page shares one grid.
+    pub(super) baseline_grid: Option<f64>,
 }
 
 impl RenderCtx {
@@ -82,6 +90,7 @@ impl RenderCtx {
             opacity: 1.0,
             dx: 0.0,
             dy: 0.0,
+            baseline_grid: None,
         }
     }
 
@@ -94,6 +103,7 @@ impl RenderCtx {
             opacity: 1.0,
             dx: 0.0,
             dy: 0.0,
+            baseline_grid: None,
         }
     }
 
@@ -105,6 +115,7 @@ impl RenderCtx {
             opacity: 1.0,
             dx,
             dy,
+            baseline_grid: None,
         }
     }
 }
@@ -375,21 +386,46 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
     // `footnote_ref` keys in) and the bottom-zone rendering below.
     let footnote_markers = footnote::collect_footnote_markers(page);
 
+    // ── Step 7c: build this page's node bounding-box map ─────────────────
+    // Maps every id-bearing page node with a resolvable x/y/w/h rect to its
+    // ABSOLUTE page-coordinate box, accumulating group/instance translation
+    // (frames are clip-only). Drives text-runaround exclusion lookup. Empty when
+    // no node carries a complete rect (byte-identical to before for any text node
+    // without `text-exclusion`).
+    let node_boxes = build_node_boxes(page);
+
     let field_ctx = FieldCtx {
         page_index_1based,
         is_recto,
         live_area,
         page_index_by_node_id: &page_index_by_node_id,
         footnote_markers: &footnote_markers,
+        node_boxes: &node_boxes,
     };
 
-    let root_ctx = if bleed > 0.0 {
+    // ── Resolve the page baseline grid ───────────────────────────────────
+    // A page may declare `baseline-grid=(px)14`. When it resolves to a positive
+    // pixel value `g`, every text node on this page snaps its line baselines
+    // onto the grid `{0, g, 2g, …}` (see [`RenderCtx::baseline_grid`]). An
+    // absent / unresolvable / non-positive value yields `None`, byte-identical
+    // to a page with no grid.
+    let baseline_grid: Option<f64> = page
+        .baseline_grid
+        .as_ref()
+        .and_then(|d| dim_to_px(d.value, &d.unit))
+        .filter(|g| g.is_finite() && *g > 0.0);
+
+    let mut root_ctx = if bleed > 0.0 {
         // Shift authored coordinates into the trim box. With bleed = 0 this is
         // the identity root context (byte-identical to before).
         RenderCtx::root_offset(bleed, bleed)
     } else {
         RenderCtx::root()
     };
+    // Thread the grid into BOTH the bleed and no-bleed root contexts. The grid
+    // is measured in the post-`dy` (shifted) coordinate space, the same space
+    // the emitted baselines live in, so a bleed-shifted page snaps consistently.
+    root_ctx.baseline_grid = baseline_grid;
 
     // ── Step 7a: project the page's master (UNDER its own children) ──────
     // When `page.master` names a declared master, clone the master's children,
@@ -558,6 +594,7 @@ pub(super) fn compile_node(
             diagnostics,
             chains,
             field_ctx.footnote_markers,
+            field_ctx.node_boxes,
             ctx,
         ),
         Node::Line(line) => {
@@ -628,6 +665,7 @@ pub(super) fn compile_node(
                     diagnostics,
                     chains,
                     field_ctx.footnote_markers,
+                    field_ctx.node_boxes,
                     ctx,
                 );
             }

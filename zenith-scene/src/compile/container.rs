@@ -121,30 +121,17 @@ pub(super) fn compile_frame(
         opacity: ctx.opacity * frame.opacity.unwrap_or(1.0).clamp(0.0, 1.0),
         dx: ctx.dx, // clip-only: no translation
         dy: ctx.dy, // clip-only: no translation
+        // Page baseline grid cascades unchanged so all text shares one grid.
+        baseline_grid: ctx.baseline_grid,
     };
 
-    if frame.layout.as_deref() == Some("flow") {
-        compile_frame_flow(
-            frame,
-            frame_x,
-            frame_y,
-            frame_w,
-            resolved,
-            style_map,
-            components,
-            fonts,
-            engine,
-            commands,
-            diagnostics,
-            chains,
-            field_ctx,
-            child_ctx,
-        );
-    } else {
-        // Absolute (clip-only) model: children render at their own page coords.
-        for child in &frame.children {
-            compile_node(
-                child,
+    match frame.layout.as_deref() {
+        Some("flow") => {
+            compile_frame_flow(
+                frame,
+                frame_x,
+                frame_y,
+                frame_w,
                 resolved,
                 style_map,
                 components,
@@ -156,6 +143,43 @@ pub(super) fn compile_frame(
                 field_ctx,
                 child_ctx,
             );
+        }
+        Some("grid") => {
+            compile_frame_grid(
+                frame,
+                frame_x,
+                frame_y,
+                frame_w,
+                frame_h,
+                resolved,
+                style_map,
+                components,
+                fonts,
+                engine,
+                commands,
+                diagnostics,
+                chains,
+                field_ctx,
+                child_ctx,
+            );
+        }
+        _ => {
+            // Absolute (clip-only) model: children render at their own page coords.
+            for child in &frame.children {
+                compile_node(
+                    child,
+                    resolved,
+                    style_map,
+                    components,
+                    fonts,
+                    engine,
+                    commands,
+                    diagnostics,
+                    chains,
+                    field_ctx,
+                    child_ctx,
+                );
+            }
         }
     }
 
@@ -254,6 +278,106 @@ fn compile_frame_flow(
         if i != last_idx {
             cursor_y += gap;
         }
+    }
+}
+
+/// Lay a grid-frame's children out into a `columns × rows` grid inside its
+/// padded content box, compiling each at the injected absolute coordinates.
+///
+/// Triggered only when `frame.layout == Some("grid")`. `frame_x`/`frame_y`/
+/// `frame_w`/`frame_h` are the already-resolved frame box in page coordinates
+/// (the same values used for the surrounding `PushClip`). Participating children
+/// (the same set the flow layout lays out: visible, non-guide) auto-place
+/// row-major into the grid. Both `padding` and `gap` are token-only dimension
+/// style props on the frame's style, defaulting to `0.0` when absent.
+///
+/// Cell sizing (uniform gutters of `gap`):
+/// - `cols = frame.columns.unwrap_or(1).max(1)`
+/// - `effective_rows = frame.rows.max(1)` or, when absent,
+///   `ceil(n / cols).max(1)` so the grid grows to fit its children.
+/// - `col_w = ((content_w - (cols-1)*gap) / cols).max(0.0)`
+/// - `row_h = ((content_h - (effective_rows-1)*gap) / effective_rows).max(0.0)`
+///
+/// Unlike flow, every cell's height is FIXED (`Some(row_h)`) so an image child
+/// with `fit="cover"` fills its cell.
+#[allow(clippy::too_many_arguments)]
+fn compile_frame_grid(
+    frame: &FrameNode,
+    frame_x: f64,
+    frame_y: f64,
+    frame_w: f64,
+    frame_h: f64,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    style_map: &BTreeMap<&str, &Style>,
+    components: &ComponentMap,
+    fonts: &dyn FontProvider,
+    engine: &RustybuzzEngine,
+    commands: &mut Vec<SceneCommand>,
+    diagnostics: &mut Vec<Diagnostic>,
+    chains: &ChainAssignments,
+    field_ctx: &FieldCtx,
+    child_ctx: RenderCtx,
+) {
+    // Resolve padding / gap from the frame's style (token → px); 0.0 default.
+    let pad = resolve_property_dimension_px(
+        &style_prop(&frame.style, style_map, "padding").cloned(),
+        resolved,
+        0.0,
+    );
+    let gap = resolve_property_dimension_px(
+        &style_prop(&frame.style, style_map, "gap").cloned(),
+        resolved,
+        0.0,
+    );
+
+    // Content box: uniform padding on all four sides.
+    let content_left = frame_x + pad;
+    let content_top = frame_y + pad;
+    let content_w = (frame_w - 2.0 * pad).max(0.0);
+    let content_h = (frame_h - 2.0 * pad).max(0.0);
+
+    // Participating children: skip invisible and guide nodes (reuse flow helper).
+    let participating: Vec<&Node> = frame
+        .children
+        .iter()
+        .filter(|c| !node_skipped_in_flow(c))
+        .collect();
+    let n = participating.len();
+
+    // Column / row counts (both guaranteed >= 1 so divisions are safe).
+    let cols = frame.columns.unwrap_or(1).max(1) as usize;
+    let effective_rows = frame
+        .rows
+        .map(|r| r.max(1) as usize)
+        .unwrap_or_else(|| n.div_ceil(cols).max(1));
+
+    // Uniform cell sizing with `gap` gutters between cells.
+    let col_w = ((content_w - (cols - 1) as f64 * gap) / cols as f64).max(0.0);
+    let row_h = ((content_h - (effective_rows - 1) as f64 * gap) / effective_rows as f64).max(0.0);
+
+    for (i, child) in participating.iter().enumerate() {
+        let col = i % cols;
+        let row = i / cols;
+        let cell_x = content_left + col as f64 * (col_w + gap);
+        let cell_y = content_top + row as f64 * (row_h + gap);
+
+        // Inject the FULL fixed cell box (always Some(row_h)) so e.g. an image
+        // with fit="cover" fills its cell. Compile at absolute page coords
+        // (dx/dy unchanged). The measured height is ignored — cells are fixed.
+        let positioned = with_flow_box(child, cell_x, cell_y, col_w, Some(row_h));
+        let _ = compile_node(
+            &positioned,
+            resolved,
+            style_map,
+            components,
+            fonts,
+            engine,
+            commands,
+            diagnostics,
+            chains,
+            field_ctx,
+            child_ctx,
+        );
     }
 }
 
@@ -497,6 +621,8 @@ pub(super) fn compile_group(
         opacity: child_opacity,
         dx: child_dx,
         dy: child_dy,
+        // Page baseline grid cascades unchanged so all text shares one grid.
+        baseline_grid: ctx.baseline_grid,
     };
     for child in &group.children {
         compile_node(
