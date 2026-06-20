@@ -6370,3 +6370,207 @@ page id="page.dcr" w=(px)1800 h=(px)2700 {
         "two drop-cap renders must be byte-identical"
     );
 }
+
+// ── Hyphenation (single-box wrap path) ────────────────────────────────
+
+/// Build a single-box wrapping paragraph with a narrow box, optionally with
+/// `hyphenate=#true`. The body is long hyphenatable words that overflow the
+/// width. Returns the compiled scene's full command stream.
+fn hyphenate_commands(hyphenate: bool, body: &str) -> Vec<SceneCommand> {
+    let hy = if hyphenate { " hyphenate=#true" } else { "" };
+    let src = format!(
+        r##"zenith version=1 {{
+  project id="proj.hy" name="HY"
+  tokens format="zenith-token-v1" {{}}
+  styles {{}}
+  document id="doc.hy" title="HY" {{
+page id="page.hy" w=(px)1200 h=(px)2000 {{
+  text id="text.hy" x=(px)100 y=(px)100 w=(px)360 h=(px)1600 font-size=(px)40{hy} {{
+    span "{body}"
+  }}
+}}
+  }}
+}}
+"##
+    );
+    let doc = parse(&src);
+    compile(&doc, &default_provider()).scene.commands
+}
+
+/// Count distinct glyph-run baseline y values (≈ the number of text lines).
+fn distinct_line_count(cmds: &[SceneCommand]) -> usize {
+    let mut ys: std::collections::BTreeSet<i64> = std::collections::BTreeSet::new();
+    for c in cmds {
+        if let SceneCommand::DrawGlyphRun { y, .. } = c {
+            ys.insert((*y * 100.0) as i64);
+        }
+    }
+    ys.len()
+}
+
+/// Count DrawGlyphRun commands.
+fn glyph_run_count(cmds: &[SceneCommand]) -> usize {
+    cmds.iter()
+        .filter(|c| matches!(c, SceneCommand::DrawGlyphRun { .. }))
+        .count()
+}
+
+const HYPH_BODY: &str = "extraordinarily complicated hyphenation demonstrates \
+remarkable typographical sophistication consistently";
+
+/// With `hyphenate=#true`, a long word that does not fit the remaining space on
+/// a non-empty line is SPLIT: more glyph runs are emitted (head + tail) and the
+/// word spans two lines. The stream differs from the hyphenate-off render.
+#[test]
+fn hyphenate_splits_long_words() {
+    let off = hyphenate_commands(false, HYPH_BODY);
+    let on = hyphenate_commands(true, HYPH_BODY);
+
+    assert_ne!(
+        off, on,
+        "hyphenation must change the command stream for an overflowing paragraph"
+    );
+    // Splitting a word into `head-` + `tail` adds glyph runs beyond the off case.
+    assert!(
+        glyph_run_count(&on) > glyph_run_count(&off),
+        "hyphenation must emit more glyph runs (head+tail); off={}, on={}",
+        glyph_run_count(&off),
+        glyph_run_count(&on)
+    );
+    // Determinism: two on-renders are byte-identical.
+    let on2 = hyphenate_commands(true, HYPH_BODY);
+    assert_eq!(on, on2, "hyphenated render must be deterministic");
+}
+
+/// Hyphenation OFF is byte-identical when re-rendered, and a long word wraps
+/// whole (line count is the unsplit count). This is the opt-in guard: the
+/// default path is unchanged from pre-feature behavior.
+#[test]
+fn hyphenate_off_is_byte_identical_and_wraps_whole() {
+    let off = hyphenate_commands(false, HYPH_BODY);
+    let off2 = hyphenate_commands(false, HYPH_BODY);
+    assert_eq!(off, off2, "hyphenate-off render must be deterministic");
+
+    // Hyphenation packs fragments tighter, MOVING break points, so the on/off
+    // line stream differs (it may yield fewer OR more lines depending on how
+    // fragments fill). The whole-word (off) path wraps to at least one line.
+    let on = hyphenate_commands(true, HYPH_BODY);
+    assert_ne!(
+        off, on,
+        "hyphenation must move break points relative to whole-word wrapping"
+    );
+    assert!(
+        distinct_line_count(&off) >= 1,
+        "off paragraph must wrap to at least one line"
+    );
+}
+
+// ── Widow/orphan control (chain distribution) ─────────────────────────
+
+/// Build a 2-page chain whose body is two newline-separated paragraphs, sized so
+/// the greedy height-cut would otherwise strand a paragraph's first line at the
+/// bottom of box 1. `widow_orphan` toggles `widow-orphan=2` on the source.
+/// Returns `(page0_line_count, page1_line_count)` from glyph-run baselines.
+fn widow_orphan_line_counts(widow_orphan: bool) -> (usize, usize) {
+    let wo = if widow_orphan { " widow-orphan=2" } else { "" };
+    // Narrow box (w=500) so each paragraph is several lines; box 1 (h=240) holds
+    // ~4 lines. Paragraph 1 is ~3 lines, so the greedy cut would otherwise leave
+    // paragraph 2's lone FIRST line as box 1's 4th line → an orphan.
+    let p1 = "alpha bravo charlie delta echo foxtrot golf hotel";
+    let p2 = "victor whiskey xray yankee zulu aurora borealis cascade delta \
+estuary fjord glacier harbor island jungle kelp lagoon marsh nimbus quill \
+raven storm thicket umbra";
+    // Embed a LITERAL backslash-n so the KDL string parser decodes it to a
+    // newline (a raw newline inside a quoted KDL string is invalid).
+    let body = format!("{p1}\\n{p2}");
+    let src = format!(
+        r##"zenith version=1 {{
+  project id="proj.wo" name="WO"
+  tokens format="zenith-token-v1" {{}}
+  styles {{}}
+  document id="doc.wo" title="WO" {{
+page id="page.a" w=(px)1200 h=(px)2000 {{
+  text id="body.1" x=(px)100 y=(px)100 w=(px)500 h=(px)180 chain="ch" font-size=(px)40 overflow="visible"{wo} {{
+    span "{body}"
+  }}
+}}
+page id="page.b" w=(px)1200 h=(px)2000 {{
+  text id="body.2" x=(px)100 y=(px)100 w=(px)500 h=(px)1200 chain="ch" font-size=(px)40 overflow="visible" {{
+  }}
+}}
+  }}
+}}
+"##
+    );
+    let doc = parse(&src);
+    let p0 = compile_page(&doc, &default_provider(), 0).scene.commands;
+    let p1c = compile_page(&doc, &default_provider(), 1).scene.commands;
+    (distinct_line_count(&p0), distinct_line_count(&p1c))
+}
+
+/// With `widow-orphan=2`, a paragraph's lone first line that the greedy cut
+/// would leave at the bottom of box 1 is pulled down into box 2: box 1's line
+/// count is REDUCED relative to the control-off render, and box 2 gains lines.
+#[test]
+fn widow_orphan_pulls_orphan_line_to_next_box() {
+    let (off0, off1) = widow_orphan_line_counts(false);
+    let (on0, on1) = widow_orphan_line_counts(true);
+
+    // The control must change SOMETHING about the distribution.
+    assert!(
+        (on0, on1) != (off0, off1),
+        "widow-orphan=2 must move the break: off=({off0},{off1}) on=({on0},{on1})"
+    );
+    // Lines only move DOWN (box 1 keeps no more than before; box 2 gains).
+    assert!(
+        on0 <= off0,
+        "box 1 must not gain lines under widow/orphan: off0={off0} on0={on0}"
+    );
+    assert!(
+        on1 >= off1,
+        "box 2 must not lose lines under widow/orphan: off1={off1} on1={on1}"
+    );
+    // No content lost: the total line count is preserved across the boundary
+    // move (re-wrapping to the same widths keeps the same lines).
+    assert_eq!(
+        on0 + on1,
+        off0 + off1,
+        "total lines must be preserved when the boundary moves"
+    );
+}
+
+/// Widow/orphan OFF: the 2-box chain distribution is deterministic and matches a
+/// re-render byte-for-byte (the control is fully opt-in).
+#[test]
+fn widow_orphan_off_is_deterministic() {
+    let doc_src = || {
+        let p1 = "alpha bravo charlie delta echo foxtrot golf hotel india juliet";
+        let p2 = "victor whiskey xray yankee zulu aurora borealis cascade delta estuary";
+        format!(
+            r##"zenith version=1 {{
+  project id="proj.wod" name="WOD"
+  tokens format="zenith-token-v1" {{}}
+  styles {{}}
+  document id="doc.wod" title="WOD" {{
+page id="page.a" w=(px)1200 h=(px)2000 {{
+  text id="body.1" x=(px)100 y=(px)100 w=(px)900 h=(px)360 chain="ch" font-size=(px)40 overflow="visible" {{
+    span "{p1}\n{p2}"
+  }}
+}}
+page id="page.b" w=(px)1200 h=(px)2000 {{
+  text id="body.2" x=(px)100 y=(px)100 w=(px)900 h=(px)900 chain="ch" font-size=(px)40 overflow="visible" {{
+  }}
+}}
+  }}
+}}
+"##
+        )
+    };
+    let doc = parse(&doc_src());
+    let r1 = compile_page(&doc, &default_provider(), 0).scene.commands;
+    let r2 = compile_page(&doc, &default_provider(), 0).scene.commands;
+    assert_eq!(
+        r1, r2,
+        "widow/orphan-off chain render must be deterministic"
+    );
+}

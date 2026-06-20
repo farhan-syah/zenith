@@ -114,6 +114,8 @@ pub(super) fn resolve_field_to_text(field: &FieldNode, ctx: &FieldCtx) -> Option
         rotate: None,
         chain: None,
         drop_cap_lines: None,
+        hyphenate: None,
+        widow_orphan: None,
         spans: vec![TextSpan {
             text,
             fill: None,

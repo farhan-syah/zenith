@@ -10,6 +10,7 @@ zenith-core = { path = "../zenith-core" }
 zenith-layout = { path = "../zenith-layout" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+hyphenation = { version = "0.8.4", default-features = false, features = ["embed_en-us"] }
 
 [lints]
 workspace = true

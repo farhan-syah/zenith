@@ -522,6 +522,12 @@ fn write_text(t: &TextNode, out: &mut String, depth: usize) {
     if let Some(n) = t.drop_cap_lines {
         let _ = write!(out, " drop-cap-lines={n}");
     }
+    if let Some(h) = t.hyphenate {
+        let _ = write!(out, " hyphenate=#{h}");
+    }
+    if let Some(n) = t.widow_orphan {
+        let _ = write!(out, " widow-orphan={n}");
+    }
 
     // Unknown properties in sorted key order.
     for (key, prop) in &t.unknown_props {

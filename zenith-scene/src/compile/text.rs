@@ -39,12 +39,42 @@ pub(super) struct WordToken {
     /// Super/subscript baseline shift in pixels (negative = up; 0 = baseline).
     /// Applied per-glyph-run by [`emit_lines`] on top of the line baseline.
     pub(super) baseline_dy: f64,
+    /// The exact source text this word was shaped from, plus the weight/style/
+    /// size needed to RE-shape a hyphenated fragment of it. Used ONLY by the
+    /// optional hyphenation path in [`pack_lines`]; the non-hyphenate path never
+    /// reads it, so default-off packing is byte-identical. `paragraph` is the
+    /// 0-based paragraph index this word belongs to (newline-separated source),
+    /// consumed by widow/orphan control in the chain distributor.
+    pub(super) src: WordSource,
+}
+
+/// The source text + shaping attributes a [`WordToken`] was produced from, so a
+/// hyphenated fragment can be deterministically re-shaped with identical style.
+#[derive(Clone)]
+pub(super) struct WordSource {
+    pub(super) text: String,
+    pub(super) weight: u16,
+    pub(super) style: FontStyle,
+    pub(super) font_size: f32,
+    /// 0-based paragraph index (each `\n` in the source starts a new paragraph).
+    pub(super) paragraph: usize,
+    /// When this token is a hyphenation fragment, the ORIGINAL unsplit word it
+    /// came from, with `true` for the head (`fragment-`) and `false` for the
+    /// tail. The chain distributor uses this to MERGE an adjacent head+tail back
+    /// into the original word before re-wrapping it in the next box, so a
+    /// fragment is never hyphenated twice. `None` for an ordinary word.
+    pub(super) hyphen_part: Option<(String, bool)>,
 }
 
 /// One packed line: its words plus the summed content width (no trailing space).
 pub(super) struct Line {
     pub(super) words: Vec<WordToken>,
     pub(super) content_w: f64,
+    /// The 0-based paragraph index this line belongs to, taken from its first
+    /// word. Used by widow/orphan control in the chain distributor; the
+    /// single-box path ignores it. A line is always within ONE paragraph because
+    /// the packer never mixes words from different paragraphs onto one line.
+    pub(super) paragraph: usize,
 }
 
 /// Shared font metrics captured from the first successfully shaped word.
@@ -93,6 +123,11 @@ pub(super) fn shape_words(
     let mut tokens: Vec<WordToken> = Vec::new();
     let mut metrics = WordMetrics::default();
     let mut have_metrics = false;
+    // Running paragraph index. Each `\n` in the source (across spans) starts a
+    // new paragraph; consecutive spans without a newline keep the same index, so
+    // a multi-span paragraph stays one paragraph. Widow/orphan control reads this
+    // per-line; the default-off path never inspects it.
+    let mut paragraph: usize = 0;
 
     for shaped in spans {
         // A super/subscript span carries its own reduced size; a baseline span
@@ -100,41 +135,57 @@ pub(super) fn shape_words(
         // captured ONLY from a full-size word so the line grid stays uniform.
         let is_vertical_align = shaped.baseline_dy != 0.0;
         let word_font_size = shaped.font_size;
-        for word in shaped.text.split_whitespace() {
-            let req = ShapeRequest {
-                text: word,
-                families,
-                weight: shaped.weight,
-                style: shaped.style,
-                font_size: word_font_size,
-            };
-            match engine.shape_with_fallback(&req, fonts) {
-                Err(e) => {
-                    diagnostics.push(Diagnostic::advisory(
-                        "scene.text_unshaped",
-                        format!("text node '{}' could not be shaped: {}", node_id, e.message),
-                        span,
-                        Some(node_id.to_owned()),
-                    ));
-                }
-                Ok(runs) => {
-                    if !have_metrics
-                        && !is_vertical_align
-                        && let Some(first) = runs.first()
-                    {
-                        metrics.ascent = first.ascent as f64;
-                        metrics.line_height = first.line_height as f64;
-                        have_metrics = true;
+        // Split the span text into paragraphs on `\n`; each segment after the
+        // first increments the running paragraph index. `split('\n')` always
+        // yields ≥1 segment, so a span without a newline keeps `paragraph`.
+        for (seg_idx, segment) in shaped.text.split('\n').enumerate() {
+            if seg_idx > 0 {
+                paragraph += 1;
+            }
+            for word in segment.split_whitespace() {
+                let req = ShapeRequest {
+                    text: word,
+                    families,
+                    weight: shaped.weight,
+                    style: shaped.style,
+                    font_size: word_font_size,
+                };
+                match engine.shape_with_fallback(&req, fonts) {
+                    Err(e) => {
+                        diagnostics.push(Diagnostic::advisory(
+                            "scene.text_unshaped",
+                            format!("text node '{}' could not be shaped: {}", node_id, e.message),
+                            span,
+                            Some(node_id.to_owned()),
+                        ));
                     }
-                    let advance: f64 = runs.iter().map(|r| r.advance_width as f64).sum();
-                    tokens.push(WordToken {
-                        advance,
-                        color: shaped.color,
-                        underline: shaped.underline,
-                        strikethrough: shaped.strikethrough,
-                        baseline_dy: shaped.baseline_dy,
-                        runs,
-                    });
+                    Ok(runs) => {
+                        if !have_metrics
+                            && !is_vertical_align
+                            && let Some(first) = runs.first()
+                        {
+                            metrics.ascent = first.ascent as f64;
+                            metrics.line_height = first.line_height as f64;
+                            have_metrics = true;
+                        }
+                        let advance: f64 = runs.iter().map(|r| r.advance_width as f64).sum();
+                        tokens.push(WordToken {
+                            advance,
+                            color: shaped.color,
+                            underline: shaped.underline,
+                            strikethrough: shaped.strikethrough,
+                            baseline_dy: shaped.baseline_dy,
+                            runs,
+                            src: WordSource {
+                                text: word.to_owned(),
+                                weight: shaped.weight,
+                                style: shaped.style,
+                                font_size: word_font_size,
+                                paragraph,
+                                hyphen_part: None,
+                            },
+                        });
+                    }
                 }
             }
         }
@@ -159,32 +210,198 @@ pub(super) fn shape_words(
     (tokens, metrics)
 }
 
-/// Greedy-pack word tokens into lines for a given box width, left-to-right and
-/// deterministic. Identical algorithm to the original inline wrap packer.
-pub(super) fn pack_lines(tokens: Vec<WordToken>, box_w: f64, space_advance: f64) -> Vec<Line> {
-    let mut lines: Vec<Line> = Vec::new();
-    let mut cur: Vec<WordToken> = Vec::new();
-    let mut line_w: f64 = 0.0;
-    for tok in tokens {
-        if !cur.is_empty() && line_w + space_advance + tok.advance > box_w {
-            let content_w = line_w;
-            lines.push(Line {
-                words: std::mem::take(&mut cur),
-                content_w,
-            });
-            line_w = 0.0;
+// ── Hyphenation ───────────────────────────────────────────────────────────────
+//
+// Opt-in Knuth–Liang hyphenation. The embedded en-US `Standard` dictionary is
+// loaded exactly ONCE into a process-wide `OnceLock` (deterministic: a pure
+// function of the embedded patterns, no time/random/IO beyond the embedded
+// blob). A `HyphenationContext` bundles the dictionary with the shaping engine
+// and node-level family so the packer can re-shape a `fragment-` head and the
+// remainder of a split word with identical style.
+
+use std::sync::OnceLock;
+
+use hyphenation::{Hyphenator, Language, Load, Standard};
+
+/// Process-wide cache for the embedded en-US hyphenation dictionary. Loaded at
+/// most once; `None` only if the embedded blob fails to decode (it should not,
+/// but we never panic). Subsequent calls reuse the same `Standard`.
+static EN_US_HYPHENATOR: OnceLock<Option<Standard>> = OnceLock::new();
+
+/// Return the cached en-US hyphenator, loading it on first use. Deterministic.
+pub(super) fn en_us_hyphenator() -> Option<&'static Standard> {
+    EN_US_HYPHENATOR
+        .get_or_init(|| Standard::from_embedded(Language::EnglishUS).ok())
+        .as_ref()
+}
+
+/// Everything the packer needs to hyphenate + re-shape a word fragment: the
+/// dictionary plus the shaping engine, fonts, and node family. The per-word
+/// weight/style/size come from each [`WordToken::src`], so a chain or wrapped
+/// node hyphenates with that word's exact style.
+pub(super) struct HyphenationContext<'a> {
+    pub(super) dict: &'static Standard,
+    pub(super) engine: &'a RustybuzzEngine,
+    pub(super) fonts: &'a dyn FontProvider,
+    pub(super) families: &'a [String],
+    /// The hyphen glyph string shaped onto the head fragment.
+    pub(super) hyphen: &'a str,
+}
+
+/// A word split at a hyphenation point: the head (`fragment-`, including the
+/// hyphen glyph) to place on the current line, and the tail to carry to the next.
+struct HyphenSplit {
+    head: WordToken,
+    tail: WordToken,
+}
+
+/// Re-shape `text` into a [`WordToken`] inheriting `donor`'s visual attributes,
+/// at `donor`'s weight/style/size. `hyphen_part` tags the result as a
+/// hyphenation head/tail (or `None` for a plain reconstruction). Returns `None`
+/// on a shaping failure so the caller falls back to NOT splitting. Deterministic.
+fn reshape_fragment(
+    text: &str,
+    donor: &WordToken,
+    hyphen_part: Option<(String, bool)>,
+    ctx: &HyphenationContext,
+) -> Option<WordToken> {
+    let req = ShapeRequest {
+        text,
+        families: ctx.families,
+        weight: donor.src.weight,
+        style: donor.src.style,
+        font_size: donor.src.font_size,
+    };
+    let runs = ctx.engine.shape_with_fallback(&req, ctx.fonts).ok()?;
+    let advance: f64 = runs.iter().map(|r| r.advance_width as f64).sum();
+    Some(WordToken {
+        runs,
+        advance,
+        color: donor.color,
+        underline: donor.underline,
+        strikethrough: donor.strikethrough,
+        baseline_dy: donor.baseline_dy,
+        src: WordSource {
+            text: text.to_owned(),
+            weight: donor.src.weight,
+            style: donor.src.style,
+            font_size: donor.src.font_size,
+            paragraph: donor.src.paragraph,
+            hyphen_part,
+        },
+    })
+}
+
+/// Attempt to hyphenate `word` so its head fragment (`fragment-`, including the
+/// hyphen glyph) fits within `avail` pixels. Tries the LAST (longest) embedded
+/// break point that fits; returns `None` when the word has no break point whose
+/// head fits, leaving the caller to push the whole word to the next line.
+///
+/// Determinism: the break list is pattern-derived (deterministic), the chosen
+/// point is a pure function of `avail`, and both fragments are re-shaped with the
+/// same engine. Words containing non-letters (e.g. trailing punctuation) still
+/// hyphenate on their letter run because the dictionary only proposes interior
+/// letter breaks; the head/tail slices are taken on byte boundaries the
+/// dictionary returns, which always fall between characters.
+fn try_hyphenate(word: &WordToken, avail: f64, ctx: &HyphenationContext) -> Option<HyphenSplit> {
+    let text = word.src.text.as_str();
+    // A break shorter than this many bytes on either side is never useful.
+    if text.len() < 4 {
+        return None;
+    }
+    let breaks = ctx.dict.hyphenate(text).breaks;
+    // Walk break points from LAST to FIRST: the longest head that still fits is
+    // the most text we can place, minimizing wasted space.
+    for &b in breaks.iter().rev() {
+        // `b` is a byte offset within `text` strictly inside the word.
+        let (Some(head_txt), Some(tail_txt)) = (text.get(..b), text.get(b..)) else {
+            continue;
+        };
+        if head_txt.is_empty() || tail_txt.is_empty() {
+            continue;
         }
-        let gap = if cur.is_empty() { 0.0 } else { space_advance };
-        line_w += gap + tok.advance;
-        cur.push(tok);
+        let head_with_hyphen = format!("{head_txt}{}", ctx.hyphen);
+        let orig = text.to_owned();
+        let Some(head) = reshape_fragment(&head_with_hyphen, word, Some((orig.clone(), true)), ctx)
+        else {
+            continue;
+        };
+        if head.advance > avail {
+            continue;
+        }
+        let Some(tail) = reshape_fragment(tail_txt, word, Some((orig, false)), ctx) else {
+            continue;
+        };
+        return Some(HyphenSplit { head, tail });
     }
-    if !cur.is_empty() {
-        lines.push(Line {
-            words: cur,
-            content_w: line_w,
-        });
+    None
+}
+
+/// Flatten packed lines back into a single ordered word stream for re-wrapping in
+/// the NEXT chain box, MERGING any hyphenation head+tail pair back into the
+/// original unsplit word so a fragment is never carried across a box (and never
+/// hyphenated twice). When `hyph` is `None` (no hyphenation was performed) the
+/// words pass through unchanged. A head whose tail does not immediately follow
+/// (it should always, by construction) is passed through as-is rather than lost.
+pub(super) fn flatten_lines_to_tokens(
+    lines: Vec<Line>,
+    hyph: Option<&HyphenationContext>,
+) -> Vec<WordToken> {
+    let mut words: Vec<WordToken> = Vec::new();
+    for line in lines {
+        for w in line.words {
+            words.push(w);
+        }
     }
-    lines
+    let Some(ctx) = hyph else {
+        return words;
+    };
+    // Merge adjacent (head, tail) pairs back into the original word.
+    let mut out: Vec<WordToken> = Vec::with_capacity(words.len());
+    let mut iter = words.into_iter().peekable();
+    while let Some(w) = iter.next() {
+        if let Some((orig, true)) = &w.src.hyphen_part {
+            let is_tail_next = iter
+                .peek()
+                .and_then(|n| n.src.hyphen_part.as_ref())
+                .is_some_and(|(o, head)| !head && o == orig);
+            if is_tail_next {
+                let orig = orig.clone();
+                let tail = iter.next();
+                match reshape_fragment(&orig, &w, None, ctx) {
+                    Some(merged) => out.push(merged),
+                    None => {
+                        // Reshape failed: keep both fragments rather than drop text.
+                        out.push(w);
+                        if let Some(t) = tail {
+                            out.push(t);
+                        }
+                    }
+                }
+                continue;
+            }
+        }
+        out.push(w);
+    }
+    out
+}
+
+/// Greedy-pack word tokens into lines for a given box width, left-to-right and
+/// deterministic. Identical algorithm to the original inline wrap packer when
+/// `hyph` is `None`; passing a [`HyphenationContext`] enables word splitting at
+/// embedded break points (see [`pack_lines_core`]).
+pub(super) fn pack_lines(
+    tokens: Vec<WordToken>,
+    box_w: f64,
+    space_advance: f64,
+    hyph: Option<&HyphenationContext>,
+) -> Vec<Line> {
+    let profile = WidthProfile {
+        narrow_w: box_w,
+        narrow_count: 0,
+        full_w: box_w,
+    };
+    pack_lines_core(tokens, profile, space_advance, hyph)
 }
 
 /// Per-line width profile for the drop-cap wrap-around.
@@ -222,20 +439,92 @@ pub(super) fn pack_lines_variable(
     profile: WidthProfile,
     space_advance: f64,
 ) -> Vec<Line> {
+    // The drop-cap path does not hyphenate (a documented v0 follow-up like the
+    // chain/flow drop-cap combination), so it threads `None`.
+    pack_lines_core(tokens, profile, space_advance, None)
+}
+
+/// The single greedy packer shared by [`pack_lines`] and [`pack_lines_variable`].
+///
+/// Beyond the original greedy fill it adds two OPT-IN behaviours that leave the
+/// default path byte-identical:
+///
+/// 1. **Paragraph breaks.** Each word carries a paragraph index
+///    ([`WordSource::paragraph`]); a word whose paragraph differs from the line
+///    being filled forces a line break, so a line never mixes paragraphs and
+///    every [`Line::paragraph`] is well-defined. A single-paragraph document
+///    (every index 0) never triggers this, so output is unchanged.
+///
+/// 2. **Hyphenation.** When `hyph` is `Some` and a word does NOT fit the
+///    remaining space on a NON-EMPTY line, the packer tries to split it at the
+///    last embedded break point whose `fragment-` head fits the remaining width
+///    ([`try_hyphenate`]); the head joins the current line and the tail is
+///    re-queued as the first word of the next line. If no break fits, the word
+///    flows whole to the next line exactly as before. `hyph == None` skips this
+///    entirely, so the default path is byte-identical.
+fn pack_lines_core(
+    tokens: Vec<WordToken>,
+    profile: WidthProfile,
+    space_advance: f64,
+    hyph: Option<&HyphenationContext>,
+) -> Vec<Line> {
     let mut lines: Vec<Line> = Vec::new();
     let mut cur: Vec<WordToken> = Vec::new();
     let mut line_w: f64 = 0.0;
-    for tok in tokens {
+    // Paragraph index of the line currently being filled (set by its first word).
+    let mut cur_para: usize = 0;
+    // A queue so a hyphenation tail can be re-processed as the next word without
+    // restructuring the loop. Seeded with the input tokens in order.
+    let mut queue: std::collections::VecDeque<WordToken> = tokens.into();
+
+    while let Some(tok) = queue.pop_front() {
         // The width budget for the line currently being filled is the width for
-        // the NEXT line index (i.e. the line this word would land on).
+        // the line this word would land on (the next line index when `cur` is
+        // empty, else the current one — `lines.len()` is that index).
         let box_w = profile.width_for(lines.len());
-        if !cur.is_empty() && line_w + space_advance + tok.advance > box_w {
+
+        // Paragraph boundary: a word from a later paragraph than the line being
+        // filled forces a break first (single-paragraph docs never hit this).
+        let para_break = !cur.is_empty() && tok.src.paragraph != cur_para;
+
+        let overflow = !cur.is_empty() && line_w + space_advance + tok.advance > box_w;
+
+        if overflow && !para_break {
+            // Try to hyphenate the word into the remaining space before wrapping.
+            // `avail` is the width left on the current line after a space gap.
+            if let Some(ctx) = hyph {
+                let avail = box_w - line_w - space_advance;
+                if avail > 0.0
+                    && let Some(split) = try_hyphenate(&tok, avail, ctx)
+                {
+                    // Head + hyphen joins the current line; close the line.
+                    line_w += space_advance + split.head.advance;
+                    cur.push(split.head);
+                    lines.push(Line {
+                        words: std::mem::take(&mut cur),
+                        content_w: line_w,
+                        paragraph: cur_para,
+                    });
+                    line_w = 0.0;
+                    // The tail becomes the first word of the next line.
+                    queue.push_front(split.tail);
+                    continue;
+                }
+            }
+        }
+
+        if overflow || para_break {
             let content_w = line_w;
             lines.push(Line {
                 words: std::mem::take(&mut cur),
                 content_w,
+                paragraph: cur_para,
             });
             line_w = 0.0;
+        }
+
+        if cur.is_empty() {
+            cur_para = tok.src.paragraph;
         }
         let gap = if cur.is_empty() { 0.0 } else { space_advance };
         line_w += gap + tok.advance;
@@ -245,6 +534,7 @@ pub(super) fn pack_lines_variable(
         lines.push(Line {
             words: cur,
             content_w: line_w,
+            paragraph: cur_para,
         });
     }
     lines
@@ -1294,7 +1584,21 @@ pub(super) fn compile_text(
                 commands,
             );
         } else {
-            let lines = pack_lines(tokens, box_w, metrics.space_advance);
+            // Opt-in hyphenation: build a context only when `hyphenate=#true`
+            // AND the embedded dictionary is available. Absent → `None` → the
+            // packer is byte-identical to before.
+            let hyph_ctx = if text.hyphenate == Some(true) {
+                en_us_hyphenator().map(|dict| HyphenationContext {
+                    dict,
+                    engine,
+                    fonts,
+                    families: &families,
+                    hyphen: "-",
+                })
+            } else {
+                None
+            };
+            let lines = pack_lines(tokens, box_w, metrics.space_advance, hyph_ctx.as_ref());
 
             // Record the actual line count for the overflow="fit" check below.
             fit_line_count = lines.len();

@@ -1346,6 +1346,9 @@ const TEXT_KNOWN_PROPS: &[&str] = &[
     "chain",
     "drop-cap-lines",
     "drop_cap_lines",
+    "hyphenate",
+    "widow-orphan",
+    "widow_orphan",
 ];
 
 fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
@@ -1356,6 +1359,9 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
     let font_weight = optional_property_value_aliased(node, "font-weight", "font_weight");
     let drop_cap_lines = optional_u32_prop(node, "drop-cap-lines")
         .or_else(|| optional_u32_prop(node, "drop_cap_lines"));
+    let hyphenate = optional_bool_prop(node, "hyphenate");
+    let widow_orphan =
+        optional_u32_prop(node, "widow-orphan").or_else(|| optional_u32_prop(node, "widow_orphan"));
 
     let mut spans: Vec<TextSpan> = Vec::new();
     if let Some(children) = node.children() {
@@ -1391,6 +1397,8 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         rotate: optional_dimension_prop(node, "rotate"),
         chain: optional_string_prop(node, "chain").map(str::to_owned),
         drop_cap_lines,
+        hyphenate,
+        widow_orphan,
         spans,
         source_span: node_span(node),
         unknown_props,

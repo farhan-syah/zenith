@@ -57,8 +57,9 @@ use crate::ir::Color;
 use super::paint::resolve_property_color;
 use super::style_prop;
 use super::text::{
-    Line, ResolvedSpan, WordMetrics, pack_lines, resolve_family_with_fallback, resolve_font_weight,
-    resolve_vertical_align, shape_words,
+    HyphenationContext, Line, ResolvedSpan, WordMetrics, en_us_hyphenator, flatten_lines_to_tokens,
+    pack_lines, resolve_family_with_fallback, resolve_font_weight, resolve_vertical_align,
+    shape_words,
 };
 use super::util::resolve_property_dimension_px;
 
@@ -308,12 +309,35 @@ fn distribute_chains(
             src.source_span,
         );
 
+        // Opt-in hyphenation for the whole chain, read from the source node.
+        // Absent → `None` → packing + flattening are byte-identical to before.
+        let hyph_ctx = if src.hyphenate == Some(true) {
+            en_us_hyphenator().map(|dict| HyphenationContext {
+                dict,
+                engine,
+                fonts,
+                families: &families,
+                hyphen: "-",
+            })
+        } else {
+            None
+        };
+
+        // Widow/orphan minimum, read from the chain source node. `None` or a
+        // value < 2 leaves the greedy height-cut unadjusted (byte-identical).
+        let widow_orphan = src.widow_orphan.filter(|&n| n >= 2);
+
         // Distribute tokens across the members' boxes in order.
         let mut remaining = tokens;
         let last_member = chain_members.len().saturating_sub(1);
         for (mi, member) in chain_members.iter().enumerate() {
             // Greedy-wrap the REMAINING words to THIS box's width.
-            let mut lines = pack_lines(remaining, member.w, metrics.space_advance);
+            let mut lines = pack_lines(
+                remaining,
+                member.w,
+                metrics.space_advance,
+                hyph_ctx.as_ref(),
+            );
 
             if mi == last_member {
                 // Last box: keep everything that remains (it may overflow; the
@@ -335,17 +359,21 @@ fn distribute_chains(
             // the content cascades into the next box).
             let line_h = metrics.line_height.max(1.0);
             let max_lines = (member.h / line_h).floor() as usize;
-            let take = max_lines.min(lines.len());
+            let mut take = max_lines.min(lines.len());
+
+            // Widow/orphan adjustment: if the greedy cut splits a paragraph
+            // across this boundary, pull lines DOWN into the next box so neither
+            // side is left with fewer than N lines of that paragraph.
+            if let Some(n) = widow_orphan {
+                take = adjust_for_widow_orphan(&lines, take, n as usize);
+            }
 
             // Lines beyond `take` carry their words into the next box. Rebuild
             // the remaining token queue from the overflow lines (flatten back
-            // into a single word stream so the next box re-wraps to its width).
+            // into a single word stream so the next box re-wraps to its width),
+            // merging any hyphenation fragments back into whole words.
             let overflow_lines = lines.split_off(take);
-            let mut next_tokens = Vec::new();
-            for line in overflow_lines {
-                next_tokens.extend(line.words);
-            }
-            remaining = next_tokens;
+            remaining = flatten_lines_to_tokens(overflow_lines, hyph_ctx.as_ref());
 
             assignments.insert(
                 member.id.clone(),
@@ -359,4 +387,130 @@ fn distribute_chains(
     }
 
     assignments
+}
+
+/// Adjust a greedy height-cut `take` (number of lines kept in THIS box, out of
+/// `lines`) to honor a widow/orphan minimum of `n` lines per paragraph across
+/// the box boundary. Returns the possibly-reduced `take`; lines are only ever
+/// moved DOWN into the next box (the greedy flow cannot push lines up).
+///
+/// The boundary splits a paragraph when the last kept line and the first
+/// overflow line share a paragraph index. In that case:
+/// - `top_count` = trailing lines of that paragraph kept in THIS box;
+/// - `bottom_count` = leading lines of that paragraph in the NEXT box.
+///
+/// To satisfy the WIDOW rule the next box must start with ≥ `n` lines of the
+/// paragraph, so if `bottom_count < n` we move `n - bottom_count` lines down. To
+/// satisfy the ORPHAN rule this box must keep ≥ `n` lines of the paragraph, so if
+/// the move would leave `top_count < n` we instead move the WHOLE top chunk of
+/// the paragraph down (the paragraph then starts cleanly in the next box).
+///
+/// Degenerate cases (documented): if the adjustment would empty THIS box
+/// (`take` → 0) the cut is LEFT as-is, since an empty box is worse than a
+/// widow/orphan; likewise a paragraph shorter than `2n` lines cannot satisfy the
+/// rule on both sides and falls back to being moved whole (or left, if that
+/// empties the box).
+fn adjust_for_widow_orphan(lines: &[Line], take: usize, n: usize) -> usize {
+    // No straddle when nothing is kept, nothing overflows, or the boundary lines
+    // belong to different paragraphs.
+    if take == 0 || take >= lines.len() {
+        return take;
+    }
+    let (Some(last_kept), Some(first_over)) = (lines.get(take - 1), lines.get(take)) else {
+        return take;
+    };
+    if last_kept.paragraph != first_over.paragraph {
+        return take;
+    }
+    let para = last_kept.paragraph;
+
+    // Trailing lines of `para` kept in this box.
+    let top_count = lines[..take]
+        .iter()
+        .rev()
+        .take_while(|l| l.paragraph == para)
+        .count();
+    // Leading lines of `para` in the next box.
+    let bottom_count = lines[take..]
+        .iter()
+        .take_while(|l| l.paragraph == para)
+        .count();
+
+    let mut new_take = take;
+    if bottom_count < n {
+        let need = n - bottom_count;
+        new_take = take.saturating_sub(need);
+    }
+    // If the (possible) move still leaves the top side with < n lines of the
+    // paragraph, move the whole top chunk down so the paragraph starts fresh.
+    let top_after = top_count.saturating_sub(take - new_take);
+    if top_after < n {
+        new_take = take.saturating_sub(top_count);
+    }
+
+    // Never empty this box; if the rule cannot be honored without doing so,
+    // leave the greedy cut unchanged (degenerate case).
+    if new_take >= 1 { new_take } else { take }
+}
+
+#[cfg(test)]
+mod widow_orphan_tests {
+    use super::*;
+
+    /// Build a line list from per-line paragraph indices (words/width are not
+    /// read by `adjust_for_widow_orphan`).
+    fn lines_with_paragraphs(paras: &[usize]) -> Vec<Line> {
+        paras
+            .iter()
+            .map(|&p| Line {
+                words: Vec::new(),
+                content_w: 0.0,
+                paragraph: p,
+            })
+            .collect()
+    }
+
+    /// No straddle (the boundary lines belong to different paragraphs) → the cut
+    /// is left exactly where the greedy fit put it.
+    #[test]
+    fn no_straddle_keeps_take() {
+        // take=3: line 2 is paragraph 0, line 3 is paragraph 1 → no straddle.
+        let lines = lines_with_paragraphs(&[0, 0, 0, 1, 1, 1]);
+        assert_eq!(adjust_for_widow_orphan(&lines, 3, 2), 3);
+    }
+
+    /// Orphan: box 1 would keep a lone FIRST line of paragraph 1 (take=4 keeps
+    /// [0,0,0,1]). With N=2 that single line is pulled down → take=3.
+    #[test]
+    fn orphan_single_first_line_pulled_down() {
+        let lines = lines_with_paragraphs(&[0, 0, 0, 1, 1, 1]);
+        assert_eq!(adjust_for_widow_orphan(&lines, 4, 2), 3);
+    }
+
+    /// Widow: the next box would start with a lone LAST line of paragraph 0
+    /// (take=5 keeps [0,0,0,0,0], overflow [0,1,...] starts with 1 line of P0).
+    /// With N=2 one line is pulled down so the next box starts with 2 lines of P0.
+    #[test]
+    fn widow_single_last_line_pulled_down() {
+        let lines = lines_with_paragraphs(&[0, 0, 0, 0, 0, 0, 1, 1]);
+        // take=5 → bottom_count(P0)=1 (line index 5), top_count=5. Pull 1 down.
+        assert_eq!(adjust_for_widow_orphan(&lines, 5, 2), 4);
+    }
+
+    /// Both sides already satisfy N → no change.
+    #[test]
+    fn satisfied_both_sides_unchanged() {
+        let lines = lines_with_paragraphs(&[0, 0, 0, 0]);
+        // take=2: top=2 lines of P0, bottom=2 lines of P0 → fine.
+        assert_eq!(adjust_for_widow_orphan(&lines, 2, 2), 2);
+    }
+
+    /// Degenerate: honoring the rule would empty the box → leave the cut as-is.
+    #[test]
+    fn degenerate_would_empty_box_left_as_is() {
+        // Whole box is the tail of paragraph 1 (single line), next box continues
+        // it. Pulling down would empty the box → unchanged.
+        let lines = lines_with_paragraphs(&[1, 1, 1]);
+        assert_eq!(adjust_for_widow_orphan(&lines, 1, 2), 1);
+    }
 }

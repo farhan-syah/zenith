@@ -253,6 +253,20 @@ pub struct TextNode {
     /// it); chain/flow integration is a documented v0 follow-up. KDL:
     /// `drop-cap-lines=3`.
     pub drop_cap_lines: Option<u32>,
+    /// Knuth–Liang hyphenation toggle. When `Some(true)`, the greedy line packer
+    /// may break a word that does not fit the remaining space on a non-empty line
+    /// at an embedded (en-US) hyphenation point, placing `fragment-` on the
+    /// current line and carrying the remainder to the next. `None`/`Some(false)`
+    /// disables hyphenation (byte-identical to a node without the attribute).
+    /// KDL: `hyphenate=#true`.
+    pub hyphenate: Option<bool>,
+    /// Widow/orphan control: keep at least `Some(n)` lines of a paragraph
+    /// together across a chain box/page break. `n=2` prevents a lone first line
+    /// (orphan) from being stranded at a box bottom and a lone last line (widow)
+    /// from starting the next box. Applied only at the CHAIN distribution
+    /// boundary, read from the chain source node. `None` disables the control
+    /// (byte-identical to a node without the attribute). KDL: `widow-orphan=2`.
+    pub widow_orphan: Option<u32>,
     /// Inline text spans.
     pub spans: Vec<TextSpan>,
     /// Source declaration span, when available.

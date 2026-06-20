@@ -615,6 +615,60 @@ fn test_text_drop_cap_lines_round_trip() {
     }
 }
 
+/// **hyphenate + widow-orphan round-trip**: a text node carrying
+/// `hyphenate=#true` and `widow-orphan=2` must survive parse→format→parse, with
+/// both attrs emitted and re-parsed into their fields.
+#[test]
+fn test_text_hyphenate_widow_orphan_round_trip() {
+    use crate::ast::Node;
+    let src = r##"zenith version=1 {
+  project id="proj.hy" name="HY"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.hy" title="HY" {
+    page id="p" w=(px)100 h=(px)100 {
+      text id="t1" x=(px)0 y=(px)0 w=(px)80 h=(px)40 hyphenate=#true widow-orphan=2 {
+        span "Hello world"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+    let out = format_document(&doc).expect("format");
+    let text = String::from_utf8(out).unwrap();
+
+    assert!(
+        text.contains(" hyphenate=#true"),
+        "hyphenate attr must be emitted; got:\n{text}"
+    );
+    assert!(
+        text.contains(" widow-orphan=2"),
+        "widow-orphan attr must be emitted; got:\n{text}"
+    );
+
+    let doc2 = adapter.parse(text.as_bytes()).expect("re-parse");
+    let page = &doc2.body.pages[0];
+    match &page.children[0] {
+        Node::Text(t) => {
+            assert_eq!(
+                t.hyphenate,
+                Some(true),
+                "hyphenate must survive the format round-trip"
+            );
+            assert_eq!(
+                t.widow_orphan,
+                Some(2),
+                "widow-orphan must survive the format round-trip"
+            );
+        }
+        other => panic!("expected Text, got {other:?}"),
+    }
+}
+
 /// **Gradient round-trip**: a gradient token (angle + 2 stops) must
 /// parse→format→parse byte-stably, emit the `stop` brace block, and a page
 /// background referencing it must NOT flag the stop colors as `token.unused`.
