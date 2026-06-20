@@ -385,6 +385,102 @@ pub(super) fn compile_rect(
         commands.push(SceneCommand::EndBlur);
     }
 
+    // STROKE-OUTER: a second stroke painted OUTSIDE the rect geometry.
+    // Emitted after shadow/blur bracket (so it lands on top of the shadow)
+    // and outside the blend layer bracket (so it inherits the same opacity
+    // cascade). Default-OFF: no commands emitted when stroke_outer is absent.
+    if let Some(op) = rect.stroke_outer.as_ref()
+        && let Some(mut oc) = resolve_property_color(op, resolved, diagnostics, &rect.id)
+    {
+        oc.a = (oc.a as f64 * color_op).round() as u8;
+        let ow = resolve_property_dimension_px(&rect.stroke_outer_width, resolved, 1.0);
+        let half = ow / 2.0;
+        let ox = x - half;
+        let oy = y - half;
+        let ogw = w + ow;
+        let ogh = h + ow;
+        if ogw > 0.0 && ogh > 0.0 {
+            if is_rounded {
+                // Expand corner radii outward by half the outer stroke width.
+                // A corner with radius 0 stays sharp (no outset).
+                let outer_expand = |v: f64| if v > 0.0 { v + half } else { 0.0 };
+                let outer_radius = outer_expand(radius);
+                let outer_radii = radii.map(|[tl, tr, br, bl]| {
+                    [
+                        outer_expand(tl),
+                        outer_expand(tr),
+                        outer_expand(br),
+                        outer_expand(bl),
+                    ]
+                });
+                commands.push(SceneCommand::StrokeRoundedRect {
+                    x: ox,
+                    y: oy,
+                    w: ogw,
+                    h: ogh,
+                    radius: outer_radius,
+                    radii: outer_radii,
+                    color: oc,
+                    stroke_width: ow,
+                    stroke_dash: None,
+                    stroke_gap: None,
+                    stroke_linecap: None,
+                });
+            } else {
+                commands.push(SceneCommand::StrokeRect {
+                    x: ox,
+                    y: oy,
+                    w: ogw,
+                    h: ogh,
+                    color: oc,
+                    stroke_width: ow,
+                    stroke_dash: None,
+                    stroke_gap: None,
+                    stroke_linecap: None,
+                });
+            }
+        }
+    }
+
+    // PER-SIDE BORDERS: straight StrokeLine along each present side.
+    // Emitted after the outer stroke. Default-OFF: no commands when all four
+    // border_* props are absent.
+    let has_border = rect.border_top.is_some()
+        || rect.border_bottom.is_some()
+        || rect.border_left.is_some()
+        || rect.border_right.is_some();
+    if has_border {
+        // border-width falls back to stroke-width then 1px.
+        let bw_prop = rect
+            .border_width
+            .clone()
+            .or_else(|| rect.stroke_width.clone());
+        let bw = resolve_property_dimension_px(&bw_prop, resolved, 1.0);
+        for (prop, x1, y1, x2, y2) in [
+            (rect.border_top.as_ref(), x, y, x + w, y),
+            (rect.border_bottom.as_ref(), x, y + h, x + w, y + h),
+            (rect.border_left.as_ref(), x, y, x, y + h),
+            (rect.border_right.as_ref(), x + w, y, x + w, y + h),
+        ] {
+            if let Some(sp) = prop
+                && let Some(mut sc) = resolve_property_color(sp, resolved, diagnostics, &rect.id)
+            {
+                sc.a = (sc.a as f64 * color_op).round() as u8;
+                commands.push(SceneCommand::StrokeLine {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    color: sc,
+                    stroke_width: bw,
+                    stroke_dash: None,
+                    stroke_gap: None,
+                    stroke_linecap: None,
+                });
+            }
+        }
+    }
+
     if blend.is_some() {
         commands.push(SceneCommand::PopLayer);
     }

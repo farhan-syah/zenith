@@ -257,6 +257,39 @@ pub(super) fn walk_node(
                     Some(r.id.clone()),
                 ));
             }
+            // Per-side border colors (token-required color props).
+            for (prop_name, prop_val) in [
+                ("border-top", r.border_top.as_ref()),
+                ("border-bottom", r.border_bottom.as_ref()),
+                ("border-left", r.border_left.as_ref()),
+                ("border-right", r.border_right.as_ref()),
+                ("stroke-outer", r.stroke_outer.as_ref()),
+            ] {
+                check_visual_prop(
+                    &r.id,
+                    prop_name,
+                    prop_val,
+                    VisualExpect::Color,
+                    referenced_token_ids,
+                    resolved_tokens,
+                    diagnostics,
+                );
+            }
+            // Per-side border width + outer stroke width (token-required dimension props).
+            for (prop_name, prop_val) in [
+                ("border-width", r.border_width.as_ref()),
+                ("stroke-outer-width", r.stroke_outer_width.as_ref()),
+            ] {
+                check_visual_prop(
+                    &r.id,
+                    prop_name,
+                    prop_val,
+                    VisualExpect::Dimension,
+                    referenced_token_ids,
+                    resolved_tokens,
+                    diagnostics,
+                );
+            }
             if let Some(bm) = r.blend_mode.as_deref()
                 && !is_valid_blend_mode(bm)
             {

@@ -297,6 +297,13 @@ fn write_rect(r: &RectNode, out: &mut String, depth: usize) {
     write_opt_property_value(out, "stroke-dash", &r.stroke_dash);
     write_opt_property_value(out, "stroke-gap", &r.stroke_gap);
     write_opt_str(out, "stroke-linecap", &r.stroke_linecap);
+    write_opt_property_value(out, "border-top", &r.border_top);
+    write_opt_property_value(out, "border-bottom", &r.border_bottom);
+    write_opt_property_value(out, "border-left", &r.border_left);
+    write_opt_property_value(out, "border-right", &r.border_right);
+    write_opt_property_value(out, "border-width", &r.border_width);
+    write_opt_property_value(out, "stroke-outer", &r.stroke_outer);
+    write_opt_property_value(out, "stroke-outer-width", &r.stroke_outer_width);
     write_opt_property_value(out, "shadow", &r.shadow);
     write_opt_str(out, "blend-mode", &r.blend_mode);
     write_opt_dimension(out, "blur", &r.blur);

@@ -1144,7 +1144,7 @@ fn transform_children(node: &KdlNode) -> Result<Vec<Node>, ParseError> {
 
 fn transform_node(node: &KdlNode) -> Result<Node, ParseError> {
     match node.name().value() {
-        "rect" => transform_rect(node).map(Node::Rect),
+        "rect" => transform_rect(node).map(|r| Node::Rect(Box::new(r))),
         "ellipse" => transform_ellipse(node).map(Node::Ellipse),
         "line" => transform_line(node).map(Node::Line),
         "text" => transform_text(node).map(|t| Node::Text(Box::new(t))),
@@ -1202,6 +1202,20 @@ const RECT_KNOWN_PROPS: &[&str] = &[
     "visible",
     "locked",
     "rotate",
+    "border-top",
+    "border_top",
+    "border-bottom",
+    "border_bottom",
+    "border-left",
+    "border_left",
+    "border-right",
+    "border_right",
+    "border-width",
+    "border_width",
+    "stroke-outer",
+    "stroke_outer",
+    "stroke-outer-width",
+    "stroke_outer_width",
 ];
 
 fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
@@ -1224,6 +1238,18 @@ fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
     let radius_tr = optional_property_value_aliased(node, "radius-tr", "radius_tr");
     let radius_br = optional_property_value_aliased(node, "radius-br", "radius_br");
     let radius_bl = optional_property_value_aliased(node, "radius-bl", "radius_bl");
+
+    // Per-side border colors.
+    let border_top = optional_property_value_aliased(node, "border-top", "border_top");
+    let border_bottom = optional_property_value_aliased(node, "border-bottom", "border_bottom");
+    let border_left = optional_property_value_aliased(node, "border-left", "border_left");
+    let border_right = optional_property_value_aliased(node, "border-right", "border_right");
+    // Shared border width.
+    let border_width = optional_property_value_aliased(node, "border-width", "border_width");
+    // Double-border (outer stroke).
+    let stroke_outer = optional_property_value_aliased(node, "stroke-outer", "stroke_outer");
+    let stroke_outer_width =
+        optional_property_value_aliased(node, "stroke-outer-width", "stroke_outer_width");
 
     let unknown_props = collect_unknown_props(node, RECT_KNOWN_PROPS);
 
@@ -1248,6 +1274,13 @@ fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
         stroke_dash,
         stroke_gap,
         stroke_linecap,
+        border_top,
+        border_bottom,
+        border_left,
+        border_right,
+        border_width,
+        stroke_outer,
+        stroke_outer_width,
         shadow: optional_property_value(node, "shadow"),
         blend_mode,
         blur: optional_dimension_prop(node, "blur"),

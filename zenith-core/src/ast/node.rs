@@ -166,6 +166,26 @@ pub struct RectNode {
     pub stroke_gap: Option<PropertyValue>,
     /// Dash end-cap style: `"butt"` (default), `"round"`, or `"square"`.
     pub stroke_linecap: Option<String>,
+    /// Per-side border color for the top edge. Token-required (color token).
+    /// When `Some`, a `StrokeLine` is emitted along the top edge of the rect.
+    pub border_top: Option<PropertyValue>,
+    /// Per-side border color for the bottom edge. Token-required (color token).
+    pub border_bottom: Option<PropertyValue>,
+    /// Per-side border color for the left edge. Token-required (color token).
+    pub border_left: Option<PropertyValue>,
+    /// Per-side border color for the right edge. Token-required (color token).
+    pub border_right: Option<PropertyValue>,
+    /// Shared border width for per-side borders. Token-required (dimension).
+    /// Falls back to `stroke_width`, then to 1px when absent.
+    pub border_width: Option<PropertyValue>,
+    /// Outer stroke color: a SECOND stroke painted OUTSIDE the rect geometry.
+    /// Token-required (color token). When `Some`, a `StrokeRect` /
+    /// `StrokeRoundedRect` is emitted at outset geometry in addition to the
+    /// primary stroke. `None` → no outer stroke (byte-identical).
+    pub stroke_outer: Option<PropertyValue>,
+    /// Outer stroke width for `stroke_outer`. Token-required (dimension).
+    /// Defaults to 1px when absent. Only effective when `stroke_outer` is set.
+    pub stroke_outer_width: Option<PropertyValue>,
     /// Drop shadow / outer glow, as a `(token)` ref to a `shadow` token.
     pub shadow: Option<PropertyValue>,
     /// Compositing blend mode: `"normal"` (default) or one of the 11 separable
@@ -819,7 +839,10 @@ pub struct FootnoteNode {
 /// A renderable content node within a page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
-    Rect(RectNode),
+    // Boxed: `RectNode` grew large enough to trigger `large_enum_variant`.
+    // Boxing keeps `Node` compact so moving it around stays cheap.
+    // Mirrors the existing `Text(Box<TextNode>)` pattern.
+    Rect(Box<RectNode>),
     Ellipse(EllipseNode),
     Line(LineNode),
     // Boxed: `TextNode` is by far the largest node variant (many optional

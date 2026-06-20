@@ -63,7 +63,7 @@ fn token_ref(id: &str) -> PropertyValue {
 }
 
 fn minimal_rect(id: &str, fill: Option<PropertyValue>) -> Node {
-    Node::Rect(RectNode {
+    Node::Rect(Box::new(RectNode {
         shadow: None,
         id: id.to_owned(),
         name: None,
@@ -85,6 +85,13 @@ fn minimal_rect(id: &str, fill: Option<PropertyValue>) -> Node {
         stroke_dash: None,
         stroke_gap: None,
         stroke_linecap: None,
+        border_top: None,
+        border_bottom: None,
+        border_left: None,
+        border_right: None,
+        border_width: None,
+        stroke_outer: None,
+        stroke_outer_width: None,
         opacity: None,
         visible: None,
         locked: None,
@@ -93,7 +100,7 @@ fn minimal_rect(id: &str, fill: Option<PropertyValue>) -> Node {
         blur: None,
         source_span: None,
         unknown_props: BTreeMap::new(),
-    })
+    }))
 }
 
 fn minimal_ellipse(id: &str, fill: Option<PropertyValue>) -> Node {
@@ -314,7 +321,7 @@ fn rect_missing_w_produces_node_missing_geometry() {
         vec![],
         vec![minimal_page(
             "page.one",
-            vec![Node::Rect(RectNode {
+            vec![Node::Rect(Box::new(RectNode {
                 shadow: None,
                 id: "rect.no-w".to_owned(),
                 name: None,
@@ -336,6 +343,13 @@ fn rect_missing_w_produces_node_missing_geometry() {
                 stroke_dash: None,
                 stroke_gap: None,
                 stroke_linecap: None,
+                border_top: None,
+                border_bottom: None,
+                border_left: None,
+                border_right: None,
+                border_width: None,
+                stroke_outer: None,
+                stroke_outer_width: None,
                 opacity: None,
                 visible: None,
                 locked: None,
@@ -344,7 +358,7 @@ fn rect_missing_w_produces_node_missing_geometry() {
                 blur: None,
                 source_span: None,
                 unknown_props: BTreeMap::new(),
-            })],
+            }))],
         )],
     );
     let report = validate(&doc);
@@ -620,7 +634,7 @@ fn unknown_property_on_rect_produces_warning() {
         vec![],
         vec![minimal_page(
             "page.one",
-            vec![Node::Rect(RectNode {
+            vec![Node::Rect(Box::new(RectNode {
                 shadow: None,
                 id: "rect.one".to_owned(),
                 name: None,
@@ -642,6 +656,13 @@ fn unknown_property_on_rect_produces_warning() {
                 stroke_dash: None,
                 stroke_gap: None,
                 stroke_linecap: None,
+                border_top: None,
+                border_bottom: None,
+                border_left: None,
+                border_right: None,
+                border_width: None,
+                stroke_outer: None,
+                stroke_outer_width: None,
                 opacity: None,
                 visible: None,
                 locked: None,
@@ -650,7 +671,7 @@ fn unknown_property_on_rect_produces_warning() {
                 blur: None,
                 source_span: None,
                 unknown_props,
-            })],
+            }))],
         )],
     );
     let report = validate(&doc);
@@ -747,7 +768,7 @@ fn group_nested_id_duplicate_with_page_sibling() {
 fn group_child_missing_geometry_surfaces() {
     // A rect nested inside a group has no `x` property; walk_node must
     // recurse into group children and report the missing geometry.
-    let child_rect = Node::Rect(RectNode {
+    let child_rect = Node::Rect(Box::new(RectNode {
         shadow: None,
         id: "rect.inner".to_owned(),
         name: None,
@@ -769,6 +790,13 @@ fn group_child_missing_geometry_surfaces() {
         stroke_dash: None,
         stroke_gap: None,
         stroke_linecap: None,
+        border_top: None,
+        border_bottom: None,
+        border_left: None,
+        border_right: None,
+        border_width: None,
+        stroke_outer: None,
+        stroke_outer_width: None,
         opacity: None,
         visible: None,
         locked: None,
@@ -777,7 +805,7 @@ fn group_child_missing_geometry_surfaces() {
         blur: None,
         source_span: None,
         unknown_props: BTreeMap::new(),
-    });
+    }));
     let doc = doc_with(
         vec![],
         vec![minimal_page(
@@ -878,7 +906,7 @@ fn minimal_frame(id: &str, x: f64, y: f64, w: f64, h: f64, children: Vec<Node>) 
 fn frame_clean_doc_no_errors() {
     // Child rect sits fully inside the frame box (40,40,120,100), so neither
     // off_canvas nor frame.child_overflow fire.
-    let inner = Node::Rect(RectNode {
+    let inner = Node::Rect(Box::new(RectNode {
         shadow: None,
         id: "rect.inner".to_owned(),
         name: None,
@@ -900,6 +928,13 @@ fn frame_clean_doc_no_errors() {
         stroke_dash: None,
         stroke_gap: None,
         stroke_linecap: None,
+        border_top: None,
+        border_bottom: None,
+        border_left: None,
+        border_right: None,
+        border_width: None,
+        stroke_outer: None,
+        stroke_outer_width: None,
         opacity: None,
         visible: None,
         locked: None,
@@ -908,7 +943,7 @@ fn frame_clean_doc_no_errors() {
         blur: None,
         source_span: None,
         unknown_props: BTreeMap::new(),
-    });
+    }));
     let doc = doc_with(
         vec![color_token("color.fill")],
         vec![minimal_page(
@@ -1020,7 +1055,7 @@ fn frame_missing_h_produces_node_missing_geometry() {
 fn frame_child_missing_geometry_surfaces() {
     // A rect nested inside a frame has no `x`; walk_node must recurse
     // into frame children and report the missing geometry.
-    let child_rect = Node::Rect(RectNode {
+    let child_rect = Node::Rect(Box::new(RectNode {
         shadow: None,
         id: "rect.inner".to_owned(),
         name: None,
@@ -1042,6 +1077,13 @@ fn frame_child_missing_geometry_surfaces() {
         stroke_dash: None,
         stroke_gap: None,
         stroke_linecap: None,
+        border_top: None,
+        border_bottom: None,
+        border_left: None,
+        border_right: None,
+        border_width: None,
+        stroke_outer: None,
+        stroke_outer_width: None,
         opacity: None,
         visible: None,
         locked: None,
@@ -1050,7 +1092,7 @@ fn frame_child_missing_geometry_surfaces() {
         blur: None,
         source_span: None,
         unknown_props: BTreeMap::new(),
-    });
+    }));
     let doc = doc_with(
         vec![],
         vec![minimal_page(
@@ -1138,7 +1180,7 @@ fn frame_child_fully_inside_is_clean() {
 /// (node_bbox is None, so the child is naturally skipped).
 #[test]
 fn flow_frame_child_without_geometry_is_skipped() {
-    let child_rect = Node::Rect(RectNode {
+    let child_rect = Node::Rect(Box::new(RectNode {
         shadow: None,
         id: "rect.flow".to_owned(),
         name: None,
@@ -1160,6 +1202,13 @@ fn flow_frame_child_without_geometry_is_skipped() {
         stroke_dash: None,
         stroke_gap: None,
         stroke_linecap: None,
+        border_top: None,
+        border_bottom: None,
+        border_left: None,
+        border_right: None,
+        border_width: None,
+        stroke_outer: None,
+        stroke_outer_width: None,
         opacity: None,
         visible: None,
         locked: None,
@@ -1168,7 +1217,7 @@ fn flow_frame_child_without_geometry_is_skipped() {
         blur: None,
         source_span: None,
         unknown_props: BTreeMap::new(),
-    });
+    }));
     let flow_frame = Node::Frame(FrameNode {
         id: "frame.flow".to_owned(),
         name: None,
@@ -1295,7 +1344,7 @@ fn stroke_width_with_dimension_token_is_clean() {
         vec![dim_token("size.stroke")],
         vec![minimal_page(
             "page.one",
-            vec![Node::Rect(RectNode {
+            vec![Node::Rect(Box::new(RectNode {
                 shadow: None,
                 id: "rect.one".to_owned(),
                 name: None,
@@ -1317,6 +1366,13 @@ fn stroke_width_with_dimension_token_is_clean() {
                 stroke_dash: None,
                 stroke_gap: None,
                 stroke_linecap: None,
+                border_top: None,
+                border_bottom: None,
+                border_left: None,
+                border_right: None,
+                border_width: None,
+                stroke_outer: None,
+                stroke_outer_width: None,
                 opacity: None,
                 visible: None,
                 locked: None,
@@ -1325,7 +1381,7 @@ fn stroke_width_with_dimension_token_is_clean() {
                 blur: None,
                 source_span: None,
                 unknown_props: BTreeMap::new(),
-            })],
+            }))],
         )],
     );
     let report = validate(&doc);
@@ -2620,7 +2676,7 @@ fn bounded_page(id: &str, w: f64, h: f64, children: Vec<Node>) -> Page {
 
 /// Helper: rect at (x, y, w, h) in px, no fill.
 fn rect_at(id: &str, x: f64, y: f64, w: f64, h: f64) -> Node {
-    Node::Rect(RectNode {
+    Node::Rect(Box::new(RectNode {
         shadow: None,
         id: id.to_owned(),
         name: None,
@@ -2642,6 +2698,13 @@ fn rect_at(id: &str, x: f64, y: f64, w: f64, h: f64) -> Node {
         stroke_dash: None,
         stroke_gap: None,
         stroke_linecap: None,
+        border_top: None,
+        border_bottom: None,
+        border_left: None,
+        border_right: None,
+        border_width: None,
+        stroke_outer: None,
+        stroke_outer_width: None,
         opacity: None,
         visible: None,
         locked: None,
@@ -2650,7 +2713,7 @@ fn rect_at(id: &str, x: f64, y: f64, w: f64, h: f64) -> Node {
         blur: None,
         source_span: None,
         unknown_props: BTreeMap::new(),
-    })
+    }))
 }
 
 /// A rect with x=-20 on a 100×100 page → off_canvas advisory.
@@ -2755,7 +2818,7 @@ fn rect_at_rotated(id: &str, x: f64, y: f64, w: f64, h: f64, rotate_deg: Option<
         value: deg,
         unit: Unit::Deg,
     });
-    Node::Rect(RectNode {
+    Node::Rect(Box::new(RectNode {
         shadow: None,
         id: id.to_owned(),
         name: None,
@@ -2777,6 +2840,13 @@ fn rect_at_rotated(id: &str, x: f64, y: f64, w: f64, h: f64, rotate_deg: Option<
         stroke_dash: None,
         stroke_gap: None,
         stroke_linecap: None,
+        border_top: None,
+        border_bottom: None,
+        border_left: None,
+        border_right: None,
+        border_width: None,
+        stroke_outer: None,
+        stroke_outer_width: None,
         opacity: None,
         visible: None,
         locked: None,
@@ -2785,7 +2855,7 @@ fn rect_at_rotated(id: &str, x: f64, y: f64, w: f64, h: f64, rotate_deg: Option<
         blur: None,
         source_span: None,
         unknown_props: BTreeMap::new(),
-    })
+    }))
 }
 
 /// A rect centered on the page, small enough that its authored bbox is fully
@@ -4419,7 +4489,7 @@ fn unresolved_page_ref_target_is_warning() {
 #[test]
 fn resolved_page_ref_target_does_not_warn() {
     // The page contains a node with id "anchor"; a page-ref to it resolves.
-    let anchor = Node::Rect(RectNode {
+    let anchor = Node::Rect(Box::new(RectNode {
         id: "anchor".to_owned(),
         name: None,
         role: None,
@@ -4440,6 +4510,13 @@ fn resolved_page_ref_target_does_not_warn() {
         stroke_dash: None,
         stroke_gap: None,
         stroke_linecap: None,
+        border_top: None,
+        border_bottom: None,
+        border_left: None,
+        border_right: None,
+        border_width: None,
+        stroke_outer: None,
+        stroke_outer_width: None,
         shadow: None,
         opacity: None,
         visible: None,
@@ -4449,7 +4526,7 @@ fn resolved_page_ref_target_does_not_warn() {
         blur: None,
         source_span: None,
         unknown_props: BTreeMap::new(),
-    });
+    }));
     let mut f = field_node("f.ref", "page-ref");
     f.target = Some("anchor".to_owned());
     let doc = doc_with(
