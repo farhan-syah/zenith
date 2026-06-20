@@ -657,6 +657,50 @@ pub enum Op {
         /// Axis to distribute along: `"horizontal"` or `"vertical"`.
         axis: String,
     },
+    /// Create a new design token in the document's `tokens` block.
+    ///
+    /// `token_type` is one of `"color"`, `"dimension"`, `"number"`,
+    /// `"fontFamily"`, `"fontWeight"`. `value` is the literal in string form:
+    /// a color/family string (`"#e11d48"`, `"Inter"`), a dimension string
+    /// (`"(px)40"`), or a number (`"700"`, `"1.05"`).
+    ///
+    /// Eagerly rejected with `tx.duplicate_id` if a token with `id` already
+    /// exists.  Gradient/shadow/unknown types are rejected with
+    /// `tx.invalid_value` (v0: scalar literal token types only; gradient/shadow
+    /// tokens must be authored in source).
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"create_token","id":"color.brand","type":"color","value":"#e11d48"}
+    /// ```
+    CreateToken {
+        /// Globally unique token id (e.g. `"color.brand"`).
+        id: String,
+        /// Token type string: `"color"`, `"dimension"`, `"number"`,
+        /// `"fontFamily"`, or `"fontWeight"`.
+        #[serde(rename = "type")]
+        token_type: String,
+        /// Literal value in string form appropriate for the declared type.
+        value: String,
+    },
+    /// Replace the literal value of an existing token, preserving its declared
+    /// type.
+    ///
+    /// `value` is parsed against the token's existing `token_type`; a value
+    /// that does not parse for that type is rejected with `tx.invalid_value`.
+    /// Rejected with `tx.unknown_token` if no token with `id` exists.
+    /// Gradient/shadow tokens cannot be updated via this op → `tx.invalid_value`.
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"update_token_value","id":"color.brand","value":"#3b82f6"}
+    /// ```
+    UpdateTokenValue {
+        /// The id of the token to update.
+        id: String,
+        /// New literal value in string form appropriate for the token's existing type.
+        value: String,
+    },
 }
 
 fn default_anchor() -> String {

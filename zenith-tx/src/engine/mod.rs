@@ -15,6 +15,7 @@ mod flags;
 mod geometry;
 mod structure;
 mod style;
+mod token;
 
 use asset::{apply_add_asset, apply_set_asset};
 use flags::{apply_set_locked, apply_set_points, apply_set_visible};
@@ -28,6 +29,7 @@ use style::{
     apply_replace_text, apply_set_fill, apply_set_opacity, apply_set_stroke,
     apply_set_stroke_width, apply_set_text_align, apply_set_text_overflow,
 };
+use token::{apply_create_token, apply_update_token_value};
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
@@ -301,6 +303,16 @@ fn apply_op(
         Op::SetAsset { node_id, asset_id } => {
             apply_set_asset(node_id, asset_id, doc, diagnostics, affected);
         }
+        Op::CreateToken {
+            id,
+            token_type,
+            value,
+        } => {
+            apply_create_token(id, token_type, value, doc, diagnostics, affected);
+        }
+        Op::UpdateTokenValue { id, value } => {
+            apply_update_token_value(id, value, doc, diagnostics, affected);
+        }
     }
 }
 
@@ -351,7 +363,10 @@ fn op_lock_targets(op: &Op) -> Vec<&str> {
         | Op::DeletePage { .. }
         | Op::ReorderPages { .. }
         // AddAsset creates new content and never mutates a node; exempt like AddNode.
-        | Op::AddAsset { .. } => Vec::new(),
+        | Op::AddAsset { .. }
+        // Token ops mutate the token block, not the node tree; no per-node lock target.
+        | Op::CreateToken { .. }
+        | Op::UpdateTokenValue { .. } => Vec::new(),
     }
 }
 

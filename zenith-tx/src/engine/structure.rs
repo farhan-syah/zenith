@@ -726,7 +726,7 @@ pub(super) fn apply_duplicate_page(
 /// collapsing to px) because [`Page::width`]/[`Page::height`] store a full
 /// `Dimension`. Returns `None` if the string is not parenthesized-unit-prefixed
 /// or the numeric tail is not a finite number.
-fn parse_dimension_str(s: &str) -> Option<Dimension> {
+pub(super) fn parse_dimension_str(s: &str) -> Option<Dimension> {
     let rest = s.strip_prefix('(')?;
     let (unit_str, value_str) = rest.split_once(')')?;
     let unit = Unit::from_annotation(unit_str);
