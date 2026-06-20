@@ -7,11 +7,11 @@
 use std::collections::BTreeMap;
 
 use zenith_core::{
-    Diagnostic, EllipseNode, LineNode, Point, PolygonNode, PolylineNode, RectNode, ResolvedToken,
-    Span, Style, dim_to_px,
+    Diagnostic, EllipseNode, LineNode, Point, PolygonNode, PolylineNode, PropertyValue, RectNode,
+    ResolvedToken, Span, Style, dim_to_px,
 };
 
-use crate::ir::SceneCommand;
+use crate::ir::{LineCap, SceneCommand};
 
 use super::RenderCtx;
 use super::paint::{
@@ -20,6 +20,36 @@ use super::paint::{
 };
 use super::style_prop;
 use super::util::{resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag};
+
+/// Resolve dashed-stroke parameters from raw node fields.
+///
+/// Returns `(stroke_dash, stroke_gap, stroke_linecap)`:
+/// - `stroke_dash`/`stroke_gap` are `None` when dash is absent or `<= 0`
+///   (solid stroke, byte-identical to prior behavior).
+/// - `stroke_linecap` is `None` (Butt default) when dash is absent.
+fn resolve_dash_params(
+    dash_prop: &Option<PropertyValue>,
+    gap_prop: &Option<PropertyValue>,
+    linecap_str: Option<&str>,
+    resolved: &BTreeMap<String, ResolvedToken>,
+) -> (Option<f64>, Option<f64>, Option<LineCap>) {
+    let dash_px = resolve_property_dimension_px(dash_prop, resolved, -1.0);
+    let gap_px = resolve_property_dimension_px(gap_prop, resolved, -1.0);
+    let (stroke_dash, stroke_gap) = if dash_px > 0.0 {
+        let g = if gap_px >= 0.0 { gap_px } else { dash_px };
+        (Some(dash_px), Some(g))
+    } else {
+        (None, None)
+    };
+    let stroke_linecap = linecap_str.map(|s| match s {
+        "round" => LineCap::Round,
+        "square" => LineCap::Square,
+        _ => LineCap::Butt,
+    });
+    // Only emit linecap when dash is active (solid strokes ignore it).
+    let stroke_linecap = stroke_dash.and(stroke_linecap);
+    (stroke_dash, stroke_gap, stroke_linecap)
+}
 
 /// Compile a `rect` leaf node.
 pub(super) fn compile_rect(
@@ -195,6 +225,14 @@ pub(super) fn compile_rect(
             .or_else(|| style_prop(&rect.style, style_map, "stroke-width").cloned());
         let stroke_width = resolve_property_dimension_px(&sw, resolved, 1.0);
 
+        // Resolve dashed stroke parameters.
+        let (stroke_dash, stroke_gap, stroke_linecap) = resolve_dash_params(
+            &rect.stroke_dash,
+            &rect.stroke_gap,
+            rect.stroke_linecap.as_deref(),
+            resolved,
+        );
+
         // Stroke alignment offsets the stroke path relative to the box
         // edge by half the stroke width. `center` (default) straddles the
         // edge; `inside`/`outside` shift the whole stroked rectangle in or
@@ -237,6 +275,9 @@ pub(super) fn compile_rect(
                     radius: sradius,
                     color,
                     stroke_width,
+                    stroke_dash,
+                    stroke_gap,
+                    stroke_linecap,
                 });
             } else {
                 commands.push(SceneCommand::StrokeRect {
@@ -246,6 +287,9 @@ pub(super) fn compile_rect(
                     h: sh_geom,
                     color,
                     stroke_width,
+                    stroke_dash,
+                    stroke_gap,
+                    stroke_linecap,
                 });
             }
         }
@@ -402,6 +446,15 @@ pub(super) fn compile_ellipse(
             .clone()
             .or_else(|| style_prop(&ellipse.style, style_map, "stroke-width").cloned());
         let stroke_width = resolve_property_dimension_px(&sw, resolved, 1.0);
+
+        // Resolve dashed stroke parameters.
+        let (stroke_dash, stroke_gap, stroke_linecap) = resolve_dash_params(
+            &ellipse.stroke_dash,
+            &ellipse.stroke_gap,
+            ellipse.stroke_linecap.as_deref(),
+            resolved,
+        );
+
         commands.push(SceneCommand::StrokeEllipse {
             x,
             y,
@@ -409,6 +462,9 @@ pub(super) fn compile_ellipse(
             h,
             color,
             stroke_width,
+            stroke_dash,
+            stroke_gap,
+            stroke_linecap,
         });
     }
 
@@ -522,6 +578,14 @@ pub(super) fn compile_line(
         .or_else(|| style_prop(&line.style, style_map, "stroke-width").cloned());
     let stroke_width: f64 = resolve_property_dimension_px(&sw, resolved, 1.0);
 
+    // Resolve dashed stroke parameters.
+    let (stroke_dash, stroke_gap, stroke_linecap) = resolve_dash_params(
+        &line.stroke_dash,
+        &line.stroke_gap,
+        line.stroke_linecap.as_deref(),
+        resolved,
+    );
+
     commands.push(SceneCommand::StrokeLine {
         x1,
         y1,
@@ -529,6 +593,9 @@ pub(super) fn compile_line(
         y2,
         color,
         stroke_width,
+        stroke_dash,
+        stroke_gap,
+        stroke_linecap,
     });
 }
 

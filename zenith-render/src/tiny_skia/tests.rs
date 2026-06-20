@@ -605,6 +605,9 @@ fn stroke_ellipse_renders() {
         h: 40.0,
         color,
         stroke_width: 4.0,
+        stroke_dash: None,
+        stroke_gap: None,
+        stroke_linecap: None,
     });
     scene.commands.push(SceneCommand::PopClip);
 
@@ -780,6 +783,9 @@ fn stroke_line_clipped_to_subpage_clip() {
         y2: 20.0,
         color: Color::srgb(0, 0, 0, 255),
         stroke_width: 4.0,
+        stroke_dash: None,
+        stroke_gap: None,
+        stroke_linecap: None,
     });
     scene.commands.push(SceneCommand::PopClip);
     scene.commands.push(SceneCommand::PopClip);
@@ -897,6 +903,9 @@ fn stroke_rect_draws_border_pixels() {
         h: 20.0,
         color: Color::srgb(0, 0, 0, 255),
         stroke_width: 4.0,
+        stroke_dash: None,
+        stroke_gap: None,
+        stroke_linecap: None,
     });
     scene.commands.push(SceneCommand::PopClip);
 
@@ -974,6 +983,9 @@ fn rounded_and_stroke_rects_deterministic_png() {
         h: 30.0,
         color: Color::srgb(200, 0, 0, 255),
         stroke_width: 3.0,
+        stroke_dash: None,
+        stroke_gap: None,
+        stroke_linecap: None,
     });
     scene.commands.push(SceneCommand::FillRoundedRect {
         x: 40.0,
@@ -991,6 +1003,9 @@ fn rounded_and_stroke_rects_deterministic_png() {
         radius: 8.0,
         color: Color::srgb(0, 0, 200, 255),
         stroke_width: 3.0,
+        stroke_dash: None,
+        stroke_gap: None,
+        stroke_linecap: None,
     });
     scene.commands.push(SceneCommand::PopClip);
 
@@ -1000,6 +1015,81 @@ fn rounded_and_stroke_rects_deterministic_png() {
     assert_eq!(
         png1, png2,
         "StrokeRect + FillRoundedRect + StrokeRoundedRect scene must render byte-identically"
+    );
+}
+
+// ── dashed StrokeRect: renders without panic ──────────────────────────
+
+/// A `StrokeRect` with `stroke_dash=Some(8.0)` and `stroke_gap=Some(4.0)` must
+/// rasterize without panicking and ink at least one pixel (proving the dashed
+/// path is exercised). The dashed render must also differ from the solid render
+/// (different pixel pattern).
+#[test]
+fn dashed_stroke_rect_renders_without_panic() {
+    let color = Color::srgb(255, 0, 0, 255);
+
+    let mut dashed_scene = Scene::new(60.0, 60.0);
+    dashed_scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 60.0,
+        h: 60.0,
+    });
+    dashed_scene.commands.push(SceneCommand::StrokeRect {
+        x: 5.0,
+        y: 5.0,
+        w: 50.0,
+        h: 50.0,
+        color,
+        stroke_width: 3.0,
+        stroke_dash: Some(8.0),
+        stroke_gap: Some(4.0),
+        stroke_linecap: Some(zenith_scene::ir::LineCap::Round),
+    });
+    dashed_scene.commands.push(SceneCommand::PopClip);
+
+    let backend = TinySkiaBackend;
+    let provider = default_provider();
+    let img = backend
+        .rasterize(&dashed_scene, &provider, &no_assets())
+        .expect("dashed StrokeRect must rasterize without panic");
+
+    // At least one pixel must be inked (the dashed path does produce ink).
+    let any_ink = (0..img.height).any(|py| {
+        (0..img.width).any(|px| {
+            let (_, _, _, a) = pixel(&img.rgba, img.width, px, py);
+            a > 0
+        })
+    });
+    assert!(any_ink, "dashed StrokeRect must ink at least one pixel");
+
+    // The dashed version differs from a solid stroke (different pixel pattern).
+    let mut solid_scene = Scene::new(60.0, 60.0);
+    solid_scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 60.0,
+        h: 60.0,
+    });
+    solid_scene.commands.push(SceneCommand::StrokeRect {
+        x: 5.0,
+        y: 5.0,
+        w: 50.0,
+        h: 50.0,
+        color,
+        stroke_width: 3.0,
+        stroke_dash: None,
+        stroke_gap: None,
+        stroke_linecap: None,
+    });
+    solid_scene.commands.push(SceneCommand::PopClip);
+    let solid_img = backend
+        .rasterize(&solid_scene, &provider, &no_assets())
+        .expect("solid StrokeRect must rasterize");
+
+    assert_ne!(
+        img.rgba, solid_img.rgba,
+        "dashed and solid strokes must produce different pixel output"
     );
 }
 

@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use crate::ast::node::{FieldNode, FootnoteNode, InstanceNode, Node, PolygonNode, PolylineNode};
-use crate::ast::value::{Dimension, Unit, dim_to_px};
+use crate::ast::value::{Dimension, PropertyValue, Unit, dim_to_px};
 use crate::diagnostics::Diagnostic;
 use crate::tokens::ResolvedToken;
 
@@ -208,6 +208,57 @@ pub(super) fn walk_node(
             );
             check_visual_prop(
                 &r.id,
+                "stroke-dash",
+                r.stroke_dash.as_ref(),
+                VisualExpect::Dimension,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+            if let Some(PropertyValue::Dimension(d)) = r.stroke_dash.as_ref()
+                && d.value < 0.0
+            {
+                diagnostics.push(Diagnostic::error(
+                    "node.invalid_geometry",
+                    format!("rect '{}': stroke-dash must be >= 0", r.id),
+                    r.source_span,
+                    Some(r.id.clone()),
+                ));
+            }
+            check_visual_prop(
+                &r.id,
+                "stroke-gap",
+                r.stroke_gap.as_ref(),
+                VisualExpect::Dimension,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+            if let Some(PropertyValue::Dimension(d)) = r.stroke_gap.as_ref()
+                && d.value < 0.0
+            {
+                diagnostics.push(Diagnostic::error(
+                    "node.invalid_geometry",
+                    format!("rect '{}': stroke-gap must be >= 0", r.id),
+                    r.source_span,
+                    Some(r.id.clone()),
+                ));
+            }
+            if let Some(lc) = r.stroke_linecap.as_deref()
+                && !matches!(lc, "butt" | "round" | "square")
+            {
+                diagnostics.push(Diagnostic::warning(
+                    "node.unknown_property",
+                    format!(
+                        "rect '{}': stroke-linecap '{}' is not one of butt/round/square",
+                        r.id, lc
+                    ),
+                    r.source_span,
+                    Some(r.id.clone()),
+                ));
+            }
+            check_visual_prop(
+                &r.id,
                 "radius",
                 r.radius.as_ref(),
                 VisualExpect::Dimension,
@@ -314,6 +365,57 @@ pub(super) fn walk_node(
             );
             check_visual_prop(
                 &e.id,
+                "stroke-dash",
+                e.stroke_dash.as_ref(),
+                VisualExpect::Dimension,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+            if let Some(PropertyValue::Dimension(d)) = e.stroke_dash.as_ref()
+                && d.value < 0.0
+            {
+                diagnostics.push(Diagnostic::error(
+                    "node.invalid_geometry",
+                    format!("ellipse '{}': stroke-dash must be >= 0", e.id),
+                    e.source_span,
+                    Some(e.id.clone()),
+                ));
+            }
+            check_visual_prop(
+                &e.id,
+                "stroke-gap",
+                e.stroke_gap.as_ref(),
+                VisualExpect::Dimension,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+            if let Some(PropertyValue::Dimension(d)) = e.stroke_gap.as_ref()
+                && d.value < 0.0
+            {
+                diagnostics.push(Diagnostic::error(
+                    "node.invalid_geometry",
+                    format!("ellipse '{}': stroke-gap must be >= 0", e.id),
+                    e.source_span,
+                    Some(e.id.clone()),
+                ));
+            }
+            if let Some(lc) = e.stroke_linecap.as_deref()
+                && !matches!(lc, "butt" | "round" | "square")
+            {
+                diagnostics.push(Diagnostic::warning(
+                    "node.unknown_property",
+                    format!(
+                        "ellipse '{}': stroke-linecap '{}' is not one of butt/round/square",
+                        e.id, lc
+                    ),
+                    e.source_span,
+                    Some(e.id.clone()),
+                ));
+            }
+            check_visual_prop(
+                &e.id,
                 "shadow",
                 e.shadow.as_ref(),
                 VisualExpect::Shadow,
@@ -374,6 +476,57 @@ pub(super) fn walk_node(
                 resolved_tokens,
                 diagnostics,
             );
+            check_visual_prop(
+                &l.id,
+                "stroke-dash",
+                l.stroke_dash.as_ref(),
+                VisualExpect::Dimension,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+            if let Some(PropertyValue::Dimension(d)) = l.stroke_dash.as_ref()
+                && d.value < 0.0
+            {
+                diagnostics.push(Diagnostic::error(
+                    "node.invalid_geometry",
+                    format!("line '{}': stroke-dash must be >= 0", l.id),
+                    l.source_span,
+                    Some(l.id.clone()),
+                ));
+            }
+            check_visual_prop(
+                &l.id,
+                "stroke-gap",
+                l.stroke_gap.as_ref(),
+                VisualExpect::Dimension,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+            if let Some(PropertyValue::Dimension(d)) = l.stroke_gap.as_ref()
+                && d.value < 0.0
+            {
+                diagnostics.push(Diagnostic::error(
+                    "node.invalid_geometry",
+                    format!("line '{}': stroke-gap must be >= 0", l.id),
+                    l.source_span,
+                    Some(l.id.clone()),
+                ));
+            }
+            if let Some(lc) = l.stroke_linecap.as_deref()
+                && !matches!(lc, "butt" | "round" | "square")
+            {
+                diagnostics.push(Diagnostic::warning(
+                    "node.unknown_property",
+                    format!(
+                        "line '{}': stroke-linecap '{}' is not one of butt/round/square",
+                        l.id, lc
+                    ),
+                    l.source_span,
+                    Some(l.id.clone()),
+                ));
+            }
 
             // Unknown properties.
             for prop_name in l.unknown_props.keys() {

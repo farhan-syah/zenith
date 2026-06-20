@@ -1158,6 +1158,12 @@ const RECT_KNOWN_PROPS: &[&str] = &[
     "stroke_width",
     "stroke-alignment",
     "stroke_alignment",
+    "stroke-dash",
+    "stroke_dash",
+    "stroke-gap",
+    "stroke_gap",
+    "stroke-linecap",
+    "stroke_linecap",
     "shadow",
     "opacity",
     "visible",
@@ -1173,6 +1179,10 @@ fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
     let stroke_alignment =
         optional_string_prop_aliased(node, "stroke-alignment", "stroke_alignment")
             .map(str::to_owned);
+    let stroke_dash = optional_property_value_aliased(node, "stroke-dash", "stroke_dash");
+    let stroke_gap = optional_property_value_aliased(node, "stroke-gap", "stroke_gap");
+    let stroke_linecap =
+        optional_string_prop_aliased(node, "stroke-linecap", "stroke_linecap").map(str::to_owned);
 
     let unknown_props = collect_unknown_props(node, RECT_KNOWN_PROPS);
 
@@ -1190,6 +1200,9 @@ fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
         stroke: optional_property_value(node, "stroke"),
         stroke_width,
         stroke_alignment,
+        stroke_dash,
+        stroke_gap,
+        stroke_linecap,
         shadow: optional_property_value(node, "shadow"),
         opacity: optional_f64_prop(node, "opacity"),
         visible: optional_bool_prop(node, "visible"),
@@ -1297,6 +1310,12 @@ const ELLIPSE_KNOWN_PROPS: &[&str] = &[
     "stroke",
     "stroke-width",
     "stroke_width",
+    "stroke-dash",
+    "stroke_dash",
+    "stroke-gap",
+    "stroke_gap",
+    "stroke-linecap",
+    "stroke_linecap",
     "shadow",
     "opacity",
     "visible",
@@ -1309,6 +1328,10 @@ fn transform_ellipse(node: &KdlNode) -> Result<EllipseNode, ParseError> {
 
     // Handle both hyphenated and underscored variants for forward-compat.
     let stroke_width = optional_property_value_aliased(node, "stroke-width", "stroke_width");
+    let stroke_dash = optional_property_value_aliased(node, "stroke-dash", "stroke_dash");
+    let stroke_gap = optional_property_value_aliased(node, "stroke-gap", "stroke_gap");
+    let stroke_linecap =
+        optional_string_prop_aliased(node, "stroke-linecap", "stroke_linecap").map(str::to_owned);
 
     let unknown_props = collect_unknown_props(node, ELLIPSE_KNOWN_PROPS);
 
@@ -1324,6 +1347,9 @@ fn transform_ellipse(node: &KdlNode) -> Result<EllipseNode, ParseError> {
         fill: optional_property_value(node, "fill"),
         stroke: optional_property_value(node, "stroke"),
         stroke_width,
+        stroke_dash,
+        stroke_gap,
+        stroke_linecap,
         shadow: optional_property_value(node, "shadow"),
         opacity: optional_f64_prop(node, "opacity"),
         visible: optional_bool_prop(node, "visible"),
@@ -1346,6 +1372,12 @@ const LINE_KNOWN_PROPS: &[&str] = &[
     "stroke",
     "stroke-width",
     "stroke_width",
+    "stroke-dash",
+    "stroke_dash",
+    "stroke-gap",
+    "stroke_gap",
+    "stroke-linecap",
+    "stroke_linecap",
     "opacity",
     "visible",
     "locked",
@@ -1359,6 +1391,10 @@ fn transform_line(node: &KdlNode) -> Result<LineNode, ParseError> {
 
     // Handle both hyphenated and underscored variants for forward-compat.
     let stroke_width = optional_property_value_aliased(node, "stroke-width", "stroke_width");
+    let stroke_dash = optional_property_value_aliased(node, "stroke-dash", "stroke_dash");
+    let stroke_gap = optional_property_value_aliased(node, "stroke-gap", "stroke_gap");
+    let stroke_linecap =
+        optional_string_prop_aliased(node, "stroke-linecap", "stroke_linecap").map(str::to_owned);
 
     let unknown_props = collect_unknown_props(node, LINE_KNOWN_PROPS);
 
@@ -1373,6 +1409,9 @@ fn transform_line(node: &KdlNode) -> Result<LineNode, ParseError> {
         style: optional_string_prop(node, "style").map(str::to_owned),
         stroke: optional_property_value(node, "stroke"),
         stroke_width,
+        stroke_dash,
+        stroke_gap,
+        stroke_linecap,
         opacity: optional_f64_prop(node, "opacity"),
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),

@@ -111,6 +111,8 @@ fn emit_command(
             h,
             color,
             stroke_width,
+            // PDF v0 renders solid strokes only; dash params are intentionally ignored here.
+            ..
         } => {
             if !rect_ok(*x, *y, *w, *h) || !finite(*stroke_width) {
                 return;
@@ -151,6 +153,8 @@ fn emit_command(
             radius,
             color,
             stroke_width,
+            // PDF v0 renders solid strokes only; dash params are intentionally ignored here.
+            ..
         } => {
             if !rect_ok(*x, *y, *w, *h) || !finite(*radius) || !finite(*stroke_width) {
                 return;
@@ -183,6 +187,8 @@ fn emit_command(
             h,
             color,
             stroke_width,
+            // PDF v0 renders solid strokes only; dash params are intentionally ignored here.
+            ..
         } => {
             if !rect_ok(*x, *y, *w, *h) || !finite(*stroke_width) {
                 return;
@@ -203,6 +209,8 @@ fn emit_command(
             y2,
             color,
             stroke_width,
+            // PDF v0 renders solid strokes only; dash params are intentionally ignored here.
+            ..
         } => {
             if !finite(*x1)
                 || !finite(*y1)

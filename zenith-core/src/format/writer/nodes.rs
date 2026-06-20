@@ -290,6 +290,9 @@ fn write_rect(r: &RectNode, out: &mut String, depth: usize) {
     write_opt_property_value(out, "stroke", &r.stroke);
     write_opt_property_value(out, "stroke-width", &r.stroke_width);
     write_opt_str(out, "stroke-alignment", &r.stroke_alignment);
+    write_opt_property_value(out, "stroke-dash", &r.stroke_dash);
+    write_opt_property_value(out, "stroke-gap", &r.stroke_gap);
+    write_opt_str(out, "stroke-linecap", &r.stroke_linecap);
     write_opt_property_value(out, "shadow", &r.shadow);
     write_opt_f64(out, "opacity", &r.opacity);
     write_opt_bool(out, "visible", &r.visible);
@@ -374,6 +377,9 @@ fn write_ellipse(e: &EllipseNode, out: &mut String, depth: usize) {
     write_opt_property_value(out, "fill", &e.fill);
     write_opt_property_value(out, "stroke", &e.stroke);
     write_opt_property_value(out, "stroke-width", &e.stroke_width);
+    write_opt_property_value(out, "stroke-dash", &e.stroke_dash);
+    write_opt_property_value(out, "stroke-gap", &e.stroke_gap);
+    write_opt_str(out, "stroke-linecap", &e.stroke_linecap);
     write_opt_property_value(out, "shadow", &e.shadow);
     write_opt_f64(out, "opacity", &e.opacity);
     write_opt_bool(out, "visible", &e.visible);
@@ -409,6 +415,9 @@ fn write_line(l: &LineNode, out: &mut String, depth: usize) {
     write_opt_dimension(out, "y2", &l.y2);
     write_opt_property_value(out, "stroke", &l.stroke);
     write_opt_property_value(out, "stroke-width", &l.stroke_width);
+    write_opt_property_value(out, "stroke-dash", &l.stroke_dash);
+    write_opt_property_value(out, "stroke-gap", &l.stroke_gap);
+    write_opt_str(out, "stroke-linecap", &l.stroke_linecap);
     write_opt_f64(out, "opacity", &l.opacity);
     write_opt_bool(out, "visible", &l.visible);
     write_opt_bool(out, "locked", &l.locked);

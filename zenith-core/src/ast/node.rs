@@ -146,6 +146,12 @@ pub struct RectNode {
     pub stroke: Option<PropertyValue>,
     pub stroke_width: Option<PropertyValue>,
     pub stroke_alignment: Option<String>,
+    /// Dash segment length in pixels; `None` = solid stroke.
+    pub stroke_dash: Option<PropertyValue>,
+    /// Gap length in pixels between dashes; defaults to `stroke_dash` when absent.
+    pub stroke_gap: Option<PropertyValue>,
+    /// Dash end-cap style: `"butt"` (default), `"round"`, or `"square"`.
+    pub stroke_linecap: Option<String>,
     /// Drop shadow / outer glow, as a `(token)` ref to a `shadow` token.
     pub shadow: Option<PropertyValue>,
     pub opacity: Option<f64>,
@@ -175,6 +181,12 @@ pub struct LineNode {
     pub style: Option<String>,
     pub stroke: Option<PropertyValue>,
     pub stroke_width: Option<PropertyValue>,
+    /// Dash segment length in pixels; `None` = solid stroke.
+    pub stroke_dash: Option<PropertyValue>,
+    /// Gap length in pixels between dashes; defaults to `stroke_dash` when absent.
+    pub stroke_gap: Option<PropertyValue>,
+    /// Dash end-cap style: `"butt"` (default), `"round"`, or `"square"`.
+    pub stroke_linecap: Option<String>,
     pub opacity: Option<f64>,
     pub visible: Option<bool>,
     pub locked: Option<bool>,
@@ -202,6 +214,12 @@ pub struct EllipseNode {
     pub fill: Option<PropertyValue>,
     pub stroke: Option<PropertyValue>,
     pub stroke_width: Option<PropertyValue>,
+    /// Dash segment length in pixels; `None` = solid stroke.
+    pub stroke_dash: Option<PropertyValue>,
+    /// Gap length in pixels between dashes; defaults to `stroke_dash` when absent.
+    pub stroke_gap: Option<PropertyValue>,
+    /// Dash end-cap style: `"butt"` (default), `"round"`, or `"square"`.
+    pub stroke_linecap: Option<String>,
     /// Drop shadow / outer glow, as a `(token)` ref to a `shadow` token.
     pub shadow: Option<PropertyValue>,
     pub opacity: Option<f64>,

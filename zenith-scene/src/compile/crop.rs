@@ -75,5 +75,8 @@ fn push_line(commands: &mut Vec<SceneCommand>, x1: f64, y1: f64, x2: f64, y2: f6
         y2,
         color: MARK_COLOR,
         stroke_width: MARK_STROKE_WIDTH,
+        stroke_dash: None,
+        stroke_gap: None,
+        stroke_linecap: None,
     });
 }

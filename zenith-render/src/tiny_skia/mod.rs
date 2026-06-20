@@ -14,11 +14,11 @@ use resvg::usvg;
 use resvg::usvg::TreeParsing;
 use resvg::usvg::TreeTextToPath;
 use tiny_skia::{
-    FillRule, FilterQuality, IntRect, Mask, Paint, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke,
-    Transform,
+    FillRule, FilterQuality, IntRect, LineCap, Mask, Paint, PathBuilder, Pixmap, PixmapPaint, Rect,
+    Stroke, StrokeDash, Transform,
 };
 use zenith_core::{AssetKind, AssetProvider, FontProvider};
-use zenith_scene::{FitMode, ImageClip, Scene, SceneCommand, ShadowSpec};
+use zenith_scene::{FitMode, ImageClip, LineCap as IrLineCap, Scene, SceneCommand, ShadowSpec};
 
 use crate::backend::{RasterBackend, RasterImage};
 use crate::error::RenderError;
@@ -287,6 +287,9 @@ impl RasterBackend for TinySkiaBackend {
                     h,
                     color,
                     stroke_width,
+                    stroke_dash,
+                    stroke_gap,
+                    stroke_linecap,
                 } => {
                     if !x.is_finite()
                         || !y.is_finite()
@@ -329,8 +332,12 @@ impl RasterBackend for TinySkiaBackend {
                         Some(m) => m,
                     };
 
+                    let line_cap = map_line_cap(*stroke_linecap);
+                    let dash = build_stroke_dash(*stroke_dash, *stroke_gap);
                     let stroke = Stroke {
                         width: *stroke_width as f32,
+                        line_cap,
+                        dash,
                         ..Default::default()
                     };
 
@@ -349,6 +356,9 @@ impl RasterBackend for TinySkiaBackend {
                     y2,
                     color,
                     stroke_width,
+                    stroke_dash,
+                    stroke_gap,
+                    stroke_linecap,
                 } => {
                     // Guard against non-finite or out-of-f32-range values before
                     // building the path — tiny-skia requires finite f32 values,
@@ -393,12 +403,12 @@ impl RasterBackend for TinySkiaBackend {
                         None => continue, // degenerate (zero-length) line: skip
                     };
 
-                    // Stroke defaults: Butt cap, Miter join, miter_limit 4.
-                    // These are the normative v0 values (doc 09); we intentionally
-                    // keep the defaults for cap/join and only set the width, so the
-                    // defaults remain authoritative.
+                    let line_cap = map_line_cap(*stroke_linecap);
+                    let dash = build_stroke_dash(*stroke_dash, *stroke_gap);
                     let stroke = Stroke {
                         width: *stroke_width as f32,
+                        line_cap,
+                        dash,
                         ..Default::default()
                     };
 
@@ -839,6 +849,9 @@ impl RasterBackend for TinySkiaBackend {
                     h,
                     color,
                     stroke_width,
+                    stroke_dash,
+                    stroke_gap,
+                    stroke_linecap,
                 } => {
                     if !x.is_finite()
                         || !y.is_finite()
@@ -877,8 +890,12 @@ impl RasterBackend for TinySkiaBackend {
                         Some(m) => m,
                     };
 
+                    let line_cap = map_line_cap(*stroke_linecap);
+                    let dash = build_stroke_dash(*stroke_dash, *stroke_gap);
                     let stroke = Stroke {
                         width: *stroke_width as f32,
+                        line_cap,
+                        dash,
                         ..Default::default()
                     };
 
@@ -943,6 +960,9 @@ impl RasterBackend for TinySkiaBackend {
                     radius,
                     color,
                     stroke_width,
+                    stroke_dash,
+                    stroke_gap,
+                    stroke_linecap,
                 } => {
                     if !x.is_finite()
                         || !y.is_finite()
@@ -984,8 +1004,12 @@ impl RasterBackend for TinySkiaBackend {
                         Some(m) => m,
                     };
 
+                    let line_cap = map_line_cap(*stroke_linecap);
+                    let dash = build_stroke_dash(*stroke_dash, *stroke_gap);
                     let stroke = Stroke {
                         width: *stroke_width as f32,
+                        line_cap,
+                        dash,
                         ..Default::default()
                     };
 
@@ -1205,4 +1229,33 @@ impl RasterBackend for TinySkiaBackend {
             .encode_png()
             .map_err(|e| RenderError::new(format!("PNG encoding failed: {e}")))
     }
+}
+
+// ── Dashed stroke helpers ─────────────────────────────────────────────────────
+
+/// Map an IR [`IrLineCap`] to the tiny-skia [`LineCap`].
+///
+/// `None` → `LineCap::Butt` (the tiny-skia default; byte-identical to the
+/// prior `Stroke::default()` behavior).
+fn map_line_cap(lc: Option<IrLineCap>) -> LineCap {
+    match lc {
+        Some(IrLineCap::Round) => LineCap::Round,
+        Some(IrLineCap::Square) => LineCap::Square,
+        // Butt or absent — matches Stroke::default().line_cap.
+        _ => LineCap::Butt,
+    }
+}
+
+/// Build a [`StrokeDash`] from resolved dash/gap pixel values.
+///
+/// Returns `None` (solid stroke) when `dash` is `None` or `<= 0`.
+/// `StrokeDash::new` returns `None` for invalid intervals, which collapses to
+/// a solid stroke — an acceptable safe fallback.
+fn build_stroke_dash(dash: Option<f64>, gap: Option<f64>) -> Option<StrokeDash> {
+    let d = dash?;
+    if d <= 0.0 {
+        return None;
+    }
+    let g = gap.unwrap_or(d).max(0.0);
+    StrokeDash::new(vec![d as f32, g as f32], 0.0)
 }

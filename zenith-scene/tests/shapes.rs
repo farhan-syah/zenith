@@ -1,7 +1,7 @@
 mod common;
 use common::*;
 use zenith_core::default_provider;
-use zenith_scene::ir::SceneCommand;
+use zenith_scene::ir::{LineCap, SceneCommand};
 use zenith_scene::{CompileResult, compile};
 
 // ── Minimal single-rect document ──────────────────────────────────────
@@ -460,6 +460,7 @@ page id="page.e3" w=(px)200 h=(px)200 {
             h,
             color,
             stroke_width,
+            ..
         } => {
             assert_eq!(*x, 10.0);
             assert_eq!(*y, 10.0);
@@ -530,6 +531,7 @@ page id="page.e4" w=(px)100 h=(px)100 {
             h,
             color,
             stroke_width,
+            ..
         } => {
             assert_eq!(*x, 5.0);
             assert_eq!(*y, 5.0);
@@ -595,6 +597,7 @@ page id="page.l1" w=(px)320 h=(px)200 {
             y2,
             color,
             stroke_width,
+            ..
         } => {
             assert_eq!(*x1, 40.0);
             assert_eq!(*y1, 100.0);
@@ -1839,4 +1842,109 @@ page id="page.rot5" w=(px)200 h=(px)200 {
         matches!(cmds[3], SceneCommand::PopTransform),
         "expected PopTransform at index 3"
     );
+}
+
+// ── dashed stroke: rect with stroke-dash/gap/linecap compiles correctly ──
+
+/// A rect with `stroke-dash=(px)8 stroke-gap=(px)4 stroke-linecap="round"` must
+/// compile to a `StrokeRect` with `stroke_dash=Some(8.0)`, `stroke_gap=Some(4.0)`,
+/// and `stroke_linecap=Some(LineCap::Round)`.
+#[test]
+fn rect_dashed_stroke_compiles_to_stroke_rect_with_dash_fields() {
+    let src = r##"zenith version=1 {
+  project id="proj.ds" name="DS"
+  tokens format="zenith-token-v1" {
+token id="color.stroke" type="color" value="#112233"
+token id="size.sw" type="dimension" value=(px)2
+  }
+  styles {}
+  document id="doc.ds" title="DS" {
+page id="page.ds" w=(px)100 h=(px)100 {
+  rect id="rect.ds" x=(px)10 y=(px)10 w=(px)40 h=(px)40 stroke=(token)"color.stroke" stroke-width=(token)"size.sw" stroke-dash=(px)8 stroke-gap=(px)4 stroke-linecap="round"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+    let stroke_cmd = result
+        .scene
+        .commands
+        .iter()
+        .find(|c| matches!(c, SceneCommand::StrokeRect { .. }));
+    let cmd = stroke_cmd.expect("expected a StrokeRect in the scene");
+    match cmd {
+        SceneCommand::StrokeRect {
+            stroke_dash,
+            stroke_gap,
+            stroke_linecap,
+            ..
+        } => {
+            assert_eq!(*stroke_dash, Some(8.0), "stroke_dash must be Some(8.0)");
+            assert_eq!(*stroke_gap, Some(4.0), "stroke_gap must be Some(4.0)");
+            assert_eq!(
+                *stroke_linecap,
+                Some(LineCap::Round),
+                "stroke_linecap must be Some(Round)"
+            );
+        }
+        other => panic!("expected StrokeRect, got {other:?}"),
+    }
+}
+
+/// A plain solid-stroke rect (no stroke-dash/gap/linecap) must produce a
+/// `StrokeRect` with all three dash fields = `None` (byte-compatible with prior IR).
+#[test]
+fn rect_solid_stroke_has_no_dash_fields() {
+    let src = r##"zenith version=1 {
+  project id="proj.ss" name="SS"
+  tokens format="zenith-token-v1" {
+token id="color.stroke" type="color" value="#445566"
+token id="size.sw" type="dimension" value=(px)2
+  }
+  styles {}
+  document id="doc.ss" title="SS" {
+page id="page.ss" w=(px)100 h=(px)100 {
+  rect id="rect.ss" x=(px)10 y=(px)10 w=(px)40 h=(px)40 stroke=(token)"color.stroke" stroke-width=(token)"size.sw"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+    let stroke_cmd = result
+        .scene
+        .commands
+        .iter()
+        .find(|c| matches!(c, SceneCommand::StrokeRect { .. }));
+    let cmd = stroke_cmd.expect("expected a StrokeRect in the scene");
+    match cmd {
+        SceneCommand::StrokeRect {
+            stroke_dash,
+            stroke_gap,
+            stroke_linecap,
+            ..
+        } => {
+            assert_eq!(
+                *stroke_dash, None,
+                "solid stroke must have stroke_dash=None"
+            );
+            assert_eq!(*stroke_gap, None, "solid stroke must have stroke_gap=None");
+            assert_eq!(
+                *stroke_linecap, None,
+                "solid stroke must have stroke_linecap=None"
+            );
+        }
+        other => panic!("expected StrokeRect, got {other:?}"),
+    }
 }

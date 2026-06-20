@@ -10,6 +10,20 @@
 
 use serde::Serialize;
 
+// ── LineCap ───────────────────────────────────────────────────────────────────
+
+/// Dash end-cap style for dashed strokes.
+///
+/// Maps directly to the `tiny_skia::LineCap` values; serialized in lowercase
+/// JSON so the scene JSON is human-readable and matches the KDL attribute values.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LineCap {
+    Butt,
+    Round,
+    Square,
+}
+
 // ── Color ─────────────────────────────────────────────────────────────────────
 
 /// An sRGB 8-bit color with pre-multiplied-independent alpha.
@@ -201,6 +215,15 @@ pub enum SceneCommand {
         h: f64,
         color: Color,
         stroke_width: f64,
+        /// Dash segment length in pixels. `None` = solid stroke (byte-identical to prior IR).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stroke_dash: Option<f64>,
+        /// Gap length in pixels between dashes. `None` = solid stroke.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stroke_gap: Option<f64>,
+        /// Dash end-cap style. `None` = Butt (default, byte-identical to prior IR).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stroke_linecap: Option<LineCap>,
     },
     /// Fill a rectangle with uniform corner radius.
     FillRoundedRect {
@@ -220,6 +243,15 @@ pub enum SceneCommand {
         radius: f64,
         color: Color,
         stroke_width: f64,
+        /// Dash segment length in pixels. `None` = solid stroke (byte-identical to prior IR).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stroke_dash: Option<f64>,
+        /// Gap length in pixels between dashes. `None` = solid stroke.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stroke_gap: Option<f64>,
+        /// Dash end-cap style. `None` = Butt (default, byte-identical to prior IR).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stroke_linecap: Option<LineCap>,
     },
     /// Fill an axis-aligned ellipse.
     FillEllipse {
@@ -263,6 +295,15 @@ pub enum SceneCommand {
         h: f64,
         color: Color,
         stroke_width: f64,
+        /// Dash segment length in pixels. `None` = solid stroke (byte-identical to prior IR).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stroke_dash: Option<f64>,
+        /// Gap length in pixels between dashes. `None` = solid stroke.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stroke_gap: Option<f64>,
+        /// Dash end-cap style. `None` = Butt (default, byte-identical to prior IR).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stroke_linecap: Option<LineCap>,
     },
     /// Stroke a line segment.
     StrokeLine {
@@ -272,6 +313,15 @@ pub enum SceneCommand {
         y2: f64,
         color: Color,
         stroke_width: f64,
+        /// Dash segment length in pixels. `None` = solid stroke (byte-identical to prior IR).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stroke_dash: Option<f64>,
+        /// Gap length in pixels between dashes. `None` = solid stroke.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stroke_gap: Option<f64>,
+        /// Dash end-cap style. `None` = Butt (default, byte-identical to prior IR).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stroke_linecap: Option<LineCap>,
     },
     /// Fill a closed polygon.
     FillPolygon {
