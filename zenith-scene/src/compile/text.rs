@@ -1333,12 +1333,17 @@ pub(super) fn resolve_vertical_align(
 /// deterministic default.
 const DROPCAP_GAP_FACTOR: f64 = 0.25;
 
+/// Cap-height as a fraction of em (font size) used to SIZE the drop cap so its
+/// cap-height — not its full ascent — spans the requested lines. Latin cap
+/// height is ≈ `0.7 × em` (Noto Sans `sCapHeight` is 714/1000); the value
+/// cancels in the cap-top alignment (both the cap and the body use it), so the
+/// exact figure only affects the cap's optical size, not its alignment.
+const CAP_HEIGHT_RATIO: f64 = 0.714;
+
 /// A shaped drop-cap initial ready for emission.
 struct DropCap {
     /// The oversized shaped glyph run for the initial.
     run: ZenithGlyphRun,
-    /// Ascent of the oversized run (cap top → baseline), in pixels.
-    ascent: f64,
     /// Pen advance of the oversized run (used as the body indent base).
     advance: f64,
     /// Resolved node color the cap paints with.
@@ -1375,22 +1380,28 @@ fn take_drop_cap_initial(spans: &mut [ResolvedSpan]) -> Option<DropCapInitial> {
     })
 }
 
-/// Shape a lifted [`DropCapInitial`] as an oversized glyph spanning `n` lines.
-///
-/// The cap is shaped at `n * line_height` (the real body line height, captured
-/// from the body shaping pass) so the glyph optically fills ~`n` body lines (its
-/// ascent is ≈ `0.75 ×` that). It paints in the donor span's color and the node
-/// family. `None` on a shaping failure → no cap, body unchanged.
+/// Compute the drop-cap glyph SIZE so its cap-height spans `(n-1)` body lines
+/// plus the body's own cap-height: `body_size + (n-1) * line_height /
+/// CAP_HEIGHT_RATIO`. Paired with a baseline on line `n`'s baseline (emit site),
+/// this aligns the cap's cap-top with line 1's cap-top and its baseline with
+/// line `n`'s baseline — the standard drop-cap geometry.
+fn drop_cap_font_size(body_font_size: f64, line_height: f64, n: u32) -> f32 {
+    (body_font_size + (n as f64 - 1.0) * line_height / CAP_HEIGHT_RATIO).max(1.0) as f32
+}
+
+/// Shape a lifted [`DropCapInitial`] as an oversized glyph at `cap_size` (see
+/// [`drop_cap_font_size`]), spanning `n` lines. It paints in the donor span's
+/// color and the node family. `None` on a shaping failure → no cap, body
+/// unchanged.
 fn shape_drop_cap(
     initial: &DropCapInitial,
     families: &[String],
     weight: u16,
-    line_height: f64,
+    cap_size: f32,
     n: u32,
     engine: &RustybuzzEngine,
     fonts: &dyn FontProvider,
 ) -> Option<DropCap> {
-    let cap_size = (n as f64 * line_height) as f32;
     let glyph = initial.ch.to_string();
     let req = ShapeRequest {
         text: &glyph,
@@ -1407,11 +1418,9 @@ fn shape_drop_cap(
         .ok()?
         .into_iter()
         .next()?;
-    let ascent = run.ascent as f64;
     let advance = run.advance_width as f64;
     Some(DropCap {
         run,
-        ascent,
         advance,
         color: initial.color,
         lines: n as usize,
@@ -2313,7 +2322,8 @@ pub(super) fn compile_text(
 
         // Shape the cap now that the body `line_height` is known.
         let dropcap: Option<DropCap> = dropcap_initial.as_ref().and_then(|(init, n)| {
-            shape_drop_cap(init, &families, base_weight, metrics.line_height, *n, engine, fonts)
+            let cap_size = drop_cap_font_size(font_size as f64, metrics.line_height, *n);
+            shape_drop_cap(init, &families, base_weight, cap_size, *n, engine, fonts)
         });
 
         if let Some(cap) = &dropcap {
@@ -2331,9 +2341,15 @@ pub(super) fn compile_text(
             let lines = pack_lines_variable(tokens, profile, metrics.space_advance);
             fit_line_count = lines.len();
 
+            // Drop-cap baseline sits on line `n`'s baseline (body ascent +
+            // (n-1) line heights below the box top). Because the cap is sized so
+            // its cap-height spans (n-1) lines + the body cap-height, this also
+            // aligns the cap's cap-top with line 1's cap-top. Emit it ONCE at the
+            // box left edge, in the node's resolved color/family.
+            let cap_baseline_y = text_y + metrics.ascent + (n as f64 - 1.0) * metrics.line_height;
             commands.push(SceneCommand::DrawGlyphRun {
                 x: text_x,
-                y: text_y + cap.ascent,
+                y: cap_baseline_y,
                 font_id: cap.run.font_id.clone(),
                 font_size: cap.run.font_size,
                 color: cap.color,
@@ -3363,6 +3379,51 @@ mod break_word_tests {
         let word = shape_word("W", &engine, &provider);
         let c = ctx(&engine, &provider, &families);
         assert!(try_break_word(&word, 1000.0, &c).is_none());
+    }
+
+    /// Regression: under `break-word`, an ORDINARY word that fits a line by
+    /// itself but not the REMAINING space on a non-empty line must wrap WHOLE to
+    /// the next line — it must NOT be split mid-word into the leftover space.
+    /// Only a token wider than the whole box may break (covered elsewhere).
+    #[test]
+    fn ordinary_word_wraps_whole_not_broken_into_remaining_space() {
+        let engine = RustybuzzEngine::new();
+        let provider = default_provider();
+        let families = vec!["Noto Sans".to_owned()];
+        let c = ctx(&engine, &provider, &families);
+
+        let alpha = shape_word("alpha", &engine, &provider);
+        let betagamma = shape_word("betagamma", &engine, &provider);
+        let space_advance = 6.0;
+        // Box fits "betagamma" alone (with slack) but NOT "alpha" + space +
+        // "betagamma": the second word overflows the remainder yet fits a fresh
+        // line, so it must wrap whole.
+        let box_w = betagamma.advance + 5.0;
+        assert!(
+            alpha.advance + space_advance + betagamma.advance > box_w,
+            "test setup: the pair must overflow one line"
+        );
+
+        let mut forced = false;
+        let lines = pack_lines_reporting(
+            vec![alpha, betagamma],
+            box_w,
+            space_advance,
+            Some(&c),
+            &mut forced,
+        );
+
+        assert!(!forced, "no forced break: the word fits a line by itself");
+        assert_eq!(lines.len(), 2, "the second word wraps to its own line");
+        assert_eq!(
+            lines[1]
+                .words
+                .iter()
+                .map(|w| w.src.text.as_str())
+                .collect::<String>(),
+            "betagamma",
+            "the wrapped word stays intact (not split mid-word)"
+        );
     }
 
 }
