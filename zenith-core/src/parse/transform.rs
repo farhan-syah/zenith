@@ -1403,6 +1403,9 @@ const TEXT_KNOWN_PROPS: &[&str] = &[
     "padding_left",
     "text-indent",
     "text_indent",
+    "bullet",
+    "bullet-gap",
+    "bullet_gap",
 ];
 
 fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
@@ -1429,6 +1432,9 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         .or_else(|| optional_dimension_prop(node, "padding_left"));
     let text_indent = optional_dimension_prop(node, "text-indent")
         .or_else(|| optional_dimension_prop(node, "text_indent"));
+    let bullet = optional_string_prop(node, "bullet").map(str::to_owned);
+    let bullet_gap = optional_dimension_prop(node, "bullet-gap")
+        .or_else(|| optional_dimension_prop(node, "bullet_gap"));
 
     let mut spans: Vec<TextSpan> = Vec::new();
     if let Some(children) = node.children() {
@@ -1475,6 +1481,8 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         text_exclusion,
         padding_left,
         text_indent,
+        bullet,
+        bullet_gap,
         spans,
         source_span: node_span(node),
         unknown_props,

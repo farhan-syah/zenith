@@ -132,6 +132,8 @@ fn synth_footnote_text(fnote: &FootnoteNode, marker: &str, x: f64, y: f64, w: f6
         text_exclusion: None,
         padding_left: None,
         text_indent: None,
+        bullet: None,
+        bullet_gap: None,
         spans,
         source_span: fnote.source_span,
         unknown_props: BTreeMap::new(),

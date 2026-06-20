@@ -2593,3 +2593,56 @@ fn test_hanging_indent_round_trips() {
         "hanging-indent attributes must round-trip identically"
     );
 }
+
+/// `bullet="•"` and `bullet-gap=(px)16` must survive parse → format → parse.
+/// The writer must emit both attributes on the text line and re-parse them back
+/// into the `bullet` / `bullet_gap` fields.
+#[test]
+fn test_bullet_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.br" name="BR"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.br" title="BR" {
+    page id="page.one" w=(px)1920 h=(px)1080 {
+      text id="b1" x=(px)160 y=(px)200 w=(px)1600 h=(px)170 overflow="clip" align="start" bullet="•" bullet-gap=(px)16 {
+        span "Revenue grew twelve percent year over year, the strongest result since the restructuring."
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+
+    let page = &doc.body.pages[0];
+    let Node::Text(t) = &page.children[0] else {
+        panic!("first child must be the text node");
+    };
+    assert_eq!(t.bullet.as_deref(), Some("•"), "bullet must parse from KDL");
+    assert_eq!(
+        t.bullet_gap.as_ref().map(|d| d.value),
+        Some(16.0),
+        "bullet-gap must parse from KDL"
+    );
+
+    let formatted = format_document(&doc).expect("format");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("utf8");
+    assert!(
+        formatted_str.contains("bullet=\"•\""),
+        "formatted output must contain bullet; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains("bullet-gap=(px)16"),
+        "formatted output must contain bullet-gap; got:\n{formatted_str}"
+    );
+
+    let reparsed = adapter.parse(&formatted).expect("re-parse");
+    assert_eq!(
+        strip_spans(doc),
+        strip_spans(reparsed),
+        "bullet + bullet-gap must round-trip identically"
+    );
+}

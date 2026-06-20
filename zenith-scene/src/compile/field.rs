@@ -136,6 +136,8 @@ pub(super) fn resolve_field_to_text(field: &FieldNode, ctx: &FieldCtx) -> Option
         text_exclusion: None,
         padding_left: None,
         text_indent: None,
+        bullet: None,
+        bullet_gap: None,
         spans: vec![TextSpan {
             text,
             fill: None,

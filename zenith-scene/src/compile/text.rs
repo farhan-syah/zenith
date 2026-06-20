@@ -2673,7 +2673,63 @@ pub(super) fn compile_text_sized(
             } else {
                 None
             };
-            // ── Hanging indent: padding-left + (optional negative) text-indent ─
+            // ── Auto-aligning bullet marker ───────────────────────────────────
+            // When `bullet` is `Some(marker)` with a non-empty string on the plain
+            // wrap path (drop-cap/runaround/chain are handled above), the marker is:
+            //   1. Shaped at the node's own font/weight/size to get `marker_advance`.
+            //   2. Combined with the gap (`bullet_gap` or `0.4 × font_size`) to give
+            //      `M = marker_advance + gap_px`.
+            //   3. Stacked on top of any explicit `padding_left` (ADDED), so the
+            //      effective indent is `M + explicit_pl`. An explicit `text_indent`
+            //      is ignored on a bullet node (documented v0 follow-up).
+            //   4. The marker is drawn once as a `DrawGlyphRun` at `x = text_x`
+            //      (the UN-indented box edge, i.e. in the left margin), at the
+            //      first line's baseline (`emit_text_y + emit_metrics.ascent`), in
+            //      the node's resolved fill color. All text lines (first AND
+            //      wrapped) are indented by `M + explicit_pl` via the reused
+            //      `emit_lines_profiled` per-line geometry mechanism.
+            // When `bullet` is `None` (or empty) this block is a no-op and the
+            // node is BYTE-IDENTICAL to a node without the attribute.
+            let bullet_run: Option<(ZenithGlyphRun, Color)> =
+                match text.bullet.as_deref().filter(|s| !s.is_empty()) {
+                    None => None,
+                    Some(marker) => {
+                        // Resolve node fill color for the marker (same cascade as
+                        // the body spans: node fill → style fill → black).
+                        // Reuses `node_fill_prop` already computed above.
+                        let mut marker_color = node_fill_prop
+                            .and_then(|fp| {
+                                resolve_property_color(fp, resolved, diagnostics, &text.id)
+                            })
+                            .unwrap_or(Color::srgb(0, 0, 0, 255));
+                        marker_color.a =
+                            (marker_color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+
+                        // Shape the marker string at the node's resolved
+                        // font/weight/size (mirror `shape_drop_cap`). Take only
+                        // the FIRST run on success (the marker is a single glyph
+                        // cluster). On shaping failure the bullet is silently
+                        // skipped (no marker drawn, no extra indent) so the body
+                        // still renders.
+                        // `base_weight` was already resolved above for word shaping.
+                        let req = ShapeRequest {
+                            text: marker,
+                            families: &families,
+                            weight: base_weight,
+                            style: FontStyle::Normal,
+                            font_size,
+                            // Bullet marker is always LTR (the glyph faces left
+                            // regardless of body direction in v0).
+                            direction: TextDirection::Ltr,
+                        };
+                        match engine.shape_with_fallback(&req, fonts) {
+                            Ok(runs) => runs.into_iter().next().map(|r| (r, marker_color)),
+                            Err(_) => None,
+                        }
+                    }
+                };
+
+            // ── Hanging indent: padding-left + bullet-M + (optional negative) text-indent ─
             // `pl` indents EVERY line's left edge inward (reducing the measure);
             // `ti` shifts line 0 by an additional amount relative to the padded
             // edge (may be negative to pull the first line back out for a hanging
@@ -2684,16 +2740,38 @@ pub(super) fn compile_text_sized(
             // drop-cap, runaround, or chain paths is a documented v0 follow-up:
             // those branches use their own per-line width profiles and are
             // handled above, so this code is reached only on the plain wrap path.
-            let pl = text
+            let explicit_pl = text
                 .padding_left
                 .as_ref()
                 .and_then(|d| dim_to_px(d.value, &d.unit))
                 .unwrap_or(0.0);
-            let ti = text
-                .text_indent
-                .as_ref()
-                .and_then(|d| dim_to_px(d.value, &d.unit))
-                .unwrap_or(0.0);
+            // Bullet auto-indent: measured marker advance + gap, added ON TOP of
+            // any explicit `padding_left`. When there is no bullet run (bullet
+            // absent, empty, or shaping failed) `bullet_m = 0.0` so the rest of
+            // the logic is byte-identical to the pre-bullet path.
+            let bullet_m: f64 = match &bullet_run {
+                None => 0.0,
+                Some((run, _)) => {
+                    let marker_advance = run.advance_width as f64;
+                    let gap_px = text
+                        .bullet_gap
+                        .as_ref()
+                        .and_then(|d| dim_to_px(d.value, &d.unit))
+                        .unwrap_or(0.4 * font_size as f64);
+                    marker_advance + gap_px
+                }
+            };
+            let pl = bullet_m + explicit_pl;
+            // Explicit `text_indent` is ignored on a bullet node (documented).
+            // On a non-bullet node it is honoured as before (byte-identical).
+            let ti = if bullet_run.is_some() {
+                0.0
+            } else {
+                text.text_indent
+                    .as_ref()
+                    .and_then(|d| dim_to_px(d.value, &d.unit))
+                    .unwrap_or(0.0)
+            };
 
             let mut forced_break = false;
             let lines = if pl == 0.0 && ti == 0.0 {
@@ -2744,6 +2822,23 @@ pub(super) fn compile_text_sized(
 
             // Record the actual line count for the overflow="fit" check below.
             fit_line_count = lines.len();
+
+            // Emit the bullet marker BEFORE the text runs (drawn first → below the
+            // text in z-order, consistent with drop-cap emission order). The
+            // baseline is the SNAPPED first-line baseline so the marker aligns with
+            // the body's first line regardless of baseline-grid state.
+            if let Some((marker_run, marker_color)) = bullet_run {
+                let marker_baseline_y = emit_text_y + emit_metrics.ascent;
+                let glyphs = run_to_scene_glyphs(&marker_run);
+                commands.push(SceneCommand::DrawGlyphRun {
+                    x: text_x,
+                    y: marker_baseline_y,
+                    font_id: marker_run.font_id,
+                    font_size: marker_run.font_size,
+                    color: marker_color,
+                    glyphs,
+                });
+            }
 
             if pl == 0.0 && ti == 0.0 {
                 emit_lines(

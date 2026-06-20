@@ -319,6 +319,21 @@ pub struct TextNode {
     /// (per-paragraph first-line indent is a documented v0 follow-up). `None` → 0.
     /// KDL: `text-indent=(px)-44`.
     pub text_indent: Option<Dimension>,
+    /// Auto-aligning list bullet. When `Some(marker)` (a non-empty string like "•",
+    /// "–", "1."), the node renders as a hanging-indent list item: the marker is
+    /// drawn once in the left margin at the first line's baseline, and ALL text
+    /// lines (first and wrapped) are indented to a column at `marker_advance + gap`
+    /// from the box left edge, so continuation lines auto-align with the text after
+    /// the marker — measured from the marker shaped at the node's own font, hence
+    /// font/size-independent. The span text holds only the content (no bullet glyph).
+    /// `None` → not a list item (byte-identical to a node without the attribute).
+    /// Honored on the plain single-box wrap path; drop-cap/runaround/chain are a
+    /// documented v0 follow-up. KDL: `bullet="•"`.
+    pub bullet: Option<String>,
+    /// Gap between the bullet marker and the text column, in pixels. `None` → a
+    /// default proportional to the font size (`0.4 × font_size`). KDL:
+    /// `bullet-gap=(px)16`.
+    pub bullet_gap: Option<Dimension>,
     /// Inline text spans.
     pub spans: Vec<TextSpan>,
     /// Source declaration span, when available.

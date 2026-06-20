@@ -7736,3 +7736,258 @@ page id="page.af4" w=(px)1920 h=(px)1080 {
          without font-size-min"
     );
 }
+
+// ── Bullet marker tests ────────────────────────────────────────────────────
+
+/// A wrapping text node WITHOUT `bullet` must emit the identical command stream
+/// as before (default-off / byte-identical gate).
+#[test]
+fn bullet_none_is_byte_identical() {
+    // A node that wraps (narrow box, long text) without bullet.
+    let no_bullet_src = r#"zenith version=1 {
+  project id="proj.bn" name="BN"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.bn" title="BN" {
+page id="page.bn" w=(px)1280 h=(px)720 {
+  text id="t.nb" x=(px)100 y=(px)100 w=(px)200 h=(px)300 overflow="clip" align="start" {
+    span "Revenue grew twelve percent year over year the strongest result since the restructuring."
+  }
+}
+  }
+}
+"#;
+    // Same node but with an explicit `bullet=""` (empty → treated as absent).
+    let empty_bullet_src = no_bullet_src.replace(
+        r#"overflow="clip" align="start""#,
+        r#"overflow="clip" align="start" bullet="""#,
+    );
+
+    let a = compile(&parse(no_bullet_src), &default_provider());
+    let b = compile(&parse(&empty_bullet_src), &default_provider());
+    assert_eq!(
+        a.scene.commands, b.scene.commands,
+        "empty bullet string must emit identical command stream to no-bullet node"
+    );
+}
+
+/// With `bullet="•"`, the compiled output must contain:
+/// (a) a `DrawGlyphRun` for the marker at `x == text_x` (the un-indented left edge),
+/// (b) ALL text-line glyph runs at `x > text_x` (every line is indented),
+/// (c) wrapped line 2's first-glyph x equals wrapped line 1's first-glyph x
+///     (continuation auto-aligns with the first text line).
+#[test]
+fn bullet_indents_all_text_lines_and_draws_marker() {
+    let src = r#"zenith version=1 {
+  project id="proj.bi" name="BI"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.bi" title="BI" {
+page id="page.bi" w=(px)1280 h=(px)720 {
+  text id="t.bi" x=(px)160 y=(px)200 w=(px)300 h=(px)400 overflow="clip" align="start" bullet="•" {
+    span "Revenue grew twelve percent year over year the strongest result since the restructuring."
+  }
+}
+  }
+}
+"#;
+    let text_x = 160.0_f64;
+    let result = compile(&parse(src), &default_provider());
+
+    // Collect all DrawGlyphRun commands from the page (skip PushClip/PopClip).
+    let glyph_runs: Vec<(f64, f64)> = result
+        .scene
+        .commands
+        .iter()
+        .filter_map(|c| {
+            if let SceneCommand::DrawGlyphRun { x, y, .. } = c {
+                Some((*x, *y))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    assert!(
+        !glyph_runs.is_empty(),
+        "expected at least one DrawGlyphRun, got none"
+    );
+
+    // (a) The first glyph run must be the marker at x == text_x.
+    let (first_x, _) = glyph_runs[0];
+    assert!(
+        (first_x - text_x).abs() < 1.0,
+        "marker DrawGlyphRun must be at x ≈ text_x ({text_x}), got x={first_x}"
+    );
+
+    // (b) All remaining runs (the body text) must be at x > text_x.
+    let body_runs: Vec<f64> = glyph_runs[1..].iter().map(|(x, _)| *x).collect();
+    assert!(
+        !body_runs.is_empty(),
+        "expected body glyph runs after the marker"
+    );
+    for &bx in &body_runs {
+        assert!(
+            bx > text_x + 0.5,
+            "body glyph run at x={bx} must be indented past text_x={text_x}"
+        );
+    }
+
+    // (c) The text wraps: collect the DISTINCT baseline-y values of the body
+    // runs to identify lines. Check that the SECOND line's first-run x matches
+    // the FIRST line's first-run x (continuation alignment).
+    // We gather x-values per baseline_y bucket (within 1px tolerance).
+    let mut by_line: std::collections::BTreeMap<i64, Vec<f64>> = std::collections::BTreeMap::new();
+    for (x, y) in &glyph_runs[1..] {
+        let key = y.round() as i64;
+        by_line.entry(key).or_default().push(*x);
+    }
+    let lines: Vec<Vec<f64>> = by_line.into_values().collect();
+    assert!(
+        lines.len() >= 2,
+        "expected at least 2 wrapped body lines for the long sentence, got {}",
+        lines.len()
+    );
+    let line0_x = lines[0].iter().cloned().fold(f64::INFINITY, f64::min);
+    let line1_x = lines[1].iter().cloned().fold(f64::INFINITY, f64::min);
+    assert!(
+        (line0_x - line1_x).abs() < 1.5,
+        "continuation line x ({line1_x}) must align with first text line x ({line0_x})"
+    );
+}
+
+/// A larger `bullet-gap` pushes the text column further right than the default.
+#[test]
+fn bullet_gap_widens_the_column() {
+    let base = r#"zenith version=1 {
+  project id="proj.bg" name="BG"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.bg" title="BG" {
+page id="page.bg" w=(px)1280 h=(px)720 {
+  text id="t.bg" x=(px)100 y=(px)100 w=(px)500 h=(px)400 overflow="clip" align="start" bullet="•" {
+    span "Revenue grew twelve percent year over year the strongest result since the restructuring."
+  }
+}
+  }
+}
+"#;
+    let wide = base.replace(r#"bullet="•""#, r#"bullet="•" bullet-gap=(px)80"#);
+
+    let default_result = compile(&parse(base), &default_provider());
+    let wide_result = compile(&parse(&wide), &default_provider());
+
+    // The first non-marker body run x in the wide variant must be further right.
+    let first_body_x = |cmds: &[SceneCommand]| -> f64 {
+        let mut marker_seen = false;
+        for c in cmds {
+            if let SceneCommand::DrawGlyphRun { x, .. } = c {
+                if marker_seen {
+                    return *x;
+                }
+                marker_seen = true;
+            }
+        }
+        0.0
+    };
+
+    let default_x = first_body_x(&default_result.scene.commands);
+    let wide_x = first_body_x(&wide_result.scene.commands);
+    assert!(
+        wide_x > default_x + 1.0,
+        "wide bullet-gap should push text column further right: default={default_x}, wide={wide_x}"
+    );
+}
+
+/// At two different font sizes, the text column offset M scales with the
+/// shaped marker advance, so M differs between sizes and the continuation
+/// line still aligns with the first text line at each size.
+#[test]
+fn bullet_marker_measured_independent_of_size() {
+    let make_src = |size: u32| {
+        format!(
+            r#"zenith version=1 {{
+  project id="proj.bm" name="BM"
+  tokens format="zenith-token-v1" {{}}
+  styles {{}}
+  document id="doc.bm" title="BM" {{
+page id="page.bm" w=(px)1280 h=(px)720 {{
+  text id="t.bm" x=(px)100 y=(px)100 w=(px)500 h=(px)500 overflow="clip" align="start" font-size=(px){size} bullet="•" {{
+    span "Revenue grew twelve percent year over year the strongest result since the restructuring."
+  }}
+}}
+  }}
+}}
+"#
+        )
+    };
+
+    let first_body_x = |cmds: &[SceneCommand]| -> f64 {
+        let mut marker_seen = false;
+        for c in cmds {
+            if let SceneCommand::DrawGlyphRun { x, .. } = c {
+                if marker_seen {
+                    return *x;
+                }
+                marker_seen = true;
+            }
+        }
+        0.0
+    };
+
+    let text_x = 100.0_f64;
+    let r_small = compile(&parse(&make_src(14)), &default_provider());
+    let r_large = compile(&parse(&make_src(32)), &default_provider());
+
+    let x_small = first_body_x(&r_small.scene.commands);
+    let x_large = first_body_x(&r_large.scene.commands);
+
+    // M = marker_advance + gap; both scale with font_size, so M at 32px > M at 14px.
+    assert!(
+        x_large > x_small,
+        "larger font should produce a wider bullet M: small={x_small}, large={x_large}"
+    );
+
+    // Both must be indented past text_x.
+    assert!(
+        x_small > text_x + 0.5,
+        "small-font body must be indented (got x_small={x_small})"
+    );
+    assert!(
+        x_large > text_x + 0.5,
+        "large-font body must be indented (got x_large={x_large})"
+    );
+
+    // For each size, check continuation alignment (line 1 x ≈ line 0 x).
+    let check_continuation = |cmds: &[SceneCommand], label: &str| {
+        let body_runs: Vec<(f64, f64)> = cmds
+            .iter()
+            .skip_while(|c| !matches!(c, SceneCommand::DrawGlyphRun { .. }))
+            .skip(1) // skip the marker run
+            .filter_map(|c| {
+                if let SceneCommand::DrawGlyphRun { x, y, .. } = c {
+                    Some((*x, *y))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let mut by_line: std::collections::BTreeMap<i64, Vec<f64>> =
+            std::collections::BTreeMap::new();
+        for (x, y) in &body_runs {
+            by_line.entry(y.round() as i64).or_default().push(*x);
+        }
+        let lines: Vec<Vec<f64>> = by_line.into_values().collect();
+        if lines.len() >= 2 {
+            let l0 = lines[0].iter().cloned().fold(f64::INFINITY, f64::min);
+            let l1 = lines[1].iter().cloned().fold(f64::INFINITY, f64::min);
+            assert!(
+                (l0 - l1).abs() < 2.0,
+                "{label}: continuation x ({l1}) must align with first line x ({l0})"
+            );
+        }
+    };
+
+    check_continuation(&r_small.scene.commands, "small-font");
+    check_continuation(&r_large.scene.commands, "large-font");
+}
