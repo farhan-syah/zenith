@@ -3,6 +3,7 @@
 
 use zenith_core::{Diagnostic, Dimension, Document, Node, Unit, dim_to_px};
 
+use super::structure::parse_dimension_str;
 use super::{
     find_node_any_mut, find_node_shared, node_kind_str, px, record_affected, subtree_contains,
 };
@@ -13,19 +14,14 @@ const VALID_ALIGN_DIRS: &[&str] = &["left", "hcenter", "right", "top", "vcenter"
 /// Parse an explicit dimension string of the canonical `"(unit)value"` form
 /// (e.g. `"(px)120"`, `"(pt)90"`) into a px magnitude.
 ///
-/// Reuses the canonical [`Unit::from_annotation`] + [`dim_to_px`] pair so the
+/// Delegates parsing to [`parse_dimension_str`] (the single canonical
+/// `"(unit)value"` parser) then resolves to px via [`dim_to_px`], so the
 /// arithmetic matches the rest of the engine. Returns `None` if the string is
 /// not parenthesized-unit-prefixed, the numeric tail is not a finite number, or
 /// the unit does not resolve to px (e.g. `pct`, `deg`).
 fn parse_px_dimension(s: &str) -> Option<f64> {
-    let rest = s.strip_prefix('(')?;
-    let (unit_str, value_str) = rest.split_once(')')?;
-    let unit = Unit::from_annotation(unit_str);
-    let value: f64 = value_str.trim().parse().ok()?;
-    if !value.is_finite() {
-        return None;
-    }
-    dim_to_px(value, &unit)
+    let dim = parse_dimension_str(s)?;
+    dim_to_px(dim.value, &dim.unit)
 }
 
 /// Mutable references to a node's four bbox geometry slots `(x, y, w, h)`.
@@ -503,6 +499,148 @@ pub(super) fn apply_align_nodes(
                     }
                     record_affected(&bbox.id, affected);
                 }
+            }
+        }
+    }
+}
+
+// ── AlignToEdge ───────────────────────────────────────────────────────────────
+
+/// Valid edge values for `Op::AlignToEdge`.
+const VALID_EDGES: &[&str] = &["left", "right", "top", "bottom", "hcenter", "vcenter"];
+
+/// Snap a single node's edge (or centre) to the boundary of the page that
+/// contains it, with an optional margin inset.
+///
+/// Horizontal edges (`left`, `right`, `hcenter`) set x; vertical edges
+/// (`top`, `bottom`, `vcenter`) set y. The opposite coordinate is untouched.
+pub(super) fn apply_align_to_edge(
+    node_id: &str,
+    edge: &str,
+    margin: f64,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    // Validate edge value early, before touching the document.
+    if !VALID_EDGES.contains(&edge) {
+        diagnostics.push(Diagnostic::error(
+            "tx.unsupported_property",
+            format!(
+                "align_to_edge: edge {:?} must be one of left,right,top,bottom,hcenter,vcenter",
+                edge
+            ),
+            None,
+            Some(node_id.to_owned()),
+        ));
+        return;
+    }
+
+    // ── Phase 1 (shared scan): read the node's geometry and find its page ────
+
+    // Find the node and read its geometry (x, y, w, h) in px.
+    let node_geom: Option<Option<(f64, f64, f64, f64)>> = 'node_scan: {
+        for page in doc.body.pages.iter() {
+            if let Some(node) = find_node_shared(&page.children, node_id) {
+                break 'node_scan Some(read_geometry_px(node));
+            }
+        }
+        None // not found in any page
+    };
+
+    let (_, _, node_w, node_h) = match node_geom {
+        None => {
+            diagnostics.push(Diagnostic::error(
+                "tx.unknown_node",
+                format!("align_to_edge: node {:?} not found in document", node_id),
+                None,
+                Some(node_id.to_owned()),
+            ));
+            return;
+        }
+        Some(None) => {
+            diagnostics.push(Diagnostic::error(
+                "tx.unsupported_property",
+                format!(
+                    "align_to_edge: node {:?} has no resolvable x/y/w/h geometry",
+                    node_id
+                ),
+                None,
+                Some(node_id.to_owned()),
+            ));
+            return;
+        }
+        Some(Some(geom)) => geom,
+    };
+
+    // Find the page that contains the node (same pattern as align_nodes' page branch).
+    let page_bounds: Option<(f64, f64)> = doc.body.pages.iter().find_map(|page| {
+        if page.children.iter().any(|n| subtree_contains(n, node_id)) {
+            let pw = dim_to_px(page.width.value, &page.width.unit);
+            let ph = dim_to_px(page.height.value, &page.height.unit);
+            pw.zip(ph)
+        } else {
+            None
+        }
+    });
+
+    let (page_w, page_h) = match page_bounds {
+        Some(bounds) => bounds,
+        None => {
+            diagnostics.push(Diagnostic::error(
+                "tx.unknown_node",
+                format!(
+                    "align_to_edge: could not locate page containing node {:?}",
+                    node_id
+                ),
+                None,
+                Some(node_id.to_owned()),
+            ));
+            return;
+        }
+    };
+
+    // ── Compute new coordinate(s) from shared data ─────────────────────────
+
+    let new_x: Option<f64> = match edge {
+        "left" => Some(margin),
+        "right" => Some(page_w - node_w - margin),
+        "hcenter" => Some((page_w - node_w) / 2.0),
+        _ => None,
+    };
+    let new_y: Option<f64> = match edge {
+        "top" => Some(margin),
+        "bottom" => Some(page_h - node_h - margin),
+        "vcenter" => Some((page_h - node_h) / 2.0),
+        _ => None,
+    };
+
+    // ── Phase 2 (exclusive borrow): write the new coordinate ─────────────────
+
+    match find_node_any_mut(doc, node_id) {
+        None => {
+            // Should not happen: we found it in phase 1.
+            diagnostics.push(Diagnostic::error(
+                "tx.unknown_node",
+                format!(
+                    "align_to_edge: node {:?} disappeared between phases",
+                    node_id
+                ),
+                None,
+                Some(node_id.to_owned()),
+            ));
+        }
+        Some(node) => {
+            // node_geometry_mut is guaranteed Some here: read_geometry_px succeeded
+            // above, which uses the same set of node variants.
+            if let Some((nx, ny, _, _)) = node_geometry_mut(node) {
+                if let Some(v) = new_x {
+                    *nx = Some(px(v));
+                }
+                if let Some(v) = new_y {
+                    *ny = Some(px(v));
+                }
+                record_affected(node_id, affected);
             }
         }
     }

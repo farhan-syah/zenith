@@ -870,6 +870,87 @@ pub(super) fn apply_delete_page(
     record_affected(page_id, affected);
 }
 
+/// Resize a page by replacing its `width`/`height` dimensions.
+///
+/// Parses `w` and `h` via [`parse_dimension_str`], then locates the page by id
+/// and overwrites its size. Children are NOT reflowed — any child that now falls
+/// outside the new bounds will generate an `off_canvas` advisory at validation.
+pub(super) fn apply_set_page_size(
+    page_id: &str,
+    w: &str,
+    h: &str,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    // Parse width — must be a valid dimension and strictly positive.
+    let w_dim = match parse_dimension_str(w) {
+        Some(d) if d.value > 0.0 => d,
+        Some(_) => {
+            diagnostics.push(Diagnostic::error(
+                "tx.invalid_value",
+                format!("set_page_size: w {:?} must be a finite value > 0", w),
+                None,
+                Some(page_id.to_owned()),
+            ));
+            return;
+        }
+        None => {
+            diagnostics.push(Diagnostic::error(
+                "tx.invalid_value",
+                format!(
+                    "set_page_size: w {:?} is not a valid dimension (expected e.g. \"(px)794\")",
+                    w
+                ),
+                None,
+                Some(page_id.to_owned()),
+            ));
+            return;
+        }
+    };
+
+    // Parse height — must be a valid dimension and strictly positive.
+    let h_dim = match parse_dimension_str(h) {
+        Some(d) if d.value > 0.0 => d,
+        Some(_) => {
+            diagnostics.push(Diagnostic::error(
+                "tx.invalid_value",
+                format!("set_page_size: h {:?} must be a finite value > 0", h),
+                None,
+                Some(page_id.to_owned()),
+            ));
+            return;
+        }
+        None => {
+            diagnostics.push(Diagnostic::error(
+                "tx.invalid_value",
+                format!(
+                    "set_page_size: h {:?} is not a valid dimension (expected e.g. \"(px)1123\")",
+                    h
+                ),
+                None,
+                Some(page_id.to_owned()),
+            ));
+            return;
+        }
+    };
+
+    // Locate the page by id.
+    let Some(page) = doc.body.pages.iter_mut().find(|p| p.id == page_id) else {
+        diagnostics.push(Diagnostic::error(
+            "tx.unknown_node",
+            format!("set_page_size: page {:?} not found", page_id),
+            None,
+            Some(page_id.to_owned()),
+        ));
+        return;
+    };
+
+    page.width = w_dim;
+    page.height = h_dim;
+    record_affected(page_id, affected);
+}
+
 pub(super) fn apply_reorder_pages(
     order: &[String],
     doc: &mut Document,

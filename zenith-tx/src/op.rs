@@ -755,6 +755,48 @@ pub enum Op {
         #[serde(default)]
         node: Option<String>,
     },
+    /// Resize a page (artboard). `w`/`h` are canonical dimension strings like
+    /// `"(px)794"` (same form parsed by `add_page`). Rejected with `tx.unknown_node`
+    /// if no page with id `page` exists, and `tx.invalid_value` if `w`/`h` fail to
+    /// parse or are not finite and > 0.
+    ///
+    /// NOTE: child node coordinates are NOT reflowed — after shrinking a page,
+    /// children may fall outside the new bounds and trigger `off_canvas` advisories
+    /// at validation. Repositioning children is a separate concern (set_geometry).
+    SetPageSize {
+        /// Id of the page to resize.
+        page: String,
+        /// New page width as a canonical dimension string, e.g. `"(px)794"`.
+        w: String,
+        /// New page height as a canonical dimension string, e.g. `"(px)1123"`.
+        h: String,
+    },
+    /// Snap a single node's edge (or center) to the boundary of the page that
+    /// contains it, with an optional margin inset.
+    ///
+    /// `edge`: `"left"`, `"right"`, `"top"`, `"bottom"`, `"hcenter"`, `"vcenter"`.
+    /// `margin` (default 0) insets the node from that page edge (ignored for the
+    /// center edges). For `left`/`top`/`hcenter`/`vcenter` margin is measured from
+    /// the low edge; for `right`/`bottom` it is measured from the high edge.
+    ///
+    /// Computes: left → x = margin; right → x = page_w - node_w - margin;
+    /// top → y = margin; bottom → y = page_h - node_h - margin;
+    /// hcenter → x = (page_w - node_w)/2; vcenter → y = (page_h - node_h)/2.
+    ///
+    /// Rejected with `tx.unknown_node` if the node is missing, `tx.unsupported_property`
+    /// if `edge` is not one of the six values or the node has no resolvable x/y/w/h
+    /// geometry. (Composable: issue two ops — e.g. right + bottom — to snap to a corner.)
+    AlignToEdge {
+        /// The stable node `id` to snap.
+        node: String,
+        /// Which edge or centre to snap to: `left`, `right`, `top`, `bottom`,
+        /// `hcenter`, or `vcenter`.
+        edge: String,
+        /// Margin in pixels inset from the page edge. Defaults to 0. Ignored for
+        /// `hcenter` and `vcenter`.
+        #[serde(default)]
+        margin: f64,
+    },
 }
 
 fn default_anchor() -> String {

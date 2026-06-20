@@ -19,11 +19,14 @@ mod token;
 
 use asset::{apply_add_asset, apply_set_asset};
 use flags::{apply_set_locked, apply_set_points, apply_set_visible};
-use geometry::{GeometryDelta, apply_align_nodes, apply_distribute_nodes, apply_set_geometry};
+use geometry::{
+    GeometryDelta, apply_align_nodes, apply_align_to_edge, apply_distribute_nodes,
+    apply_set_geometry,
+};
 use structure::{
     ReorderKind, apply_add_node, apply_add_page, apply_delete_page, apply_duplicate_node,
     apply_duplicate_page, apply_group, apply_remove_node, apply_reorder, apply_reorder_pages,
-    apply_reparent, apply_ungroup,
+    apply_reparent, apply_set_page_size, apply_ungroup,
 };
 use style::{
     apply_find_replace_text, apply_replace_text, apply_set_fill, apply_set_opacity,
@@ -331,6 +334,12 @@ fn apply_op(
         } => {
             apply_find_replace_text(find, replace, node.as_deref(), doc, diagnostics, affected);
         }
+        Op::SetPageSize { page, w, h } => {
+            apply_set_page_size(page, w, h, doc, diagnostics, affected);
+        }
+        Op::AlignToEdge { node, edge, margin } => {
+            apply_align_to_edge(node, edge, *margin, doc, diagnostics, affected);
+        }
     }
 }
 
@@ -363,7 +372,8 @@ fn op_lock_targets(op: &Op) -> Vec<&str> {
         | Op::MoveToBack { node }
         | Op::Reparent { node, .. }
         | Op::SetTextOverflow { node_id: node, .. }
-        | Op::SetTextDirection { node, .. } => vec![node.as_str()],
+        | Op::SetTextDirection { node, .. }
+        | Op::AlignToEdge { node, .. } => vec![node.as_str()],
         // Doc-wide mode returns empty (lock handling is inside apply_find_replace_text).
         // Scoped mode: guard the named node.
         Op::FindReplaceText { node, .. } => {
@@ -386,6 +396,7 @@ fn op_lock_targets(op: &Op) -> Vec<&str> {
         | Op::AddPage { .. }
         | Op::DeletePage { .. }
         | Op::ReorderPages { .. }
+        | Op::SetPageSize { .. }
         // AddAsset creates new content and never mutates a node; exempt like AddNode.
         | Op::AddAsset { .. }
         // Token ops mutate the token block, not the node tree; no per-node lock target.
