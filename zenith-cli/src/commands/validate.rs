@@ -7,7 +7,9 @@ use std::path::Path;
 
 use zenith_core::{KdlAdapter, KdlSource, Severity, validate};
 
-use crate::commands::render::collect_missing_asset_diagnostics;
+use crate::commands::render::{
+    collect_image_dimension_diagnostics, collect_missing_asset_diagnostics,
+};
 use crate::commands::serialize_pretty;
 use crate::json_types::{DiagnosticJson, ValidateOutput};
 
@@ -66,6 +68,7 @@ pub fn run(src: &str, project_dir: Option<&Path>, json: bool) -> CmdOutput {
     let mut diagnostics = validate(&doc).diagnostics;
     if let Some(dir) = project_dir {
         diagnostics.extend(collect_missing_asset_diagnostics(&doc, dir));
+        diagnostics.extend(collect_image_dimension_diagnostics(&doc, dir));
     }
     let has_errors = diagnostics.iter().any(|d| d.severity == Severity::Error);
 

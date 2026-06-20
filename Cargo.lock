@@ -1108,10 +1108,12 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "csv",
+ "imagesize",
  "serde",
  "serde_json",
  "sha2",
  "tempfile",
+ "tiny-skia",
  "zenith-core",
  "zenith-layout",
  "zenith-render",

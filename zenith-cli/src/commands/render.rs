@@ -13,8 +13,8 @@ use std::sync::Arc;
 use sha2::{Digest, Sha256};
 
 use zenith_core::{
-    AssetKind, BytesAssetProvider, BytesFontProvider, Diagnostic, Document, KdlAdapter, KdlSource,
-    default_provider, validate,
+    AssetKind, BytesAssetProvider, BytesFontProvider, Diagnostic, Document, ImageNode, KdlAdapter,
+    KdlSource, Node, default_provider, dim_to_px, validate,
 };
 use zenith_render::{render_pdf, render_png, render_spread_png};
 use zenith_scene::compile_page;
@@ -98,10 +98,7 @@ pub fn to_scene_json(
         .scene
         .to_json()
         .map_err(|e| RenderCmdErr::new(format!("scene serialisation error: {e}"), 2))?;
-    let mut diagnostics = match project_dir {
-        Some(dir) => collect_missing_asset_diagnostics(&doc, dir),
-        None => Vec::new(),
-    };
+    let mut diagnostics = disk_diagnostics(&doc, project_dir);
     diagnostics.extend(compile_result.diagnostics);
     Ok(SceneArtifact { json, diagnostics })
 }
@@ -155,10 +152,7 @@ pub fn to_png_with_dir(
     let compile_result = compile_page(&doc, &fonts, page_index);
     let png = render_png(&compile_result.scene, &fonts, &assets)
         .map_err(|e| RenderCmdErr::new(format!("render error: {e}"), 2))?;
-    let mut diagnostics = match project_dir {
-        Some(dir) => collect_missing_asset_diagnostics(&doc, dir),
-        None => Vec::new(),
-    };
+    let mut diagnostics = disk_diagnostics(&doc, project_dir);
     diagnostics.extend(compile_result.diagnostics);
     Ok(PngArtifact { png, diagnostics })
 }
@@ -185,10 +179,7 @@ pub fn to_pdf_with_dir(
     };
     let compile_result = compile_page(&doc, &fonts, page_index);
     let pdf = render_pdf(&compile_result.scene, &fonts, &assets);
-    let mut diagnostics = match project_dir {
-        Some(dir) => collect_missing_asset_diagnostics(&doc, dir),
-        None => Vec::new(),
-    };
+    let mut diagnostics = disk_diagnostics(&doc, project_dir);
     diagnostics.extend(compile_result.diagnostics);
     Ok(PdfArtifact { pdf, diagnostics })
 }
@@ -216,16 +207,13 @@ pub fn to_png_all_pages(
         Some(dir) => build_asset_provider(&doc, dir, locked)?,
         None => BytesAssetProvider::new(),
     };
-    let missing = match project_dir {
-        Some(dir) => collect_missing_asset_diagnostics(&doc, dir),
-        None => Vec::new(),
-    };
+    let disk_diagnostics = disk_diagnostics(&doc, project_dir);
     let mut artifacts = Vec::with_capacity(page_count);
     for page_index in 0..page_count {
         let compile_result = compile_page(&doc, &fonts, page_index);
         let png = render_png(&compile_result.scene, &fonts, &assets)
             .map_err(|e| RenderCmdErr::new(format!("render error on page {page_index}: {e}"), 2))?;
-        let mut diagnostics = missing.clone();
+        let mut diagnostics = disk_diagnostics.clone();
         diagnostics.extend(compile_result.diagnostics);
         artifacts.push(PngArtifact { png, diagnostics });
     }
@@ -264,10 +252,7 @@ pub fn to_png_spread(
     let compile_b = compile_page(&doc, &fonts, index_b);
     let png = render_spread_png(&compile_a.scene, &compile_b.scene, &fonts, &assets)
         .map_err(|e| RenderCmdErr::new(format!("spread render error: {e}"), 2))?;
-    let mut diagnostics = match project_dir {
-        Some(dir) => collect_missing_asset_diagnostics(&doc, dir),
-        None => Vec::new(),
-    };
+    let mut diagnostics = disk_diagnostics(&doc, project_dir);
     diagnostics.extend(compile_a.diagnostics);
     diagnostics.extend(compile_b.diagnostics);
     Ok(PngArtifact { png, diagnostics })
@@ -431,6 +416,178 @@ pub(crate) fn collect_missing_asset_diagnostics(
         }
     }
     diagnostics
+}
+
+/// Collect `image.overflow` and `image.upscale` advisories for all image nodes
+/// in the document.
+///
+/// - **`image.overflow`** (fit="none" only): the image's intrinsic pixel
+///   dimensions exceed the declared box, so the image clips unexpectedly.
+/// - **`image.upscale`**: the image will be rendered LARGER than its intrinsic
+///   pixels (raster will appear pixelated), computed per the active fit mode.
+///
+/// SVG assets are exempt (vector, scales cleanly). Image nodes whose box uses
+/// `(pct)` or other non-absolute units are skipped (not false positives).
+/// Nodes referencing unknown or missing assets are skipped (covered elsewhere).
+/// Both diagnostics are `Severity::Advisory` and do NOT block rendering.
+pub fn collect_image_dimension_diagnostics(doc: &Document, project_dir: &Path) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    for page in &doc.body.pages {
+        walk_images(&page.children, doc, project_dir, &mut out);
+    }
+    out
+}
+
+/// Collect all disk-based diagnostics (`asset.missing` + `image.overflow` /
+/// `image.upscale`) for a document and its project directory.
+///
+/// When `project_dir` is `None`, no filesystem access is attempted and an
+/// empty `Vec` is returned. When `Some`, both
+/// [`collect_missing_asset_diagnostics`] and
+/// [`collect_image_dimension_diagnostics`] are run and their results merged.
+/// This is the single call-site replacement for the repeated inline block:
+/// ```text
+/// match project_dir {
+///     Some(dir) => { let mut d = collect_missing...; d.extend(collect_image...); d }
+///     None => Vec::new(),
+/// }
+/// ```
+fn disk_diagnostics(doc: &Document, project_dir: Option<&Path>) -> Vec<Diagnostic> {
+    match project_dir {
+        Some(dir) => {
+            let mut d = collect_missing_asset_diagnostics(doc, dir);
+            d.extend(collect_image_dimension_diagnostics(doc, dir));
+            d
+        }
+        None => Vec::new(),
+    }
+}
+
+/// Recursively walk `nodes`, collecting image dimension diagnostics.
+///
+/// Containers (`Frame`, `Group`) are recursed into. All other node variants
+/// are listed explicitly and treated as no-ops (exhaustive match guards against
+/// silently missing a future container type).
+fn walk_images(nodes: &[Node], doc: &Document, project_dir: &Path, out: &mut Vec<Diagnostic>) {
+    for node in nodes {
+        match node {
+            Node::Image(img) => {
+                check_image(img, doc, project_dir, out);
+            }
+            Node::Frame(f) => {
+                walk_images(&f.children, doc, project_dir, out);
+            }
+            Node::Group(g) => {
+                walk_images(&g.children, doc, project_dir, out);
+            }
+            // Leaf nodes that cannot contain children — explicit for exhaustiveness:
+            Node::Rect(_)
+            | Node::Ellipse(_)
+            | Node::Line(_)
+            | Node::Text(_)
+            | Node::Code(_)
+            | Node::Polygon(_)
+            | Node::Polyline(_)
+            | Node::Instance(_)
+            | Node::Field(_)
+            | Node::Footnote(_)
+            | Node::Unknown(_) => {}
+        }
+    }
+}
+
+/// Check a single image node and push any `image.overflow` / `image.upscale`
+/// advisories into `out`.
+fn check_image(img: &ImageNode, doc: &Document, project_dir: &Path, out: &mut Vec<Diagnostic>) {
+    // Resolve box dimensions to pixels — skip if either axis uses a non-pixel
+    // unit (pct, deg, unknown) to avoid false positives.
+    let w_dim = match img.w.as_ref() {
+        Some(d) => d,
+        None => return,
+    };
+    let h_dim = match img.h.as_ref() {
+        Some(d) => d,
+        None => return,
+    };
+    let w = match dim_to_px(w_dim.value, &w_dim.unit) {
+        Some(px) => px,
+        None => return,
+    };
+    let h = match dim_to_px(h_dim.value, &h_dim.unit) {
+        Some(px) => px,
+        None => return,
+    };
+
+    // Look up the asset declaration — skip if unknown (unknown_reference handles it).
+    let decl = match doc.assets.assets.iter().find(|d| d.id == img.asset) {
+        Some(d) => d,
+        None => return,
+    };
+
+    // SVG assets are vector — they scale without quality loss; skip.
+    if decl.kind != AssetKind::Image {
+        return;
+    }
+
+    // Read only the image header (cheap — no full decode).
+    let path = project_dir.join(&decl.src);
+    let isz = match imagesize::size(&path) {
+        Ok(s) => s,
+        Err(_) => return, // missing/unreadable — asset.missing covers it
+    };
+    let iw = isz.width as f64;
+    let ih = isz.height as f64;
+
+    let fit = img.fit.as_deref();
+
+    // ── image.overflow ───────────────────────────────────────────────────────
+    // Only emitted for fit="none": the image is placed at intrinsic size with
+    // no scaling, so if intrinsic > box the image clips.
+    if fit == Some("none") && (iw > w || ih > h) {
+        out.push(Diagnostic::advisory(
+            "image.overflow",
+            format!(
+                "image '{}': intrinsic size {}x{} exceeds its box {}x{} (fit=\"none\")",
+                img.id, iw as u32, ih as u32, w as u32, h as u32,
+            ),
+            img.source_span,
+            Some(img.id.clone()),
+        ));
+    }
+
+    // ── image.upscale ────────────────────────────────────────────────────────
+    // Emitted when the rendered size is larger than the intrinsic pixel count,
+    // per fit mode. fit="none" never upscales (image is placed at intrinsic
+    // size). Unknown fit strings are skipped (validate already warns).
+    let upscales = match fit {
+        Some("none") => false,
+        Some("stretch") | None => w > iw || h > ih,
+        Some("contain") => {
+            // Scale factor = min of both axes; upscale when that factor > 1.
+            let s = (w / iw).min(h / ih);
+            s > 1.0
+        }
+        Some("cover") => {
+            // Scale factor = max of both axes; upscale when that factor > 1.
+            let s = (w / iw).max(h / ih);
+            s > 1.0
+        }
+        Some(_) => false, // unknown fit string — skip
+    };
+
+    if upscales {
+        out.push(Diagnostic::advisory(
+            "image.upscale",
+            format!(
+                "image '{}': rendered larger than its intrinsic {}x{} px; raster will appear pixelated",
+                img.id,
+                iw as u32,
+                ih as u32,
+            ),
+            img.source_span,
+            Some(img.id.clone()),
+        ));
+    }
 }
 
 // ── Shared pipeline helpers ───────────────────────────────────────────────────
