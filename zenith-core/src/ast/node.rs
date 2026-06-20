@@ -236,6 +236,11 @@ pub struct TextNode {
     pub contrast_bg: Option<PropertyValue>,
     pub font_family: Option<PropertyValue>,
     pub font_size: Option<PropertyValue>,
+    /// Floor font size for `overflow="autofit"` — the node's font shrinks no
+    /// smaller than this when fitting. Token-only, like `font-size`. `None` → a
+    /// default floor (`(declared * 0.5).max(8.0)`). KDL:
+    /// `font-size-min=(token)"size.min"`.
+    pub font_size_min: Option<PropertyValue>,
     /// Numeric font weight (100–900), usually a `fontWeight` token ref.
     pub font_weight: Option<PropertyValue>,
     /// Drop shadow / outer glow, as a `(token)` ref to a `shadow` token.
@@ -303,6 +308,17 @@ pub struct TextNode {
     /// attribute). Honored on the single-box wrap path; chain-member runaround is a
     /// documented v0 follow-up. KDL: `text-exclusion="author.portrait"`.
     pub text_exclusion: Option<String>,
+    /// Left padding in pixels applied to EVERY wrapped line (indents the text-box
+    /// left edge inward, reducing the measure). Combine with a negative
+    /// [`TextNode::text_indent`] for a hanging indent (bulleted lists). `None` → 0.
+    /// KDL: `padding-left=(px)44`.
+    pub padding_left: Option<Dimension>,
+    /// First-line horizontal offset in pixels RELATIVE to the padded left edge.
+    /// May be NEGATIVE to pull the first line back out (a hanging bullet glyph sits
+    /// left of the wrapped continuation lines). Applies to line 0 of the box only
+    /// (per-paragraph first-line indent is a documented v0 follow-up). `None` → 0.
+    /// KDL: `text-indent=(px)-44`.
+    pub text_indent: Option<Dimension>,
     /// Inline text spans.
     pub spans: Vec<TextSpan>,
     /// Source declaration span, when available.
@@ -696,7 +712,10 @@ pub enum Node {
     Rect(RectNode),
     Ellipse(EllipseNode),
     Line(LineNode),
-    Text(TextNode),
+    // Boxed: `TextNode` is by far the largest node variant (many optional
+    // typography/geometry fields). Boxing keeps `Node` compact so moving it
+    // around (and the `large_enum_variant` lint) stays cheap.
+    Text(Box<TextNode>),
     Code(CodeNode),
     Frame(FrameNode),
     Group(GroupNode),

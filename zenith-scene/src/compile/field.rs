@@ -45,6 +45,10 @@ pub(crate) struct FieldCtx<'a> {
     /// nodes with a fully-resolvable x/y/w/h rect are included. Empty when no node
     /// on the page has a resolvable box.
     pub(super) node_boxes: &'a BTreeMap<String, (f64, f64, f64, f64)>,
+    /// Total page count in `doc.body.pages`, for `page-count` field resolution.
+    /// A `page-count` field resolves to this value as a decimal string (the "M"
+    /// in a "Slide N of M" footer, where `page-number` supplies N).
+    pub(super) total_pages: usize,
 }
 
 /// Resolve a [`FieldNode`] against the page context into a concrete single-line
@@ -79,6 +83,7 @@ pub(super) fn resolve_field_to_text(field: &FieldNode, ctx: &FieldCtx) -> Option
             (s.to_owned(), "center")
         }
         "page-number" => (ctx.page_index_1based.to_string(), "center"),
+        "page-count" => (ctx.total_pages.to_string(), "center"),
         "page-ref" => {
             // Resolve the 1-based index of the page that contains `target`.
             let target = field.target.as_deref()?;
@@ -116,6 +121,7 @@ pub(super) fn resolve_field_to_text(field: &FieldNode, ctx: &FieldCtx) -> Option
         contrast_bg: None,
         font_family: field.font_family.clone(),
         font_size: field.font_size.clone(),
+        font_size_min: None,
         font_weight: None,
         shadow: None,
         opacity: field.opacity,
@@ -128,6 +134,8 @@ pub(super) fn resolve_field_to_text(field: &FieldNode, ctx: &FieldCtx) -> Option
         widow_orphan: None,
         tab_leader: None,
         text_exclusion: None,
+        padding_left: None,
+        text_indent: None,
         spans: vec![TextSpan {
             text,
             fill: None,
@@ -167,7 +175,18 @@ fn index_nodes(children: &[Node], page_index_1based: usize, map: &mut BTreeMap<S
         match child {
             Node::Frame(f) => index_nodes(&f.children, page_index_1based, map),
             Node::Group(g) => index_nodes(&g.children, page_index_1based, map),
-            _ => {}
+            Node::Rect(_)
+            | Node::Ellipse(_)
+            | Node::Line(_)
+            | Node::Text(_)
+            | Node::Code(_)
+            | Node::Image(_)
+            | Node::Polygon(_)
+            | Node::Polyline(_)
+            | Node::Instance(_)
+            | Node::Field(_)
+            | Node::Footnote(_)
+            | Node::Unknown(_) => {}
         }
     }
 }
@@ -219,7 +238,18 @@ fn collect_node_boxes(
                     map,
                 );
             }
-            _ => {}
+            Node::Rect(_)
+            | Node::Ellipse(_)
+            | Node::Line(_)
+            | Node::Text(_)
+            | Node::Code(_)
+            | Node::Image(_)
+            | Node::Polygon(_)
+            | Node::Polyline(_)
+            | Node::Instance(_)
+            | Node::Field(_)
+            | Node::Footnote(_)
+            | Node::Unknown(_) => {}
         }
     }
 }
@@ -385,6 +415,57 @@ mod tests {
         KdlAdapter
             .parse(b"zenith version=1 { document id=\"d\" { } }")
             .expect("minimal test document must parse")
+    }
+
+    /// A minimal `page-count` field node (no geometry, no styling) for the
+    /// resolution unit test.
+    fn page_count_field() -> FieldNode {
+        FieldNode {
+            id: "total".to_owned(),
+            name: None,
+            role: None,
+            field_type: "page-count".to_owned(),
+            recto: None,
+            verso: None,
+            target: None,
+            x: None,
+            y: None,
+            w: None,
+            h: None,
+            style: None,
+            fill: None,
+            font_family: None,
+            font_size: None,
+            opacity: None,
+            visible: None,
+            locked: None,
+            source_span: None,
+            unknown_props: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn page_count_field_resolves_to_total_page_count() {
+        let by_id: BTreeMap<String, usize> = BTreeMap::new();
+        let markers: BTreeMap<String, String> = BTreeMap::new();
+        let boxes: BTreeMap<String, (f64, f64, f64, f64)> = BTreeMap::new();
+        let ctx = FieldCtx {
+            page_index_1based: 2,
+            is_recto: false,
+            live_area: None,
+            page_index_by_node_id: &by_id,
+            footnote_markers: &markers,
+            node_boxes: &boxes,
+            total_pages: 5,
+        };
+        let text = resolve_field_to_text(&page_count_field(), &ctx)
+            .expect("a page-count field must resolve to a text node");
+        assert_eq!(text.spans.len(), 1, "a field is a single span");
+        assert_eq!(
+            text.spans.first().map(|s| s.text.as_str()),
+            Some("5"),
+            "page-count resolves to the total page count as a decimal string"
+        );
     }
 
     #[test]

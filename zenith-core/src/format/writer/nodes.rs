@@ -517,10 +517,13 @@ fn write_text(t: &TextNode, out: &mut String, depth: usize) {
     write_opt_str(out, "direction", &t.direction);
     write_opt_str(out, "overflow", &t.overflow);
     write_opt_str(out, "overflow-wrap", &t.overflow_wrap);
+    write_opt_dimension(out, "padding-left", &t.padding_left);
+    write_opt_dimension(out, "text-indent", &t.text_indent);
     write_opt_property_value(out, "fill", &t.fill);
     write_opt_property_value(out, "contrast-bg", &t.contrast_bg);
     write_opt_property_value(out, "font-family", &t.font_family);
     write_opt_property_value(out, "font-size", &t.font_size);
+    write_opt_property_value(out, "font-size-min", &t.font_size_min);
     write_opt_property_value(out, "font-weight", &t.font_weight);
     write_opt_property_value(out, "shadow", &t.shadow);
     write_opt_f64(out, "opacity", &t.opacity);

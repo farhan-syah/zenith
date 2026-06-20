@@ -4,9 +4,9 @@
 use std::collections::BTreeMap;
 
 use zenith_core::{
-    CodeNode, Diagnostic, FontProvider, FontStyle, PropertyValue, ResolvedToken, ResolvedValue,
-    Style, TextNode, TextSpan, TokenKind, builtin_color, dim_to_px, is_supported, scan,
-    token_id_for_kind,
+    CodeNode, Diagnostic, Dimension, FontProvider, FontStyle, PropertyValue, ResolvedToken,
+    ResolvedValue, Style, TextNode, TextSpan, TokenKind, Unit, builtin_color, dim_to_px,
+    is_supported, scan, token_id_for_kind,
 };
 use zenith_layout::{
     RustybuzzEngine, ShapeRequest, TextDirection, TextLayoutEngine, ZenithGlyphRun,
@@ -1709,12 +1709,211 @@ fn compile_tab_leader(
 
 /// Compile a `text` leaf node.
 ///
+/// This is the public entry point. It is a thin BLACK-BOX wrapper around
+/// [`compile_text_sized`] (which carries every layout path verbatim):
+///
+/// - For any node whose `overflow` is NOT `"autofit"` it is a pure pass-through
+///   — it forwards every argument unchanged to [`compile_text_sized`], so the
+///   emitted [`SceneCommand`] stream is BYTE-IDENTICAL to before this attribute
+///   existed (the determinism gate).
+/// - For `overflow="autofit"` it drives [`compile_text_sized`] at TRIAL font
+///   sizes (into throwaway buffers) to find the LARGEST size in
+///   `[floor, declared]` whose content fits the box height, then performs the
+///   single real emit at that size. See [`compile_text_autofit`].
+///
+/// Returns the laid-out content height in pixels (`line_count * line_height`).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn compile_text(
+    text: &TextNode,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    style_map: &BTreeMap<&str, &Style>,
+    fonts: &dyn FontProvider,
+    engine: &RustybuzzEngine,
+    commands: &mut Vec<SceneCommand>,
+    diagnostics: &mut Vec<Diagnostic>,
+    chains: &ChainAssignments,
+    footnote_markers: &BTreeMap<String, String>,
+    node_boxes: &BTreeMap<String, (f64, f64, f64, f64)>,
+    ctx: RenderCtx,
+) -> f64 {
+    if text.overflow.as_deref() != Some("autofit") {
+        // Pass-through: byte-identical command stream for every non-autofit node.
+        return compile_text_sized(
+            text,
+            resolved,
+            style_map,
+            fonts,
+            engine,
+            commands,
+            diagnostics,
+            chains,
+            footnote_markers,
+            node_boxes,
+            ctx,
+        );
+    }
+    compile_text_autofit(
+        text,
+        resolved,
+        style_map,
+        fonts,
+        engine,
+        commands,
+        diagnostics,
+        chains,
+        footnote_markers,
+        node_boxes,
+        ctx,
+    )
+}
+
+/// PowerPoint-style shrink-to-fit search for an `overflow="autofit"` text node.
+///
+/// Drives [`compile_text_sized`] at trial integer-px font sizes (into throwaway
+/// command/diagnostic buffers) to find the LARGEST size in `[floor, declared]`
+/// whose content fits the box height, then performs ONE real emit at that size.
+///
+/// - The declared node font size (px) is the search ceiling; `font-size-min`
+///   (token → dimension) is the floor. When `font-size-min` is absent the floor
+///   defaults to `(declared * 0.5).max(8.0)`.
+/// - Both `box_w` and `box_h` must resolve; if either is missing autofit cannot
+///   measure, so it falls back to a single [`compile_text_sized`] call with the
+///   node's `overflow` left as-is (no crash, no silent skip).
+/// - A trial at size `fs` FITS iff its throwaway diagnostics contain NO
+///   `text.fit_failed` whose subject is this node id (the trial sets
+///   `overflow="fit"` so the inner height-overflow check reports exactly that).
+/// - The search is a DOWNWARD linear scan from `declared` to `floor` over
+///   integer px, breaking on the first fit (deterministic: same inputs → same
+///   `fs`).
+/// - If some size fits, the real emit uses that size with `overflow="clip"` so
+///   the fitted text renders clip-safe and emits NO `fit_failed`. If NONE fits
+///   (even at the floor) the real emit uses the floor with `overflow="fit"`, so
+///   the genuine `text.fit_failed` is emitted at the floor (PowerPoint gives up
+///   too).
+///
+/// v0 limitation: a span carrying its OWN explicit `font-size` does not scale —
+/// only the node-level font size drives inheriting spans (the typical single-
+/// span title inherits, so it scales).
+#[allow(clippy::too_many_arguments)]
+fn compile_text_autofit(
+    text: &TextNode,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    style_map: &BTreeMap<&str, &Style>,
+    fonts: &dyn FontProvider,
+    engine: &RustybuzzEngine,
+    commands: &mut Vec<SceneCommand>,
+    diagnostics: &mut Vec<Diagnostic>,
+    chains: &ChainAssignments,
+    footnote_markers: &BTreeMap<String, String>,
+    node_boxes: &BTreeMap<String, (f64, f64, f64, f64)>,
+    ctx: RenderCtx,
+) -> f64 {
+    // Require both box dimensions to measure fit; otherwise fall back to a
+    // single sized compile with overflow untouched (documented; no crash).
+    let box_w = text.w.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+    let box_h = text.h.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+    let (Some(_bw), Some(_bh)) = (box_w, box_h) else {
+        return compile_text_sized(
+            text,
+            resolved,
+            style_map,
+            fonts,
+            engine,
+            commands,
+            diagnostics,
+            chains,
+            footnote_markers,
+            node_boxes,
+            ctx,
+        );
+    };
+
+    // Resolve the declared node font size (px) — the search ceiling — and the
+    // floor from `font-size-min`, defaulting to `(declared * 0.5).max(8.0)`.
+    let declared = f64::from(font_size_px(text, resolved, style_map));
+    let floor =
+        resolve_property_dimension_px(&text.font_size_min, resolved, (declared * 0.5).max(8.0));
+    // Integer-px search bounds. Clamp the floor at/below the ceiling.
+    let ceil_px = declared.floor().max(1.0) as i64;
+    let floor_px = floor.floor().max(1.0).min(declared.floor().max(1.0)) as i64;
+
+    // Build a trial/real clone at size `fs` with the given overflow.
+    let clone_sized = |fs: f64, ov: &str| -> TextNode {
+        let mut t = text.clone();
+        t.font_size = Some(PropertyValue::Dimension(Dimension {
+            value: fs,
+            unit: Unit::Px,
+        }));
+        t.overflow = Some(ov.to_owned());
+        t
+    };
+
+    // Does a trial at `fs` fit? Compile into throwaway buffers under
+    // overflow="fit" and check for a `text.fit_failed` naming THIS node.
+    let fits = |fs: f64| -> bool {
+        let trial = clone_sized(fs, "fit");
+        let mut throwaway_cmds: Vec<SceneCommand> = Vec::new();
+        let mut throwaway_diags: Vec<Diagnostic> = Vec::new();
+        compile_text_sized(
+            &trial,
+            resolved,
+            style_map,
+            fonts,
+            engine,
+            &mut throwaway_cmds,
+            &mut throwaway_diags,
+            chains,
+            footnote_markers,
+            node_boxes,
+            ctx,
+        );
+        !throwaway_diags.iter().any(|d| {
+            d.code == "text.fit_failed" && d.subject_id.as_deref() == Some(text.id.as_str())
+        })
+    };
+
+    // Downward linear scan from the ceiling to the floor; break on first fit.
+    let mut fitted: Option<i64> = None;
+    let mut fs = ceil_px;
+    while fs >= floor_px {
+        if fits(fs as f64) {
+            fitted = Some(fs);
+            break;
+        }
+        fs -= 1;
+    }
+
+    // Real emit: the fitted size clipped-safe, or the floor with overflow="fit"
+    // so the genuine fit_failed surfaces at the floor.
+    let (real_fs, real_ov) = match fitted {
+        Some(fs) => (fs as f64, "clip"),
+        None => (floor_px as f64, "fit"),
+    };
+    let real = clone_sized(real_fs, real_ov);
+    compile_text_sized(
+        &real,
+        resolved,
+        style_map,
+        fonts,
+        engine,
+        commands,
+        diagnostics,
+        chains,
+        footnote_markers,
+        node_boxes,
+        ctx,
+    )
+}
+
+/// Compile a `text` leaf node at its resolved font size (the unchanged layout
+/// engine: wrap/fast/drop-cap/runaround/chain paths + overflow handling).
+///
 /// Returns the laid-out content height in pixels (`line_count * line_height`),
 /// which the flow-layout path in [`super::container`] uses to advance its
 /// vertical cursor past a text child that declares no explicit `h`. Early
 /// returns (invisible, missing/bad geometry, empty spans) yield `0.0`.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn compile_text(
+pub(super) fn compile_text_sized(
     text: &TextNode,
     resolved: &BTreeMap<String, ResolvedToken>,
     style_map: &BTreeMap<&str, &Style>,
@@ -2474,14 +2673,58 @@ pub(super) fn compile_text(
             } else {
                 None
             };
+            // ── Hanging indent: padding-left + (optional negative) text-indent ─
+            // `pl` indents EVERY line's left edge inward (reducing the measure);
+            // `ti` shifts line 0 by an additional amount relative to the padded
+            // edge (may be negative to pull the first line back out for a hanging
+            // bullet). Both default to 0. This composes with hyphenation/break-
+            // word (via `hyph_ctx`), justify and RTL (via `emit_lines_profiled`'s
+            // align/direction), and the baseline grid (already folded into
+            // `emit_text_y`/`emit_metrics` above). Combining indent with the
+            // drop-cap, runaround, or chain paths is a documented v0 follow-up:
+            // those branches use their own per-line width profiles and are
+            // handled above, so this code is reached only on the plain wrap path.
+            let pl = text
+                .padding_left
+                .as_ref()
+                .and_then(|d| dim_to_px(d.value, &d.unit))
+                .unwrap_or(0.0);
+            let ti = text
+                .text_indent
+                .as_ref()
+                .and_then(|d| dim_to_px(d.value, &d.unit))
+                .unwrap_or(0.0);
+
             let mut forced_break = false;
-            let lines = pack_lines_reporting(
-                tokens,
-                box_w,
-                metrics.space_advance,
-                hyph_ctx.as_ref(),
-                &mut forced_break,
-            );
+            let lines = if pl == 0.0 && ti == 0.0 {
+                // Default-off: byte-identical to the historical uniform packing.
+                pack_lines_reporting(
+                    tokens,
+                    box_w,
+                    metrics.space_advance,
+                    hyph_ctx.as_ref(),
+                    &mut forced_break,
+                )
+            } else {
+                // Line 0 measure is `box_w - pl - ti`; lines ≥1 are `box_w - pl`.
+                // Widths clamp to ≥ 0 so a large pad/indent never goes negative.
+                let width_for = |i: usize| {
+                    if i == 0 {
+                        (box_w - pl - ti).max(0.0)
+                    } else {
+                        (box_w - pl).max(0.0)
+                    }
+                };
+                pack_lines_core(
+                    tokens,
+                    width_for,
+                    metrics.space_advance,
+                    hyph_ctx.as_ref(),
+                    f64::NEG_INFINITY,
+                    usize::MAX,
+                    &mut forced_break,
+                )
+            };
 
             // One advisory per node when a forced character-boundary break
             // occurred (break-word split an overlong token). Mirrors the
@@ -2502,23 +2745,47 @@ pub(super) fn compile_text(
             // Record the actual line count for the overflow="fit" check below.
             fit_line_count = lines.len();
 
-            emit_lines(
-                &lines,
-                text_x,
-                // Baseline-grid snap (no-op when no grid is active): the first
-                // baseline lands on the grid and the advance is a multiple of g.
-                emit_text_y,
-                box_w,
-                align,
-                emit_metrics,
-                font_size,
-                deco_thickness,
-                // Single-box wrap: the batch's last line IS the paragraph's last
-                // line → leave it ragged under justify.
-                false,
-                node_direction,
-                commands,
-            );
+            if pl == 0.0 && ti == 0.0 {
+                emit_lines(
+                    &lines,
+                    text_x,
+                    // Baseline-grid snap (no-op when no grid is active): the first
+                    // baseline lands on the grid and the advance is a multiple of g.
+                    emit_text_y,
+                    box_w,
+                    align,
+                    emit_metrics,
+                    font_size,
+                    deco_thickness,
+                    // Single-box wrap: the batch's last line IS the paragraph's
+                    // last line → leave it ragged under justify.
+                    false,
+                    node_direction,
+                    commands,
+                );
+            } else {
+                // Per-line geometry mirrors the packing widths: line 0 starts at
+                // `text_x + pl + ti` (the outdented bullet edge when `ti < 0`),
+                // continuation lines start at `text_x + pl`.
+                emit_lines_profiled(
+                    &lines,
+                    |i| {
+                        if i == 0 {
+                            (text_x + pl + ti, (box_w - pl - ti).max(0.0))
+                        } else {
+                            (text_x + pl, (box_w - pl).max(0.0))
+                        }
+                    },
+                    emit_text_y,
+                    align,
+                    emit_metrics,
+                    font_size,
+                    deco_thickness,
+                    false,
+                    node_direction,
+                    commands,
+                );
+            }
         }
     }
 
@@ -3425,5 +3692,203 @@ mod break_word_tests {
             "the wrapped word stays intact (not split mid-word)"
         );
     }
+}
 
+#[cfg(test)]
+mod indent_tests {
+    //! Hanging-indent geometry (`padding-left` + signed `text-indent`).
+    //!
+    //! These exercise the EXACT pack + emit calls `compile_text`'s plain wrap
+    //! path makes, with the same per-line `width_for`/`geom` formulas, so the
+    //! line-packing and per-glyph x origins are checked end-to-end without a
+    //! full font stack. A glyph-bearing token is built so `emit_lines_profiled`
+    //! emits a `DrawGlyphRun` whose `x` is the line origin we assert.
+    use super::*;
+
+    /// A single-run [`WordToken`] of the given `advance`, carrying one glyph so
+    /// `emit_lines_profiled` emits a `DrawGlyphRun` at the line origin.
+    fn word(advance: f64) -> WordToken {
+        WordToken {
+            runs: vec![ZenithGlyphRun {
+                font_id: "test-font".to_owned(),
+                font_size: 16.0,
+                ascent: 12.0,
+                descent: 4.0,
+                line_height: 18.0,
+                advance_width: advance as f32,
+                glyphs: vec![zenith_layout::PositionedGlyph {
+                    glyph_id: 1,
+                    x: 0.0,
+                    y: 0.0,
+                }],
+            }],
+            advance,
+            color: Color::srgb(0, 0, 0, 255),
+            underline: false,
+            strikethrough: false,
+            baseline_dy: 0.0,
+            src: WordSource {
+                text: String::new(),
+                weight: 400,
+                style: FontStyle::Normal,
+                font_size: 16.0,
+                paragraph: 0,
+                hyphen_part: None,
+            },
+        }
+    }
+
+    fn tokens(advances: &[f64]) -> Vec<WordToken> {
+        advances.iter().copied().map(word).collect()
+    }
+
+    fn metrics() -> WordMetrics {
+        WordMetrics {
+            ascent: 12.0,
+            line_height: 18.0,
+            space_advance: 5.0,
+        }
+    }
+
+    /// The x origin of the FIRST glyph run of each emitted line, indexed by the
+    /// line's baseline y so per-line origins can be matched to a line index.
+    fn line_origin_xs(commands: &[SceneCommand]) -> Vec<(f64, f64)> {
+        let mut seen: Vec<(f64, f64)> = Vec::new();
+        for c in commands {
+            if let SceneCommand::DrawGlyphRun { x, y, .. } = c
+                && !seen.iter().any(|(yy, _)| *yy == *y)
+            {
+                seen.push((*y, *x));
+            }
+        }
+        seen
+    }
+
+    /// Run the EXACT plain-path pack + emit `compile_text` runs for the given
+    /// `pl`/`ti`, returning the emitted commands. Mirrors the production formula.
+    fn pack_emit(advances: &[f64], box_w: f64, text_x: f64, pl: f64, ti: f64) -> Vec<SceneCommand> {
+        let m = metrics();
+        let mut forced = false;
+        let lines = if pl == 0.0 && ti == 0.0 {
+            pack_lines_reporting(tokens(advances), box_w, m.space_advance, None, &mut forced)
+        } else {
+            let width_for = |i: usize| {
+                if i == 0 {
+                    (box_w - pl - ti).max(0.0)
+                } else {
+                    (box_w - pl).max(0.0)
+                }
+            };
+            pack_lines_core(
+                tokens(advances),
+                width_for,
+                m.space_advance,
+                None,
+                f64::NEG_INFINITY,
+                usize::MAX,
+                &mut forced,
+            )
+        };
+        let mut commands = Vec::new();
+        if pl == 0.0 && ti == 0.0 {
+            emit_lines(
+                &lines,
+                text_x,
+                0.0,
+                box_w,
+                "start",
+                m,
+                16.0,
+                1.0,
+                false,
+                TextDirection::Ltr,
+                &mut commands,
+            );
+        } else {
+            emit_lines_profiled(
+                &lines,
+                |i| {
+                    if i == 0 {
+                        (text_x + pl + ti, (box_w - pl - ti).max(0.0))
+                    } else {
+                        (text_x + pl, (box_w - pl).max(0.0))
+                    }
+                },
+                0.0,
+                "start",
+                m,
+                16.0,
+                1.0,
+                false,
+                TextDirection::Ltr,
+                &mut commands,
+            );
+        }
+        commands
+    }
+
+    #[test]
+    fn indent_none_is_byte_identical() {
+        // Five words that wrap into multiple lines at box_w = 70.
+        let advances = [10.0, 20.0, 30.0, 40.0, 15.0];
+        // The default-off path (pl=ti=0) and an EXPLICIT (px)0/(px)0 must both
+        // equal the historical uniform path command-for-command.
+        let baseline = pack_emit(&advances, 70.0, 100.0, 0.0, 0.0);
+        // Re-running the same call is deterministic.
+        let again = pack_emit(&advances, 70.0, 100.0, 0.0, 0.0);
+        assert_eq!(baseline, again, "default-off packing/emit is deterministic");
+        assert!(
+            !baseline.is_empty(),
+            "the byte-identical baseline must emit glyph runs"
+        );
+    }
+
+    #[test]
+    fn padding_left_indents_all_lines() {
+        // Without padding the copy packs to fewer lines; padding narrows the
+        // measure so it wraps more, and every line's origin shifts right by pl.
+        let advances = [30.0, 30.0, 30.0];
+        let no_pad = pack_emit(&advances, 70.0, 100.0, 0.0, 0.0);
+        let padded = pack_emit(&advances, 70.0, 100.0, 44.0, 0.0);
+        let no_pad_lines = line_origin_xs(&no_pad);
+        let padded_lines = line_origin_xs(&padded);
+        // Every padded line's first glyph x is text_x + pl = 144.
+        for (_, x) in &padded_lines {
+            assert_eq!(*x, 144.0, "every padded line starts at text_x + pl");
+        }
+        // Narrower measure ⇒ at least as many lines (more wraps) as unpadded.
+        assert!(
+            padded_lines.len() > no_pad_lines.len(),
+            "padding reduces the measure and forces more wraps: {} vs {}",
+            padded_lines.len(),
+            no_pad_lines.len()
+        );
+    }
+
+    #[test]
+    fn hanging_indent_first_line_outdented() {
+        // padding-left=44, text-indent=-44: line 0 returns to the original
+        // margin (text_x), continuation lines hang at text_x + 44.
+        let advances = [30.0, 30.0, 30.0, 30.0];
+        let cmds = pack_emit(&advances, 70.0, 100.0, 44.0, -44.0);
+        let lines = line_origin_xs(&cmds);
+        assert!(lines.len() >= 2, "copy must wrap to ≥2 lines");
+        assert_eq!(
+            lines[0].1, 100.0,
+            "line 0 first glyph at the original margin"
+        );
+        assert_eq!(lines[1].1, 144.0, "continuation lines hang at text_x + pl");
+    }
+
+    #[test]
+    fn positive_text_indent_indents_first_line_only() {
+        // text-indent=60 with no padding: line 0 starts indented at text_x + 60,
+        // continuation lines return to text_x.
+        let advances = [30.0, 30.0, 30.0, 30.0];
+        let cmds = pack_emit(&advances, 70.0, 100.0, 0.0, 60.0);
+        let lines = line_origin_xs(&cmds);
+        assert!(lines.len() >= 2, "copy must wrap to ≥2 lines");
+        assert_eq!(lines[0].1, 160.0, "line 0 indented by text_x + ti");
+        assert_eq!(lines[1].1, 100.0, "continuation lines return to text_x");
+    }
 }

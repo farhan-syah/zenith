@@ -401,6 +401,7 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
         page_index_by_node_id: &page_index_by_node_id,
         footnote_markers: &footnote_markers,
         node_boxes: &node_boxes,
+        total_pages: doc.body.pages.len(),
     };
 
     // ── Resolve the page baseline grid ───────────────────────────────────

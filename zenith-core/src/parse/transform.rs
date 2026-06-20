@@ -1125,7 +1125,7 @@ fn transform_node(node: &KdlNode) -> Result<Node, ParseError> {
         "rect" => transform_rect(node).map(Node::Rect),
         "ellipse" => transform_ellipse(node).map(Node::Ellipse),
         "line" => transform_line(node).map(Node::Line),
-        "text" => transform_text(node).map(Node::Text),
+        "text" => transform_text(node).map(|t| Node::Text(Box::new(t))),
         "code" => transform_code(node).map(Node::Code),
         "frame" => transform_frame(node).map(Node::Frame),
         "group" => transform_group(node).map(Node::Group),
@@ -1380,6 +1380,8 @@ const TEXT_KNOWN_PROPS: &[&str] = &[
     "font_family",
     "font-size",
     "font_size",
+    "font-size-min",
+    "font_size_min",
     "font-weight",
     "font_weight",
     "shadow",
@@ -1397,6 +1399,10 @@ const TEXT_KNOWN_PROPS: &[&str] = &[
     "tab_leader",
     "text-exclusion",
     "text_exclusion",
+    "padding-left",
+    "padding_left",
+    "text-indent",
+    "text_indent",
 ];
 
 fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
@@ -1404,6 +1410,7 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
 
     let font_family = optional_property_value_aliased(node, "font-family", "font_family");
     let font_size = optional_property_value_aliased(node, "font-size", "font_size");
+    let font_size_min = optional_property_value_aliased(node, "font-size-min", "font_size_min");
     let font_weight = optional_property_value_aliased(node, "font-weight", "font_weight");
     let drop_cap_lines = optional_u32_prop(node, "drop-cap-lines")
         .or_else(|| optional_u32_prop(node, "drop_cap_lines"));
@@ -1416,6 +1423,12 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
     let text_exclusion = optional_string_prop(node, "text-exclusion")
         .or_else(|| optional_string_prop(node, "text_exclusion"))
         .map(str::to_owned);
+    // Optional signed geometry dimensions (text-indent may be NEGATIVE for a
+    // hanging indent). Accept both hyphenated and underscored spellings.
+    let padding_left = optional_dimension_prop(node, "padding-left")
+        .or_else(|| optional_dimension_prop(node, "padding_left"));
+    let text_indent = optional_dimension_prop(node, "text-indent")
+        .or_else(|| optional_dimension_prop(node, "text_indent"));
 
     let mut spans: Vec<TextSpan> = Vec::new();
     if let Some(children) = node.children() {
@@ -1447,6 +1460,7 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         contrast_bg: optional_property_value_aliased(node, "contrast-bg", "contrast_bg"),
         font_family,
         font_size,
+        font_size_min,
         font_weight,
         shadow: optional_property_value(node, "shadow"),
         opacity: optional_f64_prop(node, "opacity"),
@@ -1459,6 +1473,8 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         widow_orphan,
         tab_leader,
         text_exclusion,
+        padding_left,
+        text_indent,
         spans,
         source_span: node_span(node),
         unknown_props,

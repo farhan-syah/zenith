@@ -434,6 +434,15 @@ pub(super) fn walk_node(
             );
             check_visual_prop(
                 &t.id,
+                "font-size-min",
+                t.font_size_min.as_ref(),
+                VisualExpect::Dimension,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+            check_visual_prop(
+                &t.id,
                 "font-weight",
                 t.font_weight.as_ref(),
                 VisualExpect::FontWeight,
@@ -1461,7 +1470,7 @@ fn check_instance(
 // ── field validation ──────────────────────────────────────────────────────────
 
 /// The known v0 field types.
-const KNOWN_FIELD_TYPES: &[&str] = &["running-head", "page-number", "page-ref"];
+const KNOWN_FIELD_TYPES: &[&str] = &["running-head", "page-number", "page-ref", "page-count"];
 
 /// Validate a `field` node:
 /// - its own `id` participates in GLOBAL uniqueness;

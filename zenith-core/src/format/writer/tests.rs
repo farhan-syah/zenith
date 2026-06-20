@@ -109,6 +109,45 @@ fn test_baseline_grid_round_trips() {
     );
 }
 
+/// **`font-size-min` round-trip**: a text node's `font-size-min=(token)"…"`
+/// (the `overflow="autofit"` floor) must survive parse → format → parse,
+/// mirroring `font-size`.
+#[test]
+fn test_font_size_min_round_trips() {
+    let src = r##"zenith version=1 {
+  project id="proj.fsm" name="FSM"
+  tokens format="zenith-token-v1" {
+    token id="size.title.min" type="dimension" value=(px)12
+  }
+  styles {
+  }
+  document id="doc.fsm" title="FSM" {
+    page id="page.one" w=(px)640 h=(px)360 {
+      text id="t" x=(px)0 y=(px)0 w=(px)200 h=(px)40 overflow="autofit" font-size-min=(token)"size.title.min" {
+        span "Hi"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+
+    let formatted = format_document(&doc).expect("format");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("utf8");
+    assert!(
+        formatted_str.contains(r#"font-size-min=(token)"size.title.min""#),
+        "formatted output must contain font-size-min; got:\n{formatted_str}"
+    );
+
+    let reparsed = adapter.parse(&formatted).expect("re-parse");
+    assert_eq!(
+        strip_spans(doc).body.pages[0].children,
+        strip_spans(reparsed).body.pages[0].children,
+        "font-size-min must round-trip identically"
+    );
+}
+
 /// A `.zen` document with a `code` node whose content stresses every escape
 /// path: leading spaces, a blank line, a tab, an embedded quote, and a
 /// literal backslash.
@@ -2494,5 +2533,63 @@ fn test_overflow_wrap_round_trips() {
         strip_spans(doc),
         strip_spans(reparsed),
         "overflow-wrap must round-trip identically"
+    );
+}
+
+/// **Hanging-indent round-trip**: `padding-left` plus a NEGATIVE `text-indent`
+/// must be emitted by the writer (including the minus sign) and survive
+/// parse → format → parse byte-identically.
+#[test]
+fn test_hanging_indent_round_trips() {
+    let src = r##"zenith version=1 {
+  project id="proj.hi" name="HI"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.hi" title="HI" {
+    page id="page.one" w=(px)1920 h=(px)1080 {
+      text id="b1" x=(px)160 y=(px)240 w=(px)1600 h=(px)120 overflow="clip" padding-left=(px)44 text-indent=(px)-44 {
+        span "• A hanging bullet whose wrapped lines align past the glyph."
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+
+    // The negative text-indent must have parsed onto the node.
+    let page = &doc.body.pages[0];
+    let Node::Text(t) = &page.children[0] else {
+        panic!("first child must be the text node");
+    };
+    assert_eq!(
+        t.padding_left.as_ref().map(|d| d.value),
+        Some(44.0),
+        "padding-left must parse"
+    );
+    assert_eq!(
+        t.text_indent.as_ref().map(|d| d.value),
+        Some(-44.0),
+        "negative text-indent must parse"
+    );
+
+    let formatted = format_document(&doc).expect("format");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("utf8");
+    assert!(
+        formatted_str.contains("padding-left=(px)44"),
+        "formatted output must contain padding-left; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains("text-indent=(px)-44"),
+        "formatted output must contain the NEGATIVE text-indent; got:\n{formatted_str}"
+    );
+
+    let reparsed = adapter.parse(&formatted).expect("re-parse");
+    assert_eq!(
+        strip_spans(doc),
+        strip_spans(reparsed),
+        "hanging-indent attributes must round-trip identically"
     );
 }

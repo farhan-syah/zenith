@@ -111,7 +111,7 @@ fn minimal_ellipse(id: &str, fill: Option<PropertyValue>) -> Node {
 }
 
 fn minimal_text(id: &str, fill: Option<PropertyValue>) -> Node {
-    Node::Text(TextNode {
+    Node::Text(Box::new(TextNode {
         shadow: None,
         id: id.to_owned(),
         name: None,
@@ -129,6 +129,7 @@ fn minimal_text(id: &str, fill: Option<PropertyValue>) -> Node {
         contrast_bg: None,
         font_family: None,
         font_size: None,
+        font_size_min: None,
         font_weight: None,
         opacity: None,
         visible: None,
@@ -140,10 +141,12 @@ fn minimal_text(id: &str, fill: Option<PropertyValue>) -> Node {
         widow_orphan: None,
         tab_leader: None,
         text_exclusion: None,
+        padding_left: None,
+        text_indent: None,
         spans: vec![],
         source_span: None,
         unknown_props: BTreeMap::new(),
-    })
+    }))
 }
 
 fn minimal_code(id: &str, fill: Option<PropertyValue>) -> Node {
@@ -349,7 +352,7 @@ fn fill_with_missing_token_ref_produces_unknown_reference() {
 
 #[test]
 fn font_weight_with_missing_token_ref_produces_unknown_reference() {
-    let text = Node::Text(TextNode {
+    let text = Node::Text(Box::new(TextNode {
         shadow: None,
         id: "text.fw".to_owned(),
         name: None,
@@ -367,6 +370,7 @@ fn font_weight_with_missing_token_ref_produces_unknown_reference() {
         contrast_bg: None,
         font_family: None,
         font_size: None,
+        font_size_min: None,
         font_weight: Some(token_ref("weight.does.not.exist")),
         opacity: None,
         visible: None,
@@ -378,10 +382,12 @@ fn font_weight_with_missing_token_ref_produces_unknown_reference() {
         widow_orphan: None,
         tab_leader: None,
         text_exclusion: None,
+        padding_left: None,
+        text_indent: None,
         spans: vec![],
         source_span: None,
         unknown_props: BTreeMap::new(),
-    });
+    }));
     let doc = doc_with(vec![], vec![minimal_page("page.one", vec![text])]);
     let report = validate(&doc);
     assert!(
@@ -1233,7 +1239,7 @@ fn text_font_family_with_font_family_token_is_clean() {
         vec![font_family_token("font.body")],
         vec![minimal_page(
             "page.one",
-            vec![Node::Text(TextNode {
+            vec![Node::Text(Box::new(TextNode {
                 shadow: None,
                 id: "text.one".to_owned(),
                 name: None,
@@ -1251,6 +1257,7 @@ fn text_font_family_with_font_family_token_is_clean() {
                 contrast_bg: None,
                 font_family: Some(token_ref("font.body")),
                 font_size: None,
+                font_size_min: None,
                 font_weight: None,
                 opacity: None,
                 visible: None,
@@ -1262,10 +1269,12 @@ fn text_font_family_with_font_family_token_is_clean() {
                 widow_orphan: None,
                 tab_leader: None,
                 text_exclusion: None,
+                padding_left: None,
+                text_indent: None,
                 spans: vec![],
                 source_span: None,
                 unknown_props: BTreeMap::new(),
-            })],
+            }))],
         )],
     );
     let report = validate(&doc);
@@ -2103,6 +2112,29 @@ fn text_literal_font_size_dimension_is_raw_visual_literal() {
     );
 }
 
+/// A literal `font-size-min="12"` (a `PropertyValue::Dimension`, not a token)
+/// must be flagged as a raw visual literal, exactly like `font-size`.
+#[test]
+fn text_literal_font_size_min_dimension_is_raw_visual_literal() {
+    let text = match minimal_text("text.lfsm", Some(token_ref("color.fill"))) {
+        Node::Text(mut t) => {
+            t.font_size_min = Some(PropertyValue::Dimension(px(12.0)));
+            Node::Text(t)
+        }
+        other => other,
+    };
+    let doc = doc_with(
+        vec![color_token("color.fill")],
+        vec![minimal_page("page.one", vec![text])],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "token.raw_visual_literal"),
+        "a literal font-size-min dimension must flag token.raw_visual_literal; codes: {:?}",
+        codes(&report)
+    );
+}
+
 // ── polygon: unknown fill-rule warns ──────────────────────────────────
 
 #[test]
@@ -2638,7 +2670,7 @@ fn text_with_fill_and_size(
     font_size_token: Option<&str>,
     font_weight_token: Option<&str>,
 ) -> Node {
-    Node::Text(crate::ast::node::TextNode {
+    Node::Text(Box::new(crate::ast::node::TextNode {
         shadow: None,
         id: id.to_owned(),
         name: None,
@@ -2656,6 +2688,7 @@ fn text_with_fill_and_size(
         contrast_bg: None,
         font_family: None,
         font_size: font_size_token.map(|t| PropertyValue::TokenRef(t.to_owned())),
+        font_size_min: None,
         font_weight: font_weight_token.map(|t| PropertyValue::TokenRef(t.to_owned())),
         opacity: None,
         visible: None,
@@ -2667,10 +2700,12 @@ fn text_with_fill_and_size(
         widow_orphan: None,
         tab_leader: None,
         text_exclusion: None,
+        padding_left: None,
+        text_indent: None,
         spans: vec![],
         source_span: None,
         unknown_props: BTreeMap::new(),
-    })
+    }))
 }
 
 /// Light gray (#aaaaaa) text on white page at 16 px → contrast ~2.32:1 < 4.5
@@ -2841,7 +2876,7 @@ fn no_page_background_skips_contrast_check() {
 
 /// Build a text node with an explicit fill token AND a `contrast-bg` hint token.
 fn text_with_fill_and_contrast_bg(id: &str, fill_token: &str, contrast_bg_token: &str) -> Node {
-    Node::Text(crate::ast::node::TextNode {
+    Node::Text(Box::new(crate::ast::node::TextNode {
         shadow: None,
         id: id.to_owned(),
         name: None,
@@ -2859,6 +2894,7 @@ fn text_with_fill_and_contrast_bg(id: &str, fill_token: &str, contrast_bg_token:
         contrast_bg: Some(PropertyValue::TokenRef(contrast_bg_token.to_owned())),
         font_family: None,
         font_size: None,
+        font_size_min: None,
         font_weight: None,
         opacity: None,
         visible: None,
@@ -2870,10 +2906,12 @@ fn text_with_fill_and_contrast_bg(id: &str, fill_token: &str, contrast_bg_token:
         widow_orphan: None,
         tab_leader: None,
         text_exclusion: None,
+        padding_left: None,
+        text_indent: None,
         spans: vec![],
         source_span: None,
         unknown_props: BTreeMap::new(),
-    })
+    }))
 }
 
 /// A `contrast-bg` hint takes TOP priority over the page background: a dark fill
@@ -4068,7 +4106,7 @@ fn unknown_field_type_is_warning() {
 
 #[test]
 fn known_field_types_have_no_unknown_type_warning() {
-    for ty in ["running-head", "page-number", "page-ref"] {
+    for ty in ["running-head", "page-number", "page-ref", "page-count"] {
         let mut f = field_node("f", ty);
         if ty == "page-ref" {
             // give it a resolvable target so we isolate the type check
