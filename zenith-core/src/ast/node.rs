@@ -217,8 +217,23 @@ pub struct TextNode {
     pub align: Option<String>,
     pub direction: Option<String>,
     pub overflow: Option<String>,
+    /// Overflow-wrap mode. `Some("break-word")` lets the line packer break an
+    /// unbreakable token (a long URL/compound with no space or hyphen point) that
+    /// is wider than the line box at a CHARACTER boundary, so it no longer
+    /// overflows; a forced break emits an advisory `text.forced_break`. `None` or
+    /// `"normal"` keeps the default (the overlong token overflows/clips,
+    /// byte-identical to a node without the attribute). KDL:
+    /// `overflow-wrap="break-word"`.
+    pub overflow_wrap: Option<String>,
     pub style: Option<String>,
     pub fill: Option<PropertyValue>,
+    /// WCAG contrast hint: an explicit background color (token ref) the text
+    /// visually sits ON, for nodes placed over an `image` or other non-fillable
+    /// backdrop the validator cannot sample. When set, the contrast check uses
+    /// THIS color as the background (highest priority, over any detected backdrop
+    /// and the page background). Token-only, like `fill`. `None` → unchanged
+    /// backdrop detection. KDL: `contrast-bg=(token)"color.photo.shadow"`.
+    pub contrast_bg: Option<PropertyValue>,
     pub font_family: Option<PropertyValue>,
     pub font_size: Option<PropertyValue>,
     /// Numeric font weight (100–900), usually a `fontWeight` token ref.
@@ -277,6 +292,17 @@ pub struct TextNode {
     /// string disables tab-leader mode (byte-identical to a node without the
     /// attribute). KDL: `tab-leader="."`.
     pub tab_leader: Option<String>,
+    /// Text-runaround exclusion: the id of ANOTHER node on the same page whose
+    /// bounding box becomes an exclusion zone this text wraps around. For each
+    /// wrapped line whose vertical band intersects the excluded rect, the line
+    /// flows into the LARGER free horizontal segment (left or right of the rect);
+    /// a line with no segment wide enough is left blank so text flows above and
+    /// below a full-width exclusion ("largest-area / jump" wrap). An id naming no
+    /// resolvable node yields an advisory `text-exclusion.unresolved_ref` and the
+    /// text renders with no exclusion (byte-identical to a node without the
+    /// attribute). Honored on the single-box wrap path; chain-member runaround is a
+    /// documented v0 follow-up. KDL: `text-exclusion="author.portrait"`.
+    pub text_exclusion: Option<String>,
     /// Inline text spans.
     pub spans: Vec<TextSpan>,
     /// Source declaration span, when available.
@@ -369,11 +395,21 @@ pub struct FrameNode {
     pub w: Option<Dimension>,
     /// Required: clip-rectangle height.
     pub h: Option<Dimension>,
-    /// Layout algorithm hint ("absolute"/"flow"). `"flow"` activates a
+    /// Layout algorithm hint ("absolute"/"flow"/"grid"). `"flow"` activates a
     /// vertical-stack flow layout (uniform `padding` inset + `gap` between
-    /// children, resolved from the frame's style); any other value (including
-    /// `None` and `"absolute"`) keeps the clip-only absolute-positioning model.
+    /// children, resolved from the frame's style); `"grid"` tiles children
+    /// row-major into a `columns × rows` grid inside the padded content box with
+    /// uniform `gap` gutters; any other value (including `None` and `"absolute"`)
+    /// keeps the clip-only absolute-positioning model.
     pub layout: Option<String>,
+    /// Grid column count for `layout="grid"` (ignored otherwise). When the frame
+    /// uses grid layout, children tile row-major into `columns` columns; absent →
+    /// treated as 1 column. KDL: `columns=2`.
+    pub columns: Option<u32>,
+    /// Grid row count for `layout="grid"` (ignored otherwise). Absent → derived as
+    /// `ceil(child_count / columns)` so the grid grows to fit its children. KDL:
+    /// `rows=3`.
+    pub rows: Option<u32>,
     /// Opacity that cascades (multiplies) into all descendant node alphas.
     pub opacity: Option<f64>,
     /// When `Some(false)` the entire subtree (including the clip) is excluded

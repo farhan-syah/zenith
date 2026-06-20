@@ -838,6 +838,7 @@ pub(super) fn apply_add_page(
         margin_outer: None,
         margin_top: None,
         margin_bottom: None,
+        baseline_grid: None,
         parity: None,
         master: None,
         safe_zones: Vec::new(),

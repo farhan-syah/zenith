@@ -55,6 +55,15 @@ pub struct Page {
     /// Book live-area bottom margin. `None` → no bottom margin. Metadata +
     /// validation only (see [`Page::margin_inner`]).
     pub margin_bottom: Option<Dimension>,
+    /// Optional baseline-grid pitch in pixels. When this resolves to a positive
+    /// pixel value `g`, every text node on this page snaps its line baselines onto
+    /// the grid `{ 0, g, 2g, ... }` measured from the page top (y=0): the first
+    /// line's baseline moves DOWN to the next grid line at or below its natural
+    /// position, and the effective inter-line advance becomes the smallest multiple
+    /// of `g` that is ≥ the resolved line-height, so corresponding lines align
+    /// horizontally across columns. `None` or a non-positive value renders
+    /// byte-identically to a page with no grid. KDL: `baseline-grid=(px)14`.
+    pub baseline_grid: Option<Dimension>,
     /// Author-declared safe/dead zones for this page. These are not rendering
     /// nodes; the validator checks page children against them.
     pub safe_zones: Vec<SafeZone>,
@@ -330,6 +339,7 @@ mod parity_tests {
             margin_outer: None,
             margin_top: None,
             margin_bottom: None,
+            baseline_grid: None,
             parity: parity.map(str::to_owned),
             master: None,
             safe_zones: Vec::new(),

@@ -123,8 +123,10 @@ fn minimal_text(id: &str, fill: Option<PropertyValue>) -> Node {
         align: None,
         direction: None,
         overflow: None,
+        overflow_wrap: None,
         style: None,
         fill,
+        contrast_bg: None,
         font_family: None,
         font_size: None,
         font_weight: None,
@@ -137,6 +139,7 @@ fn minimal_text(id: &str, fill: Option<PropertyValue>) -> Node {
         hyphenate: None,
         widow_orphan: None,
         tab_leader: None,
+        text_exclusion: None,
         spans: vec![],
         source_span: None,
         unknown_props: BTreeMap::new(),
@@ -184,6 +187,7 @@ fn minimal_page(id: &str, children: Vec<Node>) -> Page {
         margin_outer: None,
         margin_top: None,
         margin_bottom: None,
+        baseline_grid: None,
         parity: None,
         master: None,
         safe_zones: Vec::new(),
@@ -357,8 +361,10 @@ fn font_weight_with_missing_token_ref_produces_unknown_reference() {
         align: None,
         direction: None,
         overflow: None,
+        overflow_wrap: None,
         style: None,
         fill: None,
+        contrast_bg: None,
         font_family: None,
         font_size: None,
         font_weight: Some(token_ref("weight.does.not.exist")),
@@ -371,6 +377,7 @@ fn font_weight_with_missing_token_ref_produces_unknown_reference() {
         hyphenate: None,
         widow_orphan: None,
         tab_leader: None,
+        text_exclusion: None,
         spans: vec![],
         source_span: None,
         unknown_props: BTreeMap::new(),
@@ -537,6 +544,7 @@ fn page_unknown_unit_produces_invalid_geometry() {
             margin_outer: None,
             margin_top: None,
             margin_bottom: None,
+            baseline_grid: None,
             parity: None,
             master: None,
             safe_zones: Vec::new(),
@@ -784,6 +792,8 @@ fn minimal_frame(id: &str, x: f64, y: f64, w: f64, h: f64, children: Vec<Node>) 
         w: Some(px(w)),
         h: Some(px(h)),
         layout: None,
+        columns: None,
+        rows: None,
         opacity: None,
         visible: None,
         locked: None,
@@ -863,6 +873,8 @@ fn frame_missing_x_produces_node_missing_geometry() {
                 w: Some(px(100.0)),
                 h: Some(px(100.0)),
                 layout: None,
+                columns: None,
+                rows: None,
                 opacity: None,
                 visible: None,
                 locked: None,
@@ -900,6 +912,8 @@ fn frame_missing_h_produces_node_missing_geometry() {
                 w: Some(px(100.0)),
                 h: None, // missing
                 layout: None,
+                columns: None,
+                rows: None,
                 opacity: None,
                 visible: None,
                 locked: None,
@@ -1066,6 +1080,8 @@ fn flow_frame_child_without_geometry_is_skipped() {
         w: Some(px(120.0)),
         h: Some(px(100.0)),
         layout: Some("flow".to_owned()),
+        columns: None,
+        rows: None,
         opacity: None,
         visible: None,
         locked: None,
@@ -1141,6 +1157,8 @@ fn frame_unknown_property_warns() {
                 w: Some(px(100.0)),
                 h: Some(px(100.0)),
                 layout: None,
+                columns: None,
+                rows: None,
                 opacity: None,
                 visible: None,
                 locked: None,
@@ -1227,8 +1245,10 @@ fn text_font_family_with_font_family_token_is_clean() {
                 align: None,
                 direction: None,
                 overflow: None,
+                overflow_wrap: None,
                 style: None,
                 fill: None,
+                contrast_bg: None,
                 font_family: Some(token_ref("font.body")),
                 font_size: None,
                 font_weight: None,
@@ -1241,6 +1261,7 @@ fn text_font_family_with_font_family_token_is_clean() {
                 hyphenate: None,
                 widow_orphan: None,
                 tab_leader: None,
+                text_exclusion: None,
                 spans: vec![],
                 source_span: None,
                 unknown_props: BTreeMap::new(),
@@ -2418,6 +2439,7 @@ fn bounded_page(id: &str, w: f64, h: f64, children: Vec<Node>) -> Page {
         margin_outer: None,
         margin_top: None,
         margin_bottom: None,
+        baseline_grid: None,
         parity: None,
         master: None,
         safe_zones: Vec::new(),
@@ -2599,6 +2621,7 @@ fn page_with_bg(id: &str, bg_token_id: &str, children: Vec<Node>) -> Page {
         margin_outer: None,
         margin_top: None,
         margin_bottom: None,
+        baseline_grid: None,
         parity: None,
         master: None,
         safe_zones: Vec::new(),
@@ -2627,8 +2650,10 @@ fn text_with_fill_and_size(
         align: None,
         direction: None,
         overflow: None,
+        overflow_wrap: None,
         style: None,
         fill: fill_token.map(|t| PropertyValue::TokenRef(t.to_owned())),
+        contrast_bg: None,
         font_family: None,
         font_size: font_size_token.map(|t| PropertyValue::TokenRef(t.to_owned())),
         font_weight: font_weight_token.map(|t| PropertyValue::TokenRef(t.to_owned())),
@@ -2641,6 +2666,7 @@ fn text_with_fill_and_size(
         hyphenate: None,
         widow_orphan: None,
         tab_leader: None,
+        text_exclusion: None,
         spans: vec![],
         source_span: None,
         unknown_props: BTreeMap::new(),
@@ -2813,6 +2839,132 @@ fn no_page_background_skips_contrast_check() {
     );
 }
 
+/// Build a text node with an explicit fill token AND a `contrast-bg` hint token.
+fn text_with_fill_and_contrast_bg(id: &str, fill_token: &str, contrast_bg_token: &str) -> Node {
+    Node::Text(crate::ast::node::TextNode {
+        shadow: None,
+        id: id.to_owned(),
+        name: None,
+        role: None,
+        x: Some(px(0.0)),
+        y: Some(px(0.0)),
+        w: Some(px(200.0)),
+        h: Some(px(40.0)),
+        align: None,
+        direction: None,
+        overflow: None,
+        overflow_wrap: None,
+        style: None,
+        fill: Some(PropertyValue::TokenRef(fill_token.to_owned())),
+        contrast_bg: Some(PropertyValue::TokenRef(contrast_bg_token.to_owned())),
+        font_family: None,
+        font_size: None,
+        font_weight: None,
+        opacity: None,
+        visible: None,
+        locked: None,
+        rotate: None,
+        chain: None,
+        drop_cap_lines: None,
+        hyphenate: None,
+        widow_orphan: None,
+        tab_leader: None,
+        text_exclusion: None,
+        spans: vec![],
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    })
+}
+
+/// A `contrast-bg` hint takes TOP priority over the page background: a dark fill
+/// with a dark `contrast-bg` on a WHITE page must still warn `contrast.low`
+/// (judged against the hint, not the page bg), and the message names the hint.
+#[test]
+fn contrast_bg_hint_used_as_background() {
+    // Dark hint + dark fill → low contrast despite the white page bg.
+    let dark = doc_with(
+        vec![
+            color_token_hex("color.bg", "#ffffff"),
+            color_token_hex("color.text", "#222222"),
+            color_token_hex("color.photo.shadow", "#101010"),
+        ],
+        vec![page_with_bg(
+            "page.one",
+            "color.bg",
+            vec![text_with_fill_and_contrast_bg(
+                "coverline",
+                "color.text",
+                "color.photo.shadow",
+            )],
+        )],
+    );
+    let report = validate(&dark);
+    assert!(
+        has_code(&report, "contrast.low"),
+        "dark fill on a dark contrast-bg hint must warn contrast.low; codes: {:?}",
+        codes(&report)
+    );
+    let diag = report
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "contrast.low")
+        .expect("must exist");
+    assert!(
+        diag.message.contains("contrast-bg hint"),
+        "message must name the contrast-bg hint as the bg source; got: {}",
+        diag.message
+    );
+
+    // Light hint + dark fill → high contrast → NO warning (hint overrides bg).
+    let light = doc_with(
+        vec![
+            color_token_hex("color.bg", "#000000"),
+            color_token_hex("color.text", "#111111"),
+            color_token_hex("color.photo.light", "#fafafa"),
+        ],
+        vec![page_with_bg(
+            "page.one",
+            "color.bg",
+            vec![text_with_fill_and_contrast_bg(
+                "coverline",
+                "color.text",
+                "color.photo.light",
+            )],
+        )],
+    );
+    let report = validate(&light);
+    assert!(
+        !has_code(&report, "contrast.low"),
+        "dark fill on a light contrast-bg hint must NOT warn contrast.low; codes: {:?}",
+        codes(&report)
+    );
+}
+
+/// A raw literal `contrast-bg` value is rejected as `token.raw_visual_literal`,
+/// consistent with `fill`/`stroke`.
+#[test]
+fn contrast_bg_literal_rejected() {
+    let mut text = match text_with_fill_and_contrast_bg("t", "color.text", "color.bg") {
+        Node::Text(t) => t,
+        _ => unreachable!(),
+    };
+    // Overwrite the hint with a RAW literal.
+    text.contrast_bg = Some(PropertyValue::Literal("#000000".to_owned()));
+    let doc = doc_with(
+        vec![
+            color_token_hex("color.bg", "#ffffff"),
+            color_token_hex("color.text", "#000000"),
+        ],
+        vec![page_with_bg("page.one", "color.bg", vec![Node::Text(text)])],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "token.raw_visual_literal"),
+        "a raw-literal contrast-bg must flag token.raw_visual_literal; codes: {:?}",
+        codes(&report)
+    );
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // safe-zone advisory tests
 // ══════════════════════════════════════════════════════════════════════
@@ -2836,6 +2988,7 @@ fn page_with_zones(
         margin_outer: None,
         margin_top: None,
         margin_bottom: None,
+        baseline_grid: None,
         parity: None,
         master: None,
         safe_zones,
@@ -3079,6 +3232,7 @@ fn page_with_folds(id: &str, w: f64, h: f64, folds: Vec<Fold>, children: Vec<Nod
         margin_outer: None,
         margin_top: None,
         margin_bottom: None,
+        baseline_grid: None,
         parity: None,
         master: None,
         safe_zones: Vec::new(),

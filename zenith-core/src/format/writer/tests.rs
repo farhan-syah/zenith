@@ -69,6 +69,46 @@ fn test_round_trip_ast_equality() {
     );
 }
 
+/// **`baseline-grid` round-trip**: a page's `baseline-grid=(px)14` must survive
+/// parse → format → parse, mirroring the `bleed` dimension round-trip.
+#[test]
+fn test_baseline_grid_round_trips() {
+    let src = r##"zenith version=1 {
+  project id="proj.bg" name="BG"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.bg" title="BG" {
+    page id="page.one" w=(px)640 h=(px)360 baseline-grid=(px)14 {
+      rect id="r" x=(px)0 y=(px)0 w=(px)10 h=(px)10 fill=(token)"c"
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+    let page = &doc.body.pages[0];
+    assert!(
+        page.baseline_grid.is_some(),
+        "baseline-grid must parse onto the page"
+    );
+
+    let formatted = format_document(&doc).expect("format");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("utf8");
+    assert!(
+        formatted_str.contains("baseline-grid=(px)14"),
+        "formatted output must contain baseline-grid; got:\n{formatted_str}"
+    );
+
+    let reparsed = adapter.parse(&formatted).expect("re-parse");
+    assert_eq!(
+        strip_spans(doc).body.pages[0].baseline_grid,
+        strip_spans(reparsed).body.pages[0].baseline_grid,
+        "baseline-grid must round-trip identically"
+    );
+}
+
 /// A `.zen` document with a `code` node whose content stresses every escape
 /// path: leading spaces, a blank line, a tab, an embedded quote, and a
 /// literal backslash.
@@ -572,6 +612,54 @@ fn test_text_chain_round_trip() {
     }
 }
 
+/// **text-exclusion round-trip**: a text node carrying
+/// `text-exclusion="portrait"` must survive parse→format→parse, with the attr
+/// emitted on the text line and re-parsed back into the `text_exclusion` field.
+#[test]
+fn test_text_exclusion_round_trip() {
+    use crate::ast::Node;
+    let src = r##"zenith version=1 {
+  project id="proj.ex" name="EX"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.ex" title="EX" {
+    page id="p" w=(px)200 h=(px)200 {
+      rect id="portrait" x=(px)0 y=(px)0 w=(px)80 h=(px)80
+      text id="t1" x=(px)0 y=(px)0 w=(px)180 h=(px)180 text-exclusion="portrait" {
+        span "Hello world"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+    let out = format_document(&doc).expect("format");
+    let text = String::from_utf8(out).unwrap();
+
+    assert!(
+        text.contains(" text-exclusion=\"portrait\""),
+        "text-exclusion attr must be emitted; got:\n{text}"
+    );
+
+    let doc2 = adapter.parse(text.as_bytes()).expect("re-parse");
+    let page = &doc2.body.pages[0];
+    let mut saw_text = false;
+    for child in &page.children {
+        if let Node::Text(t) = child {
+            assert_eq!(
+                t.text_exclusion.as_deref(),
+                Some("portrait"),
+                "text-exclusion must survive the format round-trip"
+            );
+            saw_text = true;
+        }
+    }
+    assert!(saw_text, "expected a Text node in the re-parsed page");
+}
+
 /// **drop-cap-lines round-trip**: a text node carrying `drop-cap-lines=3` must
 /// survive parse→format→parse, with the attr emitted on the text line and
 /// re-parsed back into the `drop_cap_lines` field.
@@ -706,6 +794,97 @@ fn test_text_tab_leader_round_trip() {
             t.tab_leader.as_deref(),
             Some("."),
             "tab-leader must survive the format round-trip"
+        ),
+        other => panic!("expected Text, got {other:?}"),
+    }
+}
+
+/// **frame grid columns/rows round-trip**: a frame carrying `layout="grid"
+/// columns=2 rows=3` must survive parse→format→parse, with the attrs emitted
+/// near `layout` and re-parsed into the `columns`/`rows` fields.
+#[test]
+fn test_frame_grid_columns_rows_round_trip() {
+    use crate::ast::Node;
+    let src = r##"zenith version=1 {
+  project id="proj.gr" name="GR"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.gr" title="GR" {
+    page id="p" w=(px)400 h=(px)400 {
+      frame id="f1" x=(px)0 y=(px)0 w=(px)300 h=(px)300 layout="grid" columns=2 rows=3 {
+        rect id="r0"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+    let out = format_document(&doc).expect("format");
+    let text = String::from_utf8(out).unwrap();
+
+    assert!(
+        text.contains(" columns=2"),
+        "columns attr must be emitted; got:\n{text}"
+    );
+    assert!(
+        text.contains(" rows=3"),
+        "rows attr must be emitted; got:\n{text}"
+    );
+
+    let doc2 = adapter.parse(text.as_bytes()).expect("re-parse");
+    let page = &doc2.body.pages[0];
+    match &page.children[0] {
+        Node::Frame(f) => {
+            assert_eq!(f.columns, Some(2), "columns must survive the round-trip");
+            assert_eq!(f.rows, Some(3), "rows must survive the round-trip");
+        }
+        other => panic!("expected Frame, got {other:?}"),
+    }
+}
+
+/// **text contrast-bg round-trip**: a text node carrying
+/// `contrast-bg=(token)"color.photo.shadow"` must survive parse→format→parse,
+/// with the attr emitted near `fill` and re-parsed into the `contrast_bg` field.
+#[test]
+fn test_text_contrast_bg_round_trip() {
+    use crate::ast::Node;
+    use crate::ast::value::PropertyValue;
+    let src = r##"zenith version=1 {
+  project id="proj.cb" name="CB"
+  tokens format="zenith-token-v1" {
+    token id="color.photo.shadow" type="color" value="#101010"
+  }
+  styles {
+  }
+  document id="doc.cb" title="CB" {
+    page id="p" w=(px)100 h=(px)100 {
+      text id="t1" x=(px)0 y=(px)0 w=(px)80 h=(px)40 contrast-bg=(token)"color.photo.shadow" {
+        span "Cover line"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+    let out = format_document(&doc).expect("format");
+    let text = String::from_utf8(out).unwrap();
+
+    assert!(
+        text.contains(" contrast-bg=(token)\"color.photo.shadow\""),
+        "contrast-bg attr must be emitted; got:\n{text}"
+    );
+
+    let doc2 = adapter.parse(text.as_bytes()).expect("re-parse");
+    let page = &doc2.body.pages[0];
+    match &page.children[0] {
+        Node::Text(t) => assert_eq!(
+            t.contrast_bg,
+            Some(PropertyValue::TokenRef("color.photo.shadow".to_owned())),
+            "contrast-bg must survive the format round-trip"
         ),
         other => panic!("expected Text, got {other:?}"),
     }
@@ -2278,5 +2457,42 @@ fn test_document_default_margins_round_trip() {
         strip_spans(doc),
         strip_spans(reparsed),
         "document default margins must survive round-trip"
+    );
+}
+
+/// **`overflow-wrap` round-trip**: a text node's `overflow-wrap="break-word"`
+/// must be emitted by the writer and survive parse → format → parse.
+#[test]
+fn test_overflow_wrap_round_trips() {
+    let src = r##"zenith version=1 {
+  project id="proj.ow" name="OW"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.ow" title="OW" {
+    page id="page.one" w=(px)640 h=(px)360 {
+      text id="col3" x=(px)10 y=(px)10 w=(px)120 h=(px)200 overflow-wrap="break-word" {
+        span "https://very-long.example.com/x"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+
+    let formatted = format_document(&doc).expect("format");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("utf8");
+    assert!(
+        formatted_str.contains(r#"overflow-wrap="break-word""#),
+        "formatted output must contain overflow-wrap; got:\n{formatted_str}"
+    );
+
+    let reparsed = adapter.parse(&formatted).expect("re-parse");
+    assert_eq!(
+        strip_spans(doc),
+        strip_spans(reparsed),
+        "overflow-wrap must round-trip identically"
     );
 }

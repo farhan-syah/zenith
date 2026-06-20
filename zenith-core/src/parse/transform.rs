@@ -950,6 +950,13 @@ fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
     let margin_bottom = optional_dimension_prop(node, "margin-bottom")
         .or_else(|| optional_dimension_prop(node, "margin_bottom"));
 
+    // Optional page baseline-grid pitch (e.g. `baseline-grid=(px)14`). Read like
+    // any other dimension prop; resolvability (px/pt) and sign are checked at
+    // compile time (the snap ignores a non-positive/unresolvable value), never
+    // the parser, so an odd value is preserved verbatim.
+    let baseline_grid = optional_dimension_prop(node, "baseline-grid")
+        .or_else(|| optional_dimension_prop(node, "baseline_grid"));
+
     // Optional explicit per-page parity override (`parity="verso"`). Value
     // validity ("recto"|"verso") is checked by the validator, not the parser, so
     // an unrecognized value is preserved verbatim for a precise warning.
@@ -989,6 +996,7 @@ fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
         margin_outer,
         margin_top,
         margin_bottom,
+        baseline_grid,
         parity,
         master,
         safe_zones,
@@ -1362,8 +1370,12 @@ const TEXT_KNOWN_PROPS: &[&str] = &[
     "align",
     "direction",
     "overflow",
+    "overflow-wrap",
+    "overflow_wrap",
     "style",
     "fill",
+    "contrast-bg",
+    "contrast_bg",
     "font-family",
     "font_family",
     "font-size",
@@ -1383,6 +1395,8 @@ const TEXT_KNOWN_PROPS: &[&str] = &[
     "widow_orphan",
     "tab-leader",
     "tab_leader",
+    "text-exclusion",
+    "text_exclusion",
 ];
 
 fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
@@ -1398,6 +1412,9 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         optional_u32_prop(node, "widow-orphan").or_else(|| optional_u32_prop(node, "widow_orphan"));
     let tab_leader = optional_string_prop(node, "tab-leader")
         .or_else(|| optional_string_prop(node, "tab_leader"))
+        .map(str::to_owned);
+    let text_exclusion = optional_string_prop(node, "text-exclusion")
+        .or_else(|| optional_string_prop(node, "text_exclusion"))
         .map(str::to_owned);
 
     let mut spans: Vec<TextSpan> = Vec::new();
@@ -1422,8 +1439,12 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         align: optional_string_prop(node, "align").map(str::to_owned),
         direction: optional_string_prop(node, "direction").map(str::to_owned),
         overflow: optional_string_prop(node, "overflow").map(str::to_owned),
+        overflow_wrap: optional_string_prop(node, "overflow-wrap")
+            .or_else(|| optional_string_prop(node, "overflow_wrap"))
+            .map(str::to_owned),
         style: optional_string_prop(node, "style").map(str::to_owned),
         fill: optional_property_value(node, "fill"),
+        contrast_bg: optional_property_value_aliased(node, "contrast-bg", "contrast_bg"),
         font_family,
         font_size,
         font_weight,
@@ -1437,6 +1458,7 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         hyphenate,
         widow_orphan,
         tab_leader,
+        text_exclusion,
         spans,
         source_span: node_span(node),
         unknown_props,
@@ -1535,8 +1557,8 @@ fn transform_code(node: &KdlNode) -> Result<CodeNode, ParseError> {
 }
 
 const FRAME_KNOWN_PROPS: &[&str] = &[
-    "id", "name", "role", "x", "y", "w", "h", "layout", "opacity", "visible", "locked", "rotate",
-    "style",
+    "id", "name", "role", "x", "y", "w", "h", "layout", "columns", "rows", "opacity", "visible",
+    "locked", "rotate", "style",
 ];
 
 fn transform_frame(node: &KdlNode) -> Result<FrameNode, ParseError> {
@@ -1552,6 +1574,8 @@ fn transform_frame(node: &KdlNode) -> Result<FrameNode, ParseError> {
         w: optional_dimension_prop(node, "w"),
         h: optional_dimension_prop(node, "h"),
         layout: optional_string_prop(node, "layout").map(str::to_owned),
+        columns: optional_u32_prop(node, "columns"),
+        rows: optional_u32_prop(node, "rows"),
         opacity: optional_f64_prop(node, "opacity"),
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),

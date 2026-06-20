@@ -54,6 +54,7 @@ fn write_page(page: &Page, out: &mut String, depth: usize) {
     out.push_str(&fmt_dimension(&page.height));
     write_opt_property_value(out, "background", &page.background);
     write_opt_dimension(out, "bleed", &page.bleed);
+    write_opt_dimension(out, "baseline-grid", &page.baseline_grid);
     write_opt_dimension(out, "margin-inner", &page.margin_inner);
     write_opt_dimension(out, "margin-outer", &page.margin_outer);
     write_opt_dimension(out, "margin-top", &page.margin_top);
@@ -423,8 +424,8 @@ fn write_frame(f: &FrameNode, out: &mut String, depth: usize) {
     indent(out, depth);
     out.push_str("frame");
 
-    // Canonical property order: id, name, role, x, y, w, h, layout, opacity,
-    // visible, locked, rotate, style, then unknown props (sorted).
+    // Canonical property order: id, name, role, x, y, w, h, layout, columns,
+    // rows, opacity, visible, locked, rotate, style, then unknown props (sorted).
     out.push_str(" id=\"");
     out.push_str(&f.id);
     out.push('"');
@@ -435,6 +436,12 @@ fn write_frame(f: &FrameNode, out: &mut String, depth: usize) {
     write_opt_dimension(out, "w", &f.w);
     write_opt_dimension(out, "h", &f.h);
     write_opt_str(out, "layout", &f.layout);
+    if let Some(n) = f.columns {
+        let _ = write!(out, " columns={n}");
+    }
+    if let Some(n) = f.rows {
+        let _ = write!(out, " rows={n}");
+    }
     write_opt_f64(out, "opacity", &f.opacity);
     write_opt_bool(out, "visible", &f.visible);
     write_opt_bool(out, "locked", &f.locked);
@@ -509,7 +516,9 @@ fn write_text(t: &TextNode, out: &mut String, depth: usize) {
     write_opt_str(out, "align", &t.align);
     write_opt_str(out, "direction", &t.direction);
     write_opt_str(out, "overflow", &t.overflow);
+    write_opt_str(out, "overflow-wrap", &t.overflow_wrap);
     write_opt_property_value(out, "fill", &t.fill);
+    write_opt_property_value(out, "contrast-bg", &t.contrast_bg);
     write_opt_property_value(out, "font-family", &t.font_family);
     write_opt_property_value(out, "font-size", &t.font_size);
     write_opt_property_value(out, "font-weight", &t.font_weight);
@@ -530,6 +539,7 @@ fn write_text(t: &TextNode, out: &mut String, depth: usize) {
         let _ = write!(out, " widow-orphan={n}");
     }
     write_opt_str(out, "tab-leader", &t.tab_leader);
+    write_opt_str(out, "text-exclusion", &t.text_exclusion);
 
     // Unknown properties in sorted key order.
     for (key, prop) in &t.unknown_props {

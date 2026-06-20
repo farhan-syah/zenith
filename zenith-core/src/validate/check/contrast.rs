@@ -173,9 +173,27 @@ pub(super) fn check_text_contrast(
                 return;
             };
 
-            // Resolve the EFFECTIVE background: the filled shape the text sits
-            // ON (topmost qualifying preceding sibling), else the page bg.
-            // If neither is known we cannot compute contrast — bail.
+            // Resolve an explicit `contrast-bg` hint (TOP priority): a TokenRef →
+            // Color token whose hex parses. Used for text over an `image` or
+            // other non-fillable backdrop the validator cannot sample.
+            let hint_rgb = match t.contrast_bg.as_ref() {
+                Some(PropertyValue::TokenRef(id)) => {
+                    resolved_tokens.get(id.as_str()).and_then(|rt| {
+                        if let ResolvedValue::Color(hex) = &rt.value {
+                            parse_rgb(hex)
+                        } else {
+                            None
+                        }
+                    })
+                }
+                // Literal / Dimension hints are caught as raw_visual_literal
+                // errors elsewhere; no need to chase them here.
+                _ => None,
+            };
+
+            // Resolve the EFFECTIVE background. Precedence:
+            //   contrast-bg hint > detected backdrop > page background.
+            // If none is known we cannot compute contrast — bail.
             let backdrop = node_bbox(node, page_w, page_h).and_then(|tbbox| {
                 backdrop_rgb(
                     tbbox,
@@ -186,8 +204,14 @@ pub(super) fn check_text_contrast(
                     resolved_tokens,
                 )
             });
-            let on_backdrop = backdrop.is_some();
-            let Some(bg_rgb) = backdrop.or(page_bg_rgb) else {
+            let bg_source = if hint_rgb.is_some() {
+                "contrast-bg hint"
+            } else if backdrop.is_some() {
+                "backdrop"
+            } else {
+                "page background"
+            };
+            let Some(bg_rgb) = hint_rgb.or(backdrop).or(page_bg_rgb) else {
                 return;
             };
 
@@ -238,11 +262,6 @@ pub(super) fn check_text_contrast(
             let ratio = contrast_ratio(fg_rgb, bg_rgb);
 
             if ratio < threshold {
-                let bg_source = if on_backdrop {
-                    "backdrop"
-                } else {
-                    "page background"
-                };
                 diagnostics.push(Diagnostic::warning(
                     "contrast.low",
                     format!(

@@ -407,6 +407,15 @@ pub(super) fn walk_node(
             );
             check_visual_prop(
                 &t.id,
+                "contrast-bg",
+                t.contrast_bg.as_ref(),
+                VisualExpect::Color,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+            check_visual_prop(
+                &t.id,
                 "font-family",
                 t.font_family.as_ref(),
                 VisualExpect::FontFamily,
@@ -465,6 +474,24 @@ pub(super) fn walk_node(
                     resolved_tokens,
                     diagnostics,
                 );
+            }
+
+            // Text-runaround exclusion: an `text-exclusion` naming an id that
+            // does not exist among the document's node ids is advisory (the
+            // render proceeds with no exclusion, byte-identical to a node
+            // without the attribute). Mirrors `field.unresolved_ref`.
+            if let Some(target) = &t.text_exclusion
+                && !all_node_ids.contains(target)
+            {
+                diagnostics.push(Diagnostic::warning(
+                    "text-exclusion.unresolved_ref",
+                    format!(
+                        "text '{}': text-exclusion '{}' matches no node id in the document",
+                        t.id, target
+                    ),
+                    t.source_span,
+                    Some(t.id.clone()),
+                ));
             }
 
             // Unknown properties.
@@ -624,6 +651,21 @@ pub(super) fn walk_node(
                 diagnostics,
             );
 
+            // Grid layout advisory: `layout="grid"` without a positive `columns`
+            // defaults the scene to a single column. Non-fatal.
+            if f.layout.as_deref() == Some("grid") && f.columns.unwrap_or(0) == 0 {
+                diagnostics.push(Diagnostic::advisory(
+                    "grid.missing_columns",
+                    format!(
+                        "frame '{}' uses layout=\"grid\" without a positive `columns`; \
+                         defaulting to 1 column",
+                        f.id
+                    ),
+                    f.source_span,
+                    Some(f.id.clone()),
+                ));
+            }
+
             // Unknown properties.
             for prop_name in f.unknown_props.keys() {
                 diagnostics.push(Diagnostic::warning(
@@ -640,8 +682,9 @@ pub(super) fn walk_node(
 
             // Recurse into children, passing the SAME seen_ids so that
             // nested ids participate in the global uniqueness check. Direct
-            // children of a flow frame have flow-supplied geometry.
-            let children_in_flow = f.layout.as_deref() == Some("flow");
+            // children of a flow OR grid frame have layout-supplied geometry,
+            // so their own x/y/w/h are optional.
+            let children_in_flow = matches!(f.layout.as_deref(), Some("flow") | Some("grid"));
 
             // Compute this frame's own px box; children are checked for
             // overflow against it. If any of x/y/w/h is missing or has a bad
