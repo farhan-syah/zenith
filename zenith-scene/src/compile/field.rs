@@ -13,7 +13,9 @@
 
 use std::collections::BTreeMap;
 
-use zenith_core::{Dimension, FieldNode, Node, TextNode, TextSpan, Unit};
+use zenith_core::{FieldNode, Node, TextNode, TextSpan};
+
+use super::util::px;
 
 /// Per-page context threaded into field resolution.
 ///
@@ -222,14 +224,6 @@ pub(super) fn compute_live_area(
         page_w - inner - outer,
         page_h - top - bottom,
     ))
-}
-
-/// Build a `(px)`-unit [`Dimension`] from a raw pixel value.
-fn px(v: f64) -> Dimension {
-    Dimension {
-        value: v,
-        unit: Unit::Px,
-    }
 }
 
 #[cfg(test)]

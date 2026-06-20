@@ -903,6 +903,30 @@ pub(super) fn resolve_family_with_fallback(
     }
 }
 
+/// Resolve a font-family [`PropertyValue`] to a raw family name string.
+///
+/// Priority: `TokenRef → FontFamily` value → else `default`; `Literal` → that
+/// string; `Dimension` → `default` (not a family name); absent → `default`.
+/// This extraction step is shared by [`compile_text`] and [`super::chain`]'s
+/// style resolver so the two code paths stay byte-identical.
+pub(super) fn resolve_font_family_name(
+    prop: Option<&PropertyValue>,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    default: &str,
+) -> String {
+    match prop {
+        Some(PropertyValue::TokenRef(token_id)) => match resolved.get(token_id.as_str()) {
+            Some(rt) => match &rt.value {
+                ResolvedValue::FontFamily(name) => name.clone(),
+                _ => default.to_owned(),
+            },
+            None => default.to_owned(),
+        },
+        Some(PropertyValue::Literal(name)) => name.clone(),
+        Some(PropertyValue::Dimension(_)) | None => default.to_owned(),
+    }
+}
+
 /// Superscript/subscript font-size scale factor applied to a span's resolved
 /// size (deterministic). A `vertical-align="super"`/`"sub"` span is typeset at
 /// `0.65 ×` the full font size.
@@ -1433,19 +1457,7 @@ pub(super) fn compile_text(
         .font_family
         .as_ref()
         .or_else(|| style_prop(&text.style, style_map, "font-family"));
-    let raw_family_name: String = match font_family_prop {
-        Some(PropertyValue::TokenRef(token_id)) => match resolved.get(token_id.as_str()) {
-            Some(rt) => match &rt.value {
-                ResolvedValue::FontFamily(name) => name.clone(),
-                _ => "Noto Sans".to_owned(),
-            },
-            None => "Noto Sans".to_owned(),
-        },
-        Some(PropertyValue::Literal(name)) => name.clone(),
-        // A dimension is not a family name → fall back to the default.
-        Some(PropertyValue::Dimension(_)) => "Noto Sans".to_owned(),
-        None => "Noto Sans".to_owned(),
-    };
+    let raw_family_name = resolve_font_family_name(font_family_prop, resolved, "Noto Sans");
     // Probe the provider with the node-level defaults (weight 400, Normal
     // style) — sufficient to confirm family availability.  The advisory
     // fires at most once per text node, before any per-span shaping.

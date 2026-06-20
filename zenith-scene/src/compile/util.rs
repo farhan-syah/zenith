@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use zenith_core::{
-    Diagnostic, Dimension, PropertyValue, ResolvedToken, ResolvedValue, Span, dim_to_px,
+    Diagnostic, Dimension, PropertyValue, ResolvedToken, ResolvedValue, Span, Unit, dim_to_px,
 };
 
 // ── Rotation helper ───────────────────────────────────────────────────────────
@@ -35,6 +35,17 @@ pub(super) fn unsupported_unit_diag(
         span,
         Some(node_id.to_owned()),
     )
+}
+
+/// Build a `(px)`-unit [`Dimension`] from a raw pixel value.
+///
+/// Shared by `field` and `footnote` to synthesize geometry for their
+/// constructed [`zenith_core::TextNode`]s.
+pub(super) fn px(v: f64) -> Dimension {
+    Dimension {
+        value: v,
+        unit: Unit::Px,
+    }
 }
 
 /// Resolve an optional dimension-valued property to pixels.

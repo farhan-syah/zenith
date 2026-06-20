@@ -27,8 +27,8 @@
 use std::collections::BTreeMap;
 
 use zenith_core::{
-    Diagnostic, Dimension, FontProvider, FootnoteNode, Node, Page, ResolvedToken, Style, TextNode,
-    TextSpan, Unit, dim_to_px,
+    Diagnostic, FontProvider, FootnoteNode, Node, Page, ResolvedToken, Style, TextNode, TextSpan,
+    dim_to_px,
 };
 use zenith_layout::RustybuzzEngine;
 
@@ -40,7 +40,7 @@ use super::field::FieldCtx;
 use super::paint::resolve_property_color;
 use super::style_prop;
 use super::text::compile_text;
-use super::util::resolve_property_dimension_px;
+use super::util::{px, resolve_property_dimension_px};
 
 /// The gap (px) between stacked footnotes in the zone.
 const FOOTNOTE_GAP: f64 = 6.0;
@@ -77,14 +77,6 @@ pub(super) fn collect_footnote_markers(page: &Page) -> BTreeMap<String, String> 
         }
     }
     markers
-}
-
-/// Build a `(px)`-unit [`Dimension`] from a raw pixel value.
-fn px(v: f64) -> Dimension {
-    Dimension {
-        value: v,
-        unit: Unit::Px,
-    }
 }
 
 /// Synthesize the [`TextNode`] that renders one footnote at `(x, y)` with width

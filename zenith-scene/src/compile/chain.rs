@@ -47,8 +47,8 @@
 use std::collections::BTreeMap;
 
 use zenith_core::{
-    Diagnostic, FontProvider, FontStyle, Node, PropertyValue, ResolvedToken, ResolvedValue, Style,
-    TextNode, dim_to_px,
+    Diagnostic, FontProvider, FontStyle, Node, PropertyValue, ResolvedToken, Style, TextNode,
+    dim_to_px,
 };
 use zenith_layout::RustybuzzEngine;
 
@@ -58,8 +58,8 @@ use super::paint::resolve_property_color;
 use super::style_prop;
 use super::text::{
     HyphenationContext, Line, ResolvedSpan, WordMetrics, en_us_hyphenator, flatten_lines_to_tokens,
-    pack_lines, resolve_family_with_fallback, resolve_font_weight, resolve_vertical_align,
-    shape_words,
+    pack_lines, resolve_family_with_fallback, resolve_font_family_name, resolve_font_weight,
+    resolve_vertical_align, shape_words,
 };
 use super::util::resolve_property_dimension_px;
 
@@ -152,18 +152,7 @@ fn resolve_chain_style(
         .font_family
         .as_ref()
         .or_else(|| style_prop(&source.style, style_map, "font-family"));
-    let raw_family_name: String = match font_family_prop {
-        Some(PropertyValue::TokenRef(token_id)) => match resolved.get(token_id.as_str()) {
-            Some(rt) => match &rt.value {
-                ResolvedValue::FontFamily(name) => name.clone(),
-                _ => "Noto Sans".to_owned(),
-            },
-            None => "Noto Sans".to_owned(),
-        },
-        Some(PropertyValue::Literal(name)) => name.clone(),
-        Some(PropertyValue::Dimension(_)) => "Noto Sans".to_owned(),
-        None => "Noto Sans".to_owned(),
-    };
+    let raw_family_name = resolve_font_family_name(font_family_prop, resolved, "Noto Sans");
     let (family_name, fell_back) =
         resolve_family_with_fallback(fonts, &raw_family_name, "Noto Sans", 400, FontStyle::Normal);
     if fell_back {
