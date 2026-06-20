@@ -28,13 +28,47 @@ use crate::diagnostics::Diagnostic;
 /// The resolved, validated value of a single design token.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ResolvedValue {
+    /// An sRGB-origin color, stored as canonical `#rrggbb`/`#rrggbbaa` hex.
     Color(String),
+    /// A CMYK-origin color. `hex` is the naive device-conversion sRGB
+    /// approximation (so every existing hex consumer works unchanged); `c`,
+    /// `m`, `y`, `k` are the original percentages in `0.0..=100.0`, carried so a
+    /// future PDF backend can emit native DeviceCMYK.
+    CmykColor {
+        hex: String,
+        c: f32,
+        m: f32,
+        y: f32,
+        k: f32,
+    },
     Dimension(Dimension),
     Number(f64),
     FontFamily(String),
     FontWeight(u32),
     Gradient(ResolvedGradient),
     Shadow(ResolvedShadow),
+}
+
+impl ResolvedValue {
+    /// The sRGB hex string for any color-origin value (`Color` or `CmykColor`),
+    /// or `None` for non-color values. Lets color consumers treat both color
+    /// variants uniformly without duplicating match arms.
+    pub fn as_color_hex(&self) -> Option<&str> {
+        match self {
+            ResolvedValue::Color(hex) => Some(hex.as_str()),
+            ResolvedValue::CmykColor { hex, .. } => Some(hex.as_str()),
+            _ => None,
+        }
+    }
+
+    /// The original CMYK channels `(c, m, y, k)` for a `CmykColor`, or `None`
+    /// for sRGB-origin colors and non-color values.
+    pub fn cmyk(&self) -> Option<(f32, f32, f32, f32)> {
+        match self {
+            ResolvedValue::CmykColor { c, m, y, k, .. } => Some((*c, *m, *y, *k)),
+            _ => None,
+        }
+    }
 }
 
 /// A resolved gradient: an angle plus an ordered list of `(offset, color token
@@ -230,7 +264,7 @@ pub fn resolve_tokens(block: &TokenBlock) -> TokenResolution {
                     span,
                     Some(id.clone()),
                 )),
-                Some(rt) if !matches!(rt.value, ResolvedValue::Color(_)) => {
+                Some(rt) if rt.value.as_color_hex().is_none() => {
                     diagnostics.push(Diagnostic::error(
                         "gradient.stop_wrong_type",
                         format!(
@@ -282,7 +316,7 @@ pub fn resolve_tokens(block: &TokenBlock) -> TokenResolution {
                     span,
                     Some(id.clone()),
                 )),
-                Some(rt) if !matches!(rt.value, ResolvedValue::Color(_)) => {
+                Some(rt) if rt.value.as_color_hex().is_none() => {
                     diagnostics.push(Diagnostic::error(
                         "shadow.layer_wrong_type",
                         format!(
@@ -423,13 +457,36 @@ fn validate_color(
         TokenLiteral::String(s) => {
             if is_valid_hex_color(s) {
                 Some(ResolvedValue::Color(s.clone()))
+            } else if s.starts_with("cmyk(") {
+                match crate::color::parse_cmyk(s) {
+                    Some(cmyk) => Some(ResolvedValue::CmykColor {
+                        hex: crate::color::cmyk_to_hex(cmyk),
+                        c: cmyk.c,
+                        m: cmyk.m,
+                        y: cmyk.y,
+                        k: cmyk.k,
+                    }),
+                    None => {
+                        diagnostics.push(invalid_value(
+                            token_id,
+                            &format!(
+                                "color token '{}' has value '{}' which is not a valid \
+                                 CMYK color; expected 'cmyk(c,m,y,k)' with each channel \
+                                 a percentage in 0..=100",
+                                token_id, s
+                            ),
+                            span,
+                        ));
+                        None
+                    }
+                }
             } else {
                 diagnostics.push(invalid_value(
                     token_id,
                     &format!(
                         "color token '{}' has value '{}' which is not a valid \
-                         sRGB hex color; expected '#rrggbb' or '#rrggbbaa' \
-                         (lowercase hex digits)",
+                         color; expected sRGB hex '#rrggbb'/'#rrggbbaa' \
+                         (lowercase hex digits) or 'cmyk(c,m,y,k)'",
                         token_id, s
                     ),
                     span,
@@ -1102,6 +1159,104 @@ mod tests {
             codes(&r.diagnostics)
         );
         assert!(!r.resolved.contains_key("color.bad"));
+    }
+
+    #[test]
+    fn resolves_cmyk_color_to_hex_and_carries_channels() {
+        let b = block(vec![literal_token(
+            "color.accent.violet",
+            TokenType::Color,
+            TokenLiteral::String("cmyk(59,85,0,7)".to_owned()),
+        )]);
+        let r = resolve_tokens(&b);
+        assert!(
+            r.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            r.diagnostics
+        );
+        match &r.resolved["color.accent.violet"].value {
+            ResolvedValue::CmykColor { hex, c, m, y, k } => {
+                assert_eq!(hex, "#6124ed");
+                assert_eq!((*c, *m, *y, *k), (59.0, 85.0, 0.0, 7.0));
+            }
+            other => panic!("expected CmykColor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cmyk_zero_resolves_to_white_hex() {
+        let b = block(vec![literal_token(
+            "color.white",
+            TokenType::Color,
+            TokenLiteral::String("cmyk(0,0,0,0)".to_owned()),
+        )]);
+        let r = resolve_tokens(&b);
+        assert!(r.diagnostics.is_empty());
+        assert_eq!(
+            r.resolved["color.white"].value.as_color_hex(),
+            Some("#ffffff")
+        );
+    }
+
+    #[test]
+    fn malformed_cmyk_produces_invalid_value() {
+        let b = block(vec![literal_token(
+            "color.bad-cmyk",
+            TokenType::Color,
+            TokenLiteral::String("cmyk(59,85,0,200)".to_owned()),
+        )]);
+        let r = resolve_tokens(&b);
+        assert!(
+            has_code(&r.diagnostics, "token.invalid_value"),
+            "codes: {:?}",
+            codes(&r.diagnostics)
+        );
+        assert!(!r.resolved.contains_key("color.bad-cmyk"));
+    }
+
+    #[test]
+    fn hex_color_still_resolves_to_color_variant_unchanged() {
+        // Regression guard: an sRGB hex token must remain a plain `Color`,
+        // carrying no CMYK, byte-for-byte as before.
+        let b = block(vec![literal_token(
+            "color.hex",
+            TokenType::Color,
+            TokenLiteral::String("#112233".to_owned()),
+        )]);
+        let r = resolve_tokens(&b);
+        assert!(r.diagnostics.is_empty());
+        assert_eq!(
+            r.resolved["color.hex"].value,
+            ResolvedValue::Color("#112233".to_owned())
+        );
+        assert_eq!(r.resolved["color.hex"].value.cmyk(), None);
+    }
+
+    #[test]
+    fn cmyk_color_works_as_gradient_stop() {
+        let b = block(vec![
+            literal_token(
+                "color.top",
+                TokenType::Color,
+                TokenLiteral::String("cmyk(59,85,0,7)".to_owned()),
+            ),
+            literal_token(
+                "color.bottom",
+                TokenType::Color,
+                TokenLiteral::String("#334455".to_owned()),
+            ),
+            gradient_token(
+                "gradient.bg",
+                90.0,
+                vec![(0.0, "color.top"), (1.0, "color.bottom")],
+            ),
+        ]);
+        let r = resolve_tokens(&b);
+        assert!(
+            r.diagnostics.is_empty(),
+            "a CMYK color must be a valid gradient stop; got: {:?}",
+            r.diagnostics
+        );
     }
 
     #[test]

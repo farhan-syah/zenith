@@ -326,6 +326,10 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
         })?;
 
     let version = required_u32_prop(zenith_node, "version")?;
+    // Optional export color space attribute on the root `zenith` node. Value
+    // validity ("srgb"|"cmyk") is checked by the validator, not the parser, so
+    // an unrecognized value is preserved verbatim for a precise warning.
+    let colorspace = optional_string_prop(zenith_node, "colorspace").map(str::to_owned);
 
     let children_doc = zenith_node.children().ok_or_else(|| {
         ParseError::spanless(
@@ -376,6 +380,7 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
 
     Ok(Document {
         version,
+        colorspace,
         project,
         assets,
         tokens,

@@ -233,6 +233,9 @@ fn write_document(doc: &Document, out: &mut String) {
     // Writing to a String via fmt::Write is infallible; the Err variant is
     // unreachable but we must handle it — discard rather than unwrap.
     let _ = write!(out, "{}", doc.version);
+    // Optional export color space attribute, emitted right after version so the
+    // canonical form round-trips (parse → format → parse is byte-stable).
+    write_opt_str(out, "colorspace", &doc.colorspace);
     out.push_str(" {\n");
 
     // Child order: project, assets, tokens, styles, document.

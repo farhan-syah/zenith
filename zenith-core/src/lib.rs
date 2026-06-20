@@ -26,7 +26,9 @@ pub use ast::{
     StyleBlock, TextNode, TextSpan, Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit,
     UnknownNode, UnknownProperty, UnknownStyleProp, UnknownValue, dim_to_px,
 };
-pub use color::{contrast_ratio, parse_rgb, relative_luminance};
+pub use color::{
+    Cmyk, cmyk_to_hex, cmyk_to_srgb, contrast_ratio, parse_cmyk, parse_rgb, relative_luminance,
+};
 pub use diagnostics::{Diagnostic, Severity};
 pub use error::{FormatError, ParseError, ParseErrorCode};
 pub use font::{BytesFontProvider, FontData, FontProvider, FontStyle, default_provider};

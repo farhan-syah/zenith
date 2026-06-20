@@ -184,6 +184,7 @@ fn minimal_page(id: &str, children: Vec<Node>) -> Page {
 fn doc_with(tokens: Vec<Token>, pages: Vec<Page>) -> Document {
     Document {
         version: 1,
+        colorspace: None,
         project: None,
         assets: AssetBlock::default(),
         tokens: TokenBlock {
@@ -1452,6 +1453,7 @@ fn line_stroke_raw_literal_produces_raw_visual_literal() {
 fn doc_with_assets(assets: Vec<AssetDecl>) -> Document {
     Document {
         version: 1,
+        colorspace: None,
         project: None,
         assets: AssetBlock {
             assets,
@@ -2087,6 +2089,7 @@ use crate::ast::style::{Style, UnknownStyleProp};
 fn doc_with_styles(tokens: Vec<Token>, styles: Vec<Style>, pages: Vec<Page>) -> Document {
     Document {
         version: 1,
+        colorspace: None,
         project: None,
         assets: AssetBlock::default(),
         tokens: TokenBlock {

@@ -24,12 +24,7 @@ fn no_assets() -> BytesAssetProvider {
 }
 
 fn red() -> Color {
-    Color {
-        r: 255,
-        g: 0,
-        b: 0,
-        a: 255,
-    }
+    Color::srgb(255, 0, 0, 255)
 }
 
 fn make_solid_red_scene(page: f64) -> Scene {
@@ -220,12 +215,7 @@ fn glyph_run_draws_pixels() {
     let baseline_y = 34.0_f64;
     let origin_x = 4.0_f64;
 
-    let ink_color = Color {
-        r: 0,
-        g: 0,
-        b: 200,
-        a: 255,
-    };
+    let ink_color = Color::srgb(0, 0, 200, 255);
 
     // Map the shaped glyphs into SceneGlyph instances.
     let glyphs: Vec<SceneGlyph> = run
@@ -301,12 +291,7 @@ fn glyph_run_deterministic_png() {
         y: 30.0,
         font_id: run.font_id.clone(),
         font_size,
-        color: Color {
-            r: 10,
-            g: 10,
-            b: 10,
-            a: 255,
-        },
+        color: Color::srgb(10, 10, 10, 255),
         glyphs,
     });
 
@@ -330,12 +315,7 @@ fn glyph_run_missing_font_id_succeeds_silently() {
         y: 20.0,
         font_id: "nonexistent-font-000-normal".to_string(),
         font_size: 16.0,
-        color: Color {
-            r: 255,
-            g: 0,
-            b: 0,
-            a: 255,
-        },
+        color: Color::srgb(255, 0, 0, 255),
         glyphs: vec![SceneGlyph {
             glyph_id: 36,
             dx: 0.0,
@@ -512,12 +492,7 @@ fn draw_image_ellipse_clip_takes_effect() {
 #[test]
 fn fill_polygon_renders() {
     // A simple triangle on a 100×100 page.
-    let color = Color {
-        r: 0,
-        g: 200,
-        b: 0,
-        a: 255,
-    };
+    let color = Color::srgb(0, 200, 0, 255);
     let mut scene = Scene::new(100.0, 100.0);
     scene.commands.push(SceneCommand::PushClip {
         x: 0.0,
@@ -565,12 +540,7 @@ fn fill_polygon_renders() {
 
 #[test]
 fn stroke_polyline_renders() {
-    let color = Color {
-        r: 255,
-        g: 0,
-        b: 0,
-        a: 255,
-    };
+    let color = Color::srgb(255, 0, 0, 255);
     let mut scene = Scene::new(100.0, 100.0);
     scene.commands.push(SceneCommand::PushClip {
         x: 0.0,
@@ -616,12 +586,7 @@ fn stroke_polyline_renders() {
 
 #[test]
 fn stroke_ellipse_renders() {
-    let color = Color {
-        r: 255,
-        g: 0,
-        b: 0,
-        a: 255,
-    };
+    let color = Color::srgb(255, 0, 0, 255);
     let mut scene = Scene::new(100.0, 100.0);
     scene.commands.push(SceneCommand::PushClip {
         x: 0.0,
@@ -750,12 +715,7 @@ fn ellipse_partial_clip_truncates_not_reshapes() {
         y: 0.0,
         w: 20.0,
         h: 20.0,
-        color: Color {
-            r: 255,
-            g: 255,
-            b: 255,
-            a: 255,
-        },
+        color: Color::srgb(255, 255, 255, 255),
     });
     scene.commands.push(SceneCommand::PopClip);
     scene.commands.push(SceneCommand::PopClip);
@@ -813,12 +773,7 @@ fn stroke_line_clipped_to_subpage_clip() {
         y1: 0.0,
         x2: 20.0,
         y2: 20.0,
-        color: Color {
-            r: 0,
-            g: 0,
-            b: 0,
-            a: 255,
-        },
+        color: Color::srgb(0, 0, 0, 255),
         stroke_width: 4.0,
     });
     scene.commands.push(SceneCommand::PopClip);
@@ -895,12 +850,7 @@ fn glyph_run_clipped_to_subpage_clip() {
         y: 34.0,
         font_id: run.font_id.clone(),
         font_size,
-        color: Color {
-            r: 0,
-            g: 0,
-            b: 200,
-            a: 255,
-        },
+        color: Color::srgb(0, 0, 200, 255),
         glyphs,
     });
     scene.commands.push(SceneCommand::PopClip);
@@ -939,12 +889,7 @@ fn stroke_rect_draws_border_pixels() {
         y: 10.0,
         w: 20.0,
         h: 20.0,
-        color: Color {
-            r: 0,
-            g: 0,
-            b: 0,
-            a: 255,
-        },
+        color: Color::srgb(0, 0, 0, 255),
         stroke_width: 4.0,
     });
     scene.commands.push(SceneCommand::PopClip);
@@ -983,12 +928,7 @@ fn fill_rounded_rect_cuts_corner_fills_center() {
         w: 40.0,
         h: 40.0,
         radius: 20.0,
-        color: Color {
-            r: 255,
-            g: 255,
-            b: 255,
-            a: 255,
-        },
+        color: Color::srgb(255, 255, 255, 255),
     });
     scene.commands.push(SceneCommand::PopClip);
 
@@ -1026,12 +966,7 @@ fn rounded_and_stroke_rects_deterministic_png() {
         y: 5.0,
         w: 30.0,
         h: 30.0,
-        color: Color {
-            r: 200,
-            g: 0,
-            b: 0,
-            a: 255,
-        },
+        color: Color::srgb(200, 0, 0, 255),
         stroke_width: 3.0,
     });
     scene.commands.push(SceneCommand::FillRoundedRect {
@@ -1040,12 +975,7 @@ fn rounded_and_stroke_rects_deterministic_png() {
         w: 30.0,
         h: 30.0,
         radius: 10.0,
-        color: Color {
-            r: 0,
-            g: 200,
-            b: 0,
-            a: 255,
-        },
+        color: Color::srgb(0, 200, 0, 255),
     });
     scene.commands.push(SceneCommand::StrokeRoundedRect {
         x: 20.0,
@@ -1053,12 +983,7 @@ fn rounded_and_stroke_rects_deterministic_png() {
         w: 40.0,
         h: 30.0,
         radius: 8.0,
-        color: Color {
-            r: 0,
-            g: 0,
-            b: 200,
-            a: 255,
-        },
+        color: Color::srgb(0, 0, 200, 255),
         stroke_width: 3.0,
     });
     scene.commands.push(SceneCommand::PopClip);
@@ -1189,12 +1114,7 @@ fn draw_image_svg_text_renders_red_pixels() {
 /// - two renders of the rotated scene are byte-identical (deterministic).
 #[test]
 fn push_transform_rotates_fill_rect() {
-    let red_color = Color {
-        r: 255,
-        g: 0,
-        b: 0,
-        a: 255,
-    };
+    let red_color = Color::srgb(255, 0, 0, 255);
 
     // Rotated scene.
     let mut rotated = Scene::new(100.0, 100.0);
@@ -1315,21 +1235,11 @@ fn fill_rect_gradient_renders_non_uniform_and_deterministic() {
             stops: vec![
                 GradientStop {
                     offset: 0.0,
-                    color: Color {
-                        r: 0,
-                        g: 0,
-                        b: 0,
-                        a: 255,
-                    },
+                    color: Color::srgb(0, 0, 0, 255),
                 },
                 GradientStop {
                     offset: 1.0,
-                    color: Color {
-                        r: 255,
-                        g: 255,
-                        b: 255,
-                        a: 255,
-                    },
+                    color: Color::srgb(255, 255, 255, 255),
                 },
             ],
         },
@@ -1373,12 +1283,7 @@ fn shadow_blurs_and_bleeds_outward_deterministically() {
                 dx: 1.0,
                 dy: 1.0,
                 blur: 3.0,
-                color: Color {
-                    r: 0,
-                    g: 0,
-                    b: 0,
-                    a: 255,
-                },
+                color: Color::srgb(0, 0, 0, 255),
             }],
         });
         scene.commands.push(SceneCommand::FillRect {
@@ -1386,12 +1291,7 @@ fn shadow_blurs_and_bleeds_outward_deterministically() {
             y: 15.0,
             w: 10.0,
             h: 10.0,
-            color: Color {
-                r: 255,
-                g: 0,
-                b: 0,
-                a: 255,
-            },
+            color: Color::srgb(255, 0, 0, 255),
         });
         scene.commands.push(SceneCommand::EndShadow);
         scene

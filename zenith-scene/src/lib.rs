@@ -21,7 +21,7 @@
 //! let mut scene = Scene::new(640.0, 360.0);
 //! scene.commands.push(SceneCommand::FillRect {
 //!     x: 0.0, y: 0.0, w: 640.0, h: 360.0,
-//!     color: Color { r: 248, g: 250, b: 252, a: 255 },
+//!     color: Color::srgb(248, 250, 252, 255),
 //! });
 //! let json = scene.to_json().expect("serializes");
 //! assert!(json.contains("zenith-scene-v1"));

@@ -83,6 +83,27 @@ pub fn validate(doc: &Document) -> ValidationReport {
 
     let mut diagnostics: Vec<Diagnostic> = token_resolution.diagnostics;
 
+    // ── Document color space ──────────────────────────────────────────────
+    // `colorspace` is informational export metadata; it does not affect PNG
+    // output. Only "srgb" and "cmyk" are recognized; any other value is a
+    // Warning (forward-compatible — never a hard error).
+    if let Some(cs) = &doc.colorspace
+        && cs != "srgb"
+        && cs != "cmyk"
+    {
+        diagnostics.push(Diagnostic::warning(
+            "document.invalid_colorspace",
+            format!(
+                "document colorspace '{}' is unrecognized; expected \"srgb\" or \
+                 \"cmyk\" (this attribute is export metadata and does not change \
+                 PNG output)",
+                cs
+            ),
+            None,
+            None,
+        ));
+    }
+
     // ── Step 2: collect all IDs and gather referenced token ids ──────────
     // `seen_ids` accumulates every id encountered across the whole document.
     // When we encounter a duplicate we push `id.duplicate`.

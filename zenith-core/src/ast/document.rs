@@ -115,6 +115,12 @@ pub struct ComponentDef {
 pub struct Document {
     /// Must be `1` in v0.
     pub version: u32,
+    /// Declared export color space: `Some("srgb")` (default) or `Some("cmyk")`.
+    /// `None` when the author omitted the `colorspace` attribute. In v0 this is
+    /// informational export metadata only — it does NOT change PNG output (the
+    /// PNG is always sRGB); a future PDF backend consults it. An invalid value
+    /// is preserved here verbatim and surfaced as a validation warning.
+    pub colorspace: Option<String>,
     pub project: Option<Project>,
     /// Asset declarations; empty when the `assets` block is absent.
     pub assets: AssetBlock,

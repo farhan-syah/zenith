@@ -5,8 +5,21 @@ use std::collections::BTreeMap;
 
 use zenith_core::{Diagnostic, PropertyValue, ResolvedToken, ResolvedValue};
 
-use crate::color::parse_srgb_hex;
+use crate::color::{parse_color, parse_srgb_hex};
 use crate::ir::{Color, GradientPaint, GradientStop, ShadowSpec};
+
+/// Build an [`ir::Color`](Color) from a resolved color token, preserving its
+/// CMYK origin when present. Returns `None` only when the resolved value is not
+/// a color or its stored hex is somehow unparseable (which token resolution
+/// already guarantees not to happen).
+fn color_from_resolved(rv: &ResolvedValue) -> Option<Color> {
+    let hex = rv.as_color_hex()?;
+    let mut color = parse_srgb_hex(hex)?;
+    if let Some((c, m, y, k)) = rv.cmyk() {
+        color.cmyk = Some([c, m, y, k]);
+    }
+    Some(color)
+}
 
 /// Resolve a `PropertyValue` to a `Color`, or push a diagnostic and return
 /// `None`.
@@ -23,39 +36,38 @@ pub(super) fn resolve_property_color(
     match prop {
         PropertyValue::TokenRef(token_id) => {
             match resolved.get(token_id.as_str()) {
-                Some(rt) => match &rt.value {
-                    ResolvedValue::Color(hex) => match parse_srgb_hex(hex) {
+                Some(rt) if rt.value.as_color_hex().is_some() => {
+                    match color_from_resolved(&rt.value) {
                         Some(c) => Some(c),
                         None => {
-                            // Should not happen — token resolution validates hex —
-                            // but be robust.
+                            // Should not happen — token resolution validates the
+                            // hex / cmyk literal — but be robust.
                             diagnostics.push(Diagnostic::advisory(
                                 "scene.invalid_color",
                                 format!(
-                                    "token '{}' resolved to '{}' which is not a valid \
-                                     sRGB hex color; skipped",
-                                    token_id, hex
+                                    "token '{}' resolved to an invalid color; skipped",
+                                    token_id
                                 ),
                                 None,
                                 Some(subject_id.to_owned()),
                             ));
                             None
                         }
-                    },
-                    other => {
-                        diagnostics.push(Diagnostic::advisory(
-                            "scene.wrong_token_type",
-                            format!(
-                                "node '{}' references token '{}' which resolved to a \
-                                 non-color value ({:?}); skipped",
-                                subject_id, token_id, other
-                            ),
-                            None,
-                            Some(subject_id.to_owned()),
-                        ));
-                        None
                     }
-                },
+                }
+                Some(rt) => {
+                    diagnostics.push(Diagnostic::advisory(
+                        "scene.wrong_token_type",
+                        format!(
+                            "node '{}' references token '{}' which resolved to a \
+                             non-color value ({:?}); skipped",
+                            subject_id, token_id, &rt.value
+                        ),
+                        None,
+                        Some(subject_id.to_owned()),
+                    ));
+                    None
+                }
                 None => {
                     diagnostics.push(Diagnostic::advisory(
                         "scene.unresolved_token",
@@ -71,15 +83,15 @@ pub(super) fn resolve_property_color(
                 }
             }
         }
-        PropertyValue::Literal(hex) => match parse_srgb_hex(hex) {
+        PropertyValue::Literal(literal) => match parse_color(literal) {
             Some(c) => Some(c),
             None => {
                 diagnostics.push(Diagnostic::advisory(
                     "scene.invalid_color",
                     format!(
                         "node '{}' has a fill literal '{}' that is not a valid \
-                         sRGB hex color; skipped",
-                        subject_id, hex
+                         sRGB hex or cmyk(...) color; skipped",
+                        subject_id, literal
                     ),
                     None,
                     Some(subject_id.to_owned()),
@@ -128,10 +140,7 @@ pub(super) fn resolve_property_gradient(
         let Some(rt) = resolved.get(color_token_id.as_str()) else {
             continue;
         };
-        let ResolvedValue::Color(hex) = &rt.value else {
-            continue;
-        };
-        let Some(color) = parse_srgb_hex(hex) else {
+        let Some(color) = color_from_resolved(&rt.value) else {
             continue;
         };
         stops.push(GradientStop {
@@ -174,10 +183,7 @@ pub(super) fn resolve_property_shadow(
         let Some(rt) = resolved.get(layer.color_token.as_str()) else {
             continue;
         };
-        let ResolvedValue::Color(hex) = &rt.value else {
-            continue;
-        };
-        let Some(color) = parse_srgb_hex(hex) else {
+        let Some(color) = color_from_resolved(&rt.value) else {
             continue;
         };
         layers.push(ShadowSpec {

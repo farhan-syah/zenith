@@ -658,12 +658,7 @@ pub(super) fn compile_text(
         let fill_prop = span.fill.as_ref().or(node_fill_prop);
         let mut color = fill_prop
             .and_then(|fp| resolve_property_color(fp, resolved, diagnostics, &text.id))
-            .unwrap_or(Color {
-                r: 0,
-                g: 0,
-                b: 0,
-                a: 255,
-            });
+            .unwrap_or(Color::srgb(0, 0, 0, 255));
         color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
 
         // Per-span weight: span.font_weight overrides node weight; 400.
@@ -1102,12 +1097,7 @@ pub(super) fn compile_code(
         .or_else(|| style_prop(&code.style, style_map, "fill"));
     let mut color = fill_prop
         .and_then(|fp| resolve_property_color(fp, resolved, diagnostics, &code.id))
-        .unwrap_or(Color {
-            r: 0,
-            g: 0,
-            b: 0,
-            a: 255,
-        });
+        .unwrap_or(Color::srgb(0, 0, 0, 255));
 
     // Apply node opacity then cascade ctx.opacity on top.
     let node_opacity = code.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
@@ -1167,17 +1157,9 @@ pub(super) fn compile_code(
     let syntax_color = |kind: TokenKind| -> Color {
         let hex: &str = resolved
             .get(token_id_for_kind(kind))
-            .and_then(|rt| match &rt.value {
-                ResolvedValue::Color(h) => Some(h.as_str()),
-                _ => None,
-            })
+            .and_then(|rt| rt.value.as_color_hex())
             .unwrap_or_else(|| builtin_color(theme, kind));
-        let mut c = parse_srgb_hex(hex).unwrap_or(Color {
-            r: 0,
-            g: 0,
-            b: 0,
-            a: 255,
-        });
+        let mut c = parse_srgb_hex(hex).unwrap_or(Color::srgb(0, 0, 0, 255));
         c.a = (c.a as f64 * node_opacity * ctx.opacity).round() as u8;
         c
     };

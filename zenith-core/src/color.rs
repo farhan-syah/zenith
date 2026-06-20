@@ -24,6 +24,77 @@ pub fn parse_rgb(hex: &str) -> Option<(u8, u8, u8)> {
     Some((r, g, b))
 }
 
+/// A parsed CMYK color: four channels each a percentage in `0.0..=100.0`.
+///
+/// Stored as `f32` to match the scene-IR `cmyk` tag. Carries no alpha (CMYK is
+/// always opaque in v0; the converted sRGB alpha is `255`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Cmyk {
+    pub c: f32,
+    pub m: f32,
+    pub y: f32,
+    pub k: f32,
+}
+
+/// Parse a `cmyk(c,m,y,k)` color string.
+///
+/// Each of `c`, `m`, `y`, `k` is a percentage in `0..=100` (integer or decimal,
+/// comma-separated, optional surrounding spaces). Examples:
+/// `cmyk(59,85,0,7)`, `cmyk(0, 0, 0, 100)`, `cmyk(12.5, 0, 0, 0)`.
+///
+/// Returns `None` on any malformed input or out-of-range channel; never panics.
+pub fn parse_cmyk(s: &str) -> Option<Cmyk> {
+    let inner = s.strip_prefix("cmyk(")?.strip_suffix(')')?;
+    let mut parts = inner.split(',');
+    let c = parse_pct(parts.next()?)?;
+    let m = parse_pct(parts.next()?)?;
+    let y = parse_pct(parts.next()?)?;
+    let k = parse_pct(parts.next()?)?;
+    // Reject any trailing component (e.g. `cmyk(1,2,3,4,5)`).
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(Cmyk { c, m, y, k })
+}
+
+/// Parse one CMYK channel: a trimmed decimal in `0.0..=100.0`. Returns `None`
+/// when the token is empty, non-numeric, non-finite, or out of range.
+fn parse_pct(tok: &str) -> Option<f32> {
+    let v: f32 = tok.trim().parse().ok()?;
+    if v.is_finite() && (0.0..=100.0).contains(&v) {
+        Some(v)
+    } else {
+        None
+    }
+}
+
+/// Convert CMYK percentages to an sRGB `(r, g, b)` triple using the standard
+/// naive device conversion, rounded deterministically to the nearest `u8`.
+///
+/// `R = 255*(1-c/100)*(1-k/100)`, and likewise for G (from m) and B (from y).
+/// The result is always opaque (caller supplies alpha `255`).
+pub fn cmyk_to_srgb(cmyk: Cmyk) -> (u8, u8, u8) {
+    let chan = |v: f32, kk: f32| -> u8 {
+        let f = 255.0_f32 * (1.0 - v / 100.0) * (1.0 - kk / 100.0);
+        // `round()` is half-away-from-zero and deterministic; clamp guards
+        // against any float drift outside 0..=255 before the cast.
+        f.round().clamp(0.0, 255.0) as u8
+    };
+    (
+        chan(cmyk.c, cmyk.k),
+        chan(cmyk.m, cmyk.k),
+        chan(cmyk.y, cmyk.k),
+    )
+}
+
+/// Format a CMYK color as the canonical lowercase `#rrggbb` sRGB hex string of
+/// its naive device conversion (alpha is always opaque, so the 6-digit form is
+/// used). Deterministic; used both by token resolution and the formatter.
+pub fn cmyk_to_hex(cmyk: Cmyk) -> String {
+    let (r, g, b) = cmyk_to_srgb(cmyk);
+    format!("#{r:02x}{g:02x}{b:02x}")
+}
+
 /// WCAG 2.2 relative luminance of an sRGB color, in the range 0.0..=1.0.
 ///
 /// Formula: <https://www.w3.org/TR/WCAG22/#dfn-relative-luminance>
@@ -84,6 +155,51 @@ mod tests {
         assert_eq!(parse_rgb("#fffffg"), None); // invalid hex digit
         assert_eq!(parse_rgb(""), None);
         assert_eq!(parse_rgb("#"), None);
+    }
+
+    // parse_cmyk / cmyk_to_srgb ─────────────────────────────────────────────
+
+    #[test]
+    fn cmyk_zero_is_white() {
+        let c = parse_cmyk("cmyk(0,0,0,0)").expect("must parse");
+        assert_eq!(cmyk_to_srgb(c), (255, 255, 255));
+        assert_eq!(cmyk_to_hex(c), "#ffffff");
+    }
+
+    #[test]
+    fn cmyk_full_k_is_black() {
+        let c = parse_cmyk("cmyk(0,0,0,100)").expect("must parse");
+        assert_eq!(cmyk_to_srgb(c), (0, 0, 0));
+        assert_eq!(cmyk_to_hex(c), "#000000");
+    }
+
+    #[test]
+    fn cmyk_violet_converts_to_expected_purple() {
+        let c = parse_cmyk("cmyk(59,85,0,7)").expect("must parse");
+        // R = 255*(1-0.59)*(1-0.07) = 255*0.41*0.93 = 97.23 -> 97 (0x61)
+        // G = 255*(1-0.85)*(1-0.07) = 255*0.15*0.93 = 35.57 -> 36 (0x24)
+        // B = 255*(1-0.00)*(1-0.07) = 255*1.00*0.93 = 237.15 -> 237 (0xed)
+        assert_eq!(cmyk_to_srgb(c), (97, 36, 237));
+        assert_eq!(cmyk_to_hex(c), "#6124ed");
+    }
+
+    #[test]
+    fn cmyk_accepts_spaces_and_decimals() {
+        let c = parse_cmyk("cmyk( 12.5 , 0 , 0 , 0 )").expect("must parse");
+        assert_eq!(c.c, 12.5);
+        assert_eq!(c.m, 0.0);
+    }
+
+    #[test]
+    fn cmyk_rejects_malformed_and_out_of_range() {
+        assert!(parse_cmyk("cmyk(0,0,0)").is_none()); // too few
+        assert!(parse_cmyk("cmyk(0,0,0,0,0)").is_none()); // too many
+        assert!(parse_cmyk("cmyk(0,0,0,101)").is_none()); // out of range
+        assert!(parse_cmyk("cmyk(-1,0,0,0)").is_none()); // negative
+        assert!(parse_cmyk("cmyk(a,0,0,0)").is_none()); // non-numeric
+        assert!(parse_cmyk("rgb(0,0,0,0)").is_none()); // wrong prefix
+        assert!(parse_cmyk("cmyk(0,0,0,0").is_none()); // missing paren
+        assert!(parse_cmyk("#ffffff").is_none()); // hex, not cmyk
     }
 
     // relative_luminance ────────────────────────────────────────────────────

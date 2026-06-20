@@ -20,16 +20,33 @@ pub fn parse_srgb_hex(s: &str) -> Option<Color> {
             let r = from_hex2(hex[0], hex[1])?;
             let g = from_hex2(hex[2], hex[3])?;
             let b = from_hex2(hex[4], hex[5])?;
-            Some(Color { r, g, b, a: 255 })
+            Some(Color::srgb(r, g, b, 255))
         }
         8 => {
             let r = from_hex2(hex[0], hex[1])?;
             let g = from_hex2(hex[2], hex[3])?;
             let b = from_hex2(hex[4], hex[5])?;
             let a = from_hex2(hex[6], hex[7])?;
-            Some(Color { r, g, b, a })
+            Some(Color::srgb(r, g, b, a))
         }
         _ => None,
+    }
+}
+
+/// Parse any color literal — sRGB hex (`#rrggbb`/`#rrggbbaa`) or CMYK
+/// (`cmyk(c,m,y,k)`) — into an [`ir::Color`](Color).
+///
+/// A CMYK literal yields a color whose `r`/`g`/`b` are the naive device sRGB
+/// conversion and whose `cmyk` tag carries the original channels. A hex literal
+/// yields an sRGB-origin color (`cmyk: None`). Returns `None` on any malformed
+/// input; never panics.
+pub fn parse_color(s: &str) -> Option<Color> {
+    if s.starts_with("cmyk(") {
+        let cmyk = zenith_core::parse_cmyk(s)?;
+        let (r, g, b) = zenith_core::cmyk_to_srgb(cmyk);
+        Some(Color::cmyk(cmyk.c, cmyk.m, cmyk.y, cmyk.k, r, g, b))
+    } else {
+        parse_srgb_hex(s)
     }
 }
 
@@ -82,6 +99,31 @@ mod tests {
         assert_eq!(c.g, 0x22);
         assert_eq!(c.b, 0x33);
         assert_eq!(c.a, 0x44);
+    }
+
+    #[test]
+    fn hex_color_has_no_cmyk_tag() {
+        let c = parse_srgb_hex("#f8fafc").expect("must parse");
+        assert_eq!(c.cmyk, None);
+    }
+
+    #[test]
+    fn parse_color_handles_cmyk() {
+        let c = parse_color("cmyk(59,85,0,7)").expect("cmyk must parse");
+        assert_eq!((c.r, c.g, c.b, c.a), (97, 36, 237, 255));
+        assert_eq!(c.cmyk, Some([59.0, 85.0, 0.0, 7.0]));
+    }
+
+    #[test]
+    fn parse_color_handles_hex() {
+        let c = parse_color("#112233").expect("hex must parse");
+        assert_eq!((c.r, c.g, c.b, c.a), (0x11, 0x22, 0x33, 255));
+        assert_eq!(c.cmyk, None);
+    }
+
+    #[test]
+    fn parse_color_rejects_malformed_cmyk() {
+        assert!(parse_color("cmyk(0,0,0,200)").is_none());
     }
 
     #[test]

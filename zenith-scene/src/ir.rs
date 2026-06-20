@@ -16,12 +16,51 @@ use serde::Serialize;
 ///
 /// `r`, `g`, `b`, `a` are all in `0..=255` (linear 8-bit sRGB per channel,
 /// straight / un-pre-multiplied alpha).
+///
+/// `cmyk` is `None` for sRGB-origin colors. When a color token was declared in
+/// CMYK (`cmyk(c,m,y,k)`), this carries the original `[c, m, y, k]` percentages
+/// (`0.0..=100.0`) so a future PDF backend can emit native DeviceCMYK; the
+/// `r`/`g`/`b` channels then hold the naive device sRGB conversion. The PNG
+/// renderer ignores `cmyk` entirely and paints with `r`/`g`/`b`/`a`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct Color {
     pub r: u8,
     pub g: u8,
     pub b: u8,
     pub a: u8,
+    /// Original CMYK channels `[c, m, y, k]` (percentages) when this color was
+    /// declared in CMYK; `None` for sRGB-origin colors. Skipped in JSON when
+    /// absent so existing sRGB scenes serialize byte-identically.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cmyk: Option<[f32; 4]>,
+}
+
+impl Color {
+    /// Construct an sRGB-origin color (`cmyk` is `None`).
+    pub const fn srgb(r: u8, g: u8, b: u8, a: u8) -> Self {
+        Self {
+            r,
+            g,
+            b,
+            a,
+            cmyk: None,
+        }
+    }
+
+    /// Construct a CMYK-origin opaque color from the original channels plus the
+    /// already-converted sRGB triple. `c`/`m`/`y`/`k` are percentages
+    /// (`0.0..=100.0`); the converted `r`/`g`/`b` are supplied by the caller so
+    /// the deterministic conversion lives in exactly one place
+    /// (`zenith_core::cmyk_to_srgb`). Alpha is always `255`.
+    pub const fn cmyk(c: f32, m: f32, y: f32, k: f32, r: u8, g: u8, b: u8) -> Self {
+        Self {
+            r,
+            g,
+            b,
+            a: 255,
+            cmyk: Some([c, m, y, k]),
+        }
+    }
 }
 
 // ── Gradient paint ────────────────────────────────────────────────────────────
@@ -412,12 +451,7 @@ mod tests {
             y: 0.0,
             w: 640.0,
             h: 360.0,
-            color: Color {
-                r: 10,
-                g: 20,
-                b: 30,
-                a: 255,
-            },
+            color: Color::srgb(10, 20, 30, 255),
         });
         let a = s.to_json().expect("first serialize");
         let b = s.to_json().expect("second serialize");
@@ -431,17 +465,41 @@ mod tests {
             y: 2.0,
             w: 3.0,
             h: 4.0,
-            color: Color {
-                r: 255,
-                g: 0,
-                b: 0,
-                a: 255,
-            },
+            color: Color::srgb(255, 0, 0, 255),
         };
         let json = serde_json::to_string(&cmd).expect("serialize");
         assert!(
             json.contains(r#""op":"FillRect""#),
             "op tag must be FillRect; got: {json}"
+        );
+    }
+
+    #[test]
+    fn srgb_color_omits_cmyk_in_json() {
+        let cmd = SceneCommand::FillRect {
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            color: Color::srgb(1, 2, 3, 255),
+        };
+        let json = serde_json::to_string(&cmd).expect("serialize");
+        assert!(
+            !json.contains("cmyk"),
+            "sRGB-origin color must not serialize a cmyk key; got: {json}"
+        );
+    }
+
+    #[test]
+    fn cmyk_color_carries_channels_and_serializes() {
+        // cmyk(59,85,0,7) → #6124ed (97,36,237).
+        let c = Color::cmyk(59.0, 85.0, 0.0, 7.0, 97, 36, 237);
+        assert_eq!((c.r, c.g, c.b, c.a), (97, 36, 237, 255));
+        assert_eq!(c.cmyk, Some([59.0, 85.0, 0.0, 7.0]));
+        let json = serde_json::to_string(&c).expect("serialize");
+        assert!(
+            json.contains(r#""cmyk":[59.0,85.0,0.0,7.0]"#),
+            "got: {json}"
         );
     }
 }

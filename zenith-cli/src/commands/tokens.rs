@@ -69,6 +69,9 @@ fn token_type_str(tt: &zenith_core::TokenType) -> &'static str {
 fn resolved_value_str(rv: &ResolvedValue) -> String {
     match rv {
         ResolvedValue::Color(s) => s.clone(),
+        ResolvedValue::CmykColor { c, m, y, k, hex } => {
+            format!("cmyk({c},{m},{y},{k}) ({hex})")
+        }
         ResolvedValue::Dimension(d) => {
             let unit = match d.unit {
                 zenith_core::Unit::Px => "px",

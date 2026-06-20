@@ -196,12 +196,7 @@ fn resolve_chain_style(
         let fill_prop = span.fill.as_ref().or(node_fill_prop);
         let color = fill_prop
             .and_then(|fp| resolve_property_color(fp, resolved, diagnostics, &source.id))
-            .unwrap_or(Color {
-                r: 0,
-                g: 0,
-                b: 0,
-                a: 255,
-            });
+            .unwrap_or(Color::srgb(0, 0, 0, 255));
         let weight_prop = span.font_weight.as_ref().or(node_weight_prop);
         let weight = resolve_font_weight(weight_prop, resolved, 400);
         let style = if span.italic == Some(true) {
