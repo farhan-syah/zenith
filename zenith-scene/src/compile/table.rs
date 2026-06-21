@@ -15,9 +15,13 @@
 //! table.fill), then an optional border (four independent `StrokeLine`s in
 //! separate mode; accumulated and deduplicated in collapse mode), then its
 //! compiled child content clipped to and translated into the cell content box
-//! (cell padding inset), with the cell's `h-align`/`v-align` (overriding the
-//! table default) shifting the child within the content box. Opacity cascades
-//! (table.opacity × ctx.opacity).
+//! (cell padding inset). The CELL provides each child's geometry: a `text`
+//! child auto-wraps to the content width (unless it sets `w`), is horizontally
+//! aligned by the cell/table `h-align` (via the text's own `align`), and is
+//! offset vertically by `v-align` against its measured wrapped height — so
+//! authors never hand-size cell text. Author-specified `w`/`x`/`y`/`align` win.
+//! Non-text children keep the prior declared-box align-slack placement. Opacity
+//! cascades (table.opacity × ctx.opacity).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -742,12 +746,64 @@ fn emit_cell_no_border(
         });
     }
 
+    emit_cell_children(
+        table,
+        cell,
+        rect,
+        pad,
+        opacity,
+        is_header,
+        resolved,
+        style_map,
+        components,
+        fonts,
+        engine,
+        commands,
+        diagnostics,
+        chains,
+        flows,
+        field_ctx,
+        ctx,
+    );
+}
+
+/// Compile a cell's direct children into the cell content box, clipped to it.
+///
+/// The CELL provides each child's geometry: the content box is the cell rect
+/// inset by `pad`. A `Node::Text` child gets auto-box behavior — it wraps to the
+/// content width (unless the author set `w`), is aligned horizontally by the
+/// cell/table `h-align` (via the text's own `align`), and is offset vertically by
+/// the cell/table `v-align` against its measured wrapped height. Author-specified
+/// `w`/`x`/`y`/`align` always win, so explicitly-sized cell text is byte-identical
+/// to before. Any non-text child keeps the prior declared-box align-slack layout.
+#[allow(clippy::too_many_arguments)]
+fn emit_cell_children(
+    table: &TableNode,
+    cell: &zenith_core::TableCell,
+    rect: &CellRect,
+    pad: f64,
+    opacity: f64,
+    is_header: bool,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    style_map: &BTreeMap<&str, &Style>,
+    components: &ComponentMap,
+    fonts: &dyn FontProvider,
+    engine: &RustybuzzEngine,
+    commands: &mut Vec<SceneCommand>,
+    diagnostics: &mut Vec<Diagnostic>,
+    chains: &ChainAssignments,
+    flows: &TableFlowAssignments,
+    field_ctx: &FieldCtx,
+    ctx: RenderCtx,
+) {
     // ── Content box (cell padding inset) ─────────────────────────────────
     let content_x = rect.x + pad;
     let content_y = rect.y + pad;
     let content_w = (rect.w - 2.0 * pad).max(0.0);
     let content_h = (rect.h - 2.0 * pad).max(0.0);
 
+    // Alignment offsets (cell override else table default). Horizontal shifts
+    // the child column within the content width; vertical within its height.
     let h_align = cell
         .h_align
         .as_deref()
@@ -759,6 +815,9 @@ fn emit_cell_no_border(
         .or(table.v_align.as_deref())
         .unwrap_or("top");
 
+    // Clip cell content to the content box, then compile each child with a
+    // RenderCtx translated to the content-box origin (plus the alignment
+    // offset) so authored coordinate (0,0) lands at the cell's content corner.
     commands.push(SceneCommand::PushClip {
         x: content_x,
         y: content_y,
@@ -766,7 +825,92 @@ fn emit_cell_no_border(
         h: content_h,
     });
 
+    // Shared shaping environment for the per-text measure pass.
+    let env = MeasureEnv {
+        resolved,
+        style_map,
+        fonts,
+        engine,
+    };
+    let mut family_cache: BTreeMap<String, Vec<String>> = BTreeMap::new();
+
     for child in &cell.children {
+        if let Node::Text(t) = child {
+            // ── Text: the CELL provides the box (auto-wrap + h/v align) ──
+            // Effective wrap width: author `w` else the content width.
+            let wrap_w = child_declared_box(child).0.unwrap_or(content_w);
+            // Effective text align: author `align` else the cell/table h-align
+            // mapped to a text align value.
+            let h_align_text = match h_align {
+                "center" => "center",
+                "end" => "end",
+                _ => "start",
+            };
+            let eff_align: &str = t.align.as_deref().unwrap_or(h_align_text);
+
+            // Measure wrapped natural height at the effective wrap width.
+            let families = cached_families(
+                t,
+                resolved,
+                style_map,
+                fonts,
+                diagnostics,
+                &mut family_cache,
+            );
+            let nat_h =
+                measure_text_wrapped_height(t, wrap_w, families, &env, diagnostics).unwrap_or(0.0);
+            let v_offset = match v_align {
+                "middle" => ((content_h - nat_h) / 2.0).max(0.0),
+                "bottom" => (content_h - nat_h).max(0.0),
+                _ => 0.0,
+            };
+
+            // Build the effective child: clone only to override unset fields
+            // (author w/x/y/align win) and apply header-style injection.
+            let mut cloned = (**t).clone();
+            if cloned.w.is_none() {
+                cloned.w = Some(super::util::px(wrap_w));
+            }
+            if cloned.x.is_none() {
+                cloned.x = Some(super::util::px(0.0));
+            }
+            if cloned.y.is_none() {
+                cloned.y = Some(super::util::px(0.0));
+            }
+            if cloned.align.is_none() {
+                cloned.align = Some(eff_align.to_string());
+            }
+            if is_header && table.header_style.is_some() && cloned.style.is_none() {
+                cloned.style = table.header_style.clone();
+            }
+            let effective_child = zenith_core::Node::Text(Box::new(cloned));
+
+            // Horizontal placement is handled by the text's own align, so the
+            // ctx carries only the content origin plus the vertical offset.
+            let child_ctx = RenderCtx {
+                opacity,
+                dx: content_x,
+                dy: content_y + v_offset,
+                baseline_grid: ctx.baseline_grid,
+            };
+            let _ = compile_node(
+                &effective_child,
+                resolved,
+                style_map,
+                components,
+                fonts,
+                engine,
+                commands,
+                diagnostics,
+                chains,
+                flows,
+                field_ctx,
+                child_ctx,
+            );
+            continue;
+        }
+
+        // ── Non-text: declared-box align-slack into the content box ──────
         let (cw, ch) = child_declared_box(child);
         let dx_align = match h_align {
             "center" => ((content_w - cw.unwrap_or(content_w)) / 2.0).max(0.0),
@@ -784,26 +928,8 @@ fn emit_cell_no_border(
             dy: content_y + dy_align,
             baseline_grid: ctx.baseline_grid,
         };
-        // Header text style injection: for a header cell's direct Node::Text
-        // children that have no own `style`, apply table.header_style as the
-        // style. Only direct children are affected in v0 — text nested inside
-        // a frame/group inside the cell is NOT patched here.
         let effective_child: std::borrow::Cow<zenith_core::Node> =
-            if is_header && table.header_style.is_some() {
-                if let zenith_core::Node::Text(t) = child {
-                    if t.style.is_none() {
-                        let mut cloned = (**t).clone();
-                        cloned.style = table.header_style.clone();
-                        std::borrow::Cow::Owned(zenith_core::Node::Text(Box::new(cloned)))
-                    } else {
-                        std::borrow::Cow::Borrowed(child)
-                    }
-                } else {
-                    std::borrow::Cow::Borrowed(child)
-                }
-            } else {
-                std::borrow::Cow::Borrowed(child)
-            };
+            std::borrow::Cow::Borrowed(child);
         let _ = compile_node(
             &effective_child,
             resolved,
@@ -973,93 +1099,25 @@ fn emit_cell(
         }
     }
 
-    // ── Content box (cell padding inset) ─────────────────────────────────
-    let content_x = rect.x + pad;
-    let content_y = rect.y + pad;
-    let content_w = (rect.w - 2.0 * pad).max(0.0);
-    let content_h = (rect.h - 2.0 * pad).max(0.0);
-
-    // Alignment offsets (cell override else table default). Horizontal shifts
-    // the child column within the content width; vertical within its height.
-    let h_align = cell
-        .h_align
-        .as_deref()
-        .or(table.h_align.as_deref())
-        .unwrap_or("start");
-    let v_align = cell
-        .v_align
-        .as_deref()
-        .or(table.v_align.as_deref())
-        .unwrap_or("top");
-
-    // Clip cell content to the content box, then compile each child with a
-    // RenderCtx translated to the content-box origin (plus the alignment
-    // offset) so authored coordinate (0,0) lands at the cell's content corner.
-    commands.push(SceneCommand::PushClip {
-        x: content_x,
-        y: content_y,
-        w: content_w,
-        h: content_h,
-    });
-
-    for child in &cell.children {
-        // Per-child alignment: shift by the slack between the content box and
-        // the child's declared width/height. A child with no declared box (or
-        // align="start"/"top") gets a zero offset.
-        let (cw, ch) = child_declared_box(child);
-        let dx_align = match h_align {
-            "center" => ((content_w - cw.unwrap_or(content_w)) / 2.0).max(0.0),
-            "end" => (content_w - cw.unwrap_or(content_w)).max(0.0),
-            _ => 0.0,
-        };
-        let dy_align = match v_align {
-            "middle" => ((content_h - ch.unwrap_or(content_h)) / 2.0).max(0.0),
-            "bottom" => (content_h - ch.unwrap_or(content_h)).max(0.0),
-            _ => 0.0,
-        };
-        let child_ctx = RenderCtx {
-            opacity,
-            dx: content_x + dx_align,
-            dy: content_y + dy_align,
-            baseline_grid: ctx.baseline_grid,
-        };
-        // Header text style injection: for a header cell's direct Node::Text
-        // children that have no own `style`, apply table.header_style as the
-        // style. Only direct children are affected in v0 — text nested inside
-        // a frame/group inside the cell is NOT patched here.
-        let effective_child: std::borrow::Cow<zenith_core::Node> =
-            if is_header && table.header_style.is_some() {
-                if let zenith_core::Node::Text(t) = child {
-                    if t.style.is_none() {
-                        let mut cloned = (**t).clone();
-                        cloned.style = table.header_style.clone();
-                        std::borrow::Cow::Owned(zenith_core::Node::Text(Box::new(cloned)))
-                    } else {
-                        std::borrow::Cow::Borrowed(child)
-                    }
-                } else {
-                    std::borrow::Cow::Borrowed(child)
-                }
-            } else {
-                std::borrow::Cow::Borrowed(child)
-            };
-        let _ = compile_node(
-            &effective_child,
-            resolved,
-            style_map,
-            components,
-            fonts,
-            engine,
-            commands,
-            diagnostics,
-            chains,
-            flows,
-            field_ctx,
-            child_ctx,
-        );
-    }
-
-    commands.push(SceneCommand::PopClip);
+    emit_cell_children(
+        table,
+        cell,
+        rect,
+        pad,
+        opacity,
+        is_header,
+        resolved,
+        style_map,
+        components,
+        fonts,
+        engine,
+        commands,
+        diagnostics,
+        chains,
+        flows,
+        field_ctx,
+        ctx,
+    );
 }
 
 /// The declared `(w, h)` of a cell child in pixels, when the kind carries a

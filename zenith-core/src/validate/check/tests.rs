@@ -5207,3 +5207,43 @@ fn table_well_formed_is_clean() {
         codes(&report)
     );
 }
+
+#[test]
+fn table_cell_text_without_geometry_is_clean() {
+    // A cell positions and sizes its children (auto-box), so a cell text that
+    // omits x/y/w/h must NOT trigger node.missing_geometry.
+    let mut text = minimal_text("t.cell.txt", None);
+    if let Node::Text(t) = &mut text {
+        t.x = None;
+        t.y = None;
+        t.w = None;
+        t.h = None;
+    }
+    let cell = TableCell {
+        colspan: 1,
+        rowspan: 1,
+        children: vec![text],
+        fill: None,
+        border: None,
+        border_width: None,
+        h_align: None,
+        v_align: None,
+        source_span: None,
+    };
+    let columns = vec![TableColumn {
+        width: Some(px(160.0)),
+        source_span: None,
+    }];
+    let rows = vec![TableRow {
+        cells: vec![cell],
+        source_span: None,
+    }];
+    let table = table_node("t.auto", true, None, rows, columns);
+    let doc = doc_with(vec![], vec![minimal_page("p1", vec![table])]);
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "node.missing_geometry"),
+        "cell text without x/y/w/h must NOT emit node.missing_geometry; got {:?}",
+        codes(&report)
+    );
+}

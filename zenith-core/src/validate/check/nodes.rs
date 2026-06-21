@@ -1731,8 +1731,10 @@ pub(super) fn walk_node(
             }
 
             // Recurse into every cell's children with the normal walk so nested
-            // node ids are registered/validated. Cell content has authored
-            // geometry, so it is NOT treated as flow-positioned.
+            // node ids are registered/validated. A table cell positions and
+            // sizes its children (auto-box/wrap/align), exactly like a
+            // `frame layout="grid"/"flow"`, so cell children are flow-positioned
+            // and their x/y/w/h are OPTIONAL.
             for row in &t.rows {
                 for cell in &row.cells {
                     for child in &cell.children {
@@ -1747,7 +1749,7 @@ pub(super) fn walk_node(
                             component_local_ids,
                             all_node_ids,
                             page_px_bounds,
-                            false,
+                            true,
                             enclosing_frame,
                             diagnostics,
                         );
