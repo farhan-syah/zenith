@@ -8,7 +8,7 @@ use crate::ast::{
     CodeNode, ConnectorNode, DocumentBody, EllipseNode, FieldNode, Fold, FootnoteNode, FrameNode,
     GroupNode, ImageNode, InstanceNode, LineNode, Node, Override, Page, Point, PolygonNode,
     PolylineNode, RectNode, SafeZone, SafeZoneType, ShapeNode, TableCell, TableNode, TableRow,
-    TextNode, TextSpan, TocNode,
+    TextNode, TextSpan, TocNode, UnknownNode,
 };
 
 use super::{
@@ -1049,9 +1049,33 @@ fn write_polyline(p: &PolylineNode, out: &mut String, depth: usize) {
     out.push_str("}\n");
 }
 
-fn write_unknown_node(u: &crate::ast::UnknownNode, out: &mut String, depth: usize) {
-    // Emit `<kind>` as a leaf (UnknownNode has no property map in current AST).
+fn write_unknown_node(u: &UnknownNode, out: &mut String, depth: usize) {
+    // Lossless forward-compat emit: `<kind>` then `id="..."` (if present), then
+    // every preserved property (with its value annotation) in sorted key order,
+    // then a children block if non-empty — mirroring `write_group`/`write_frame`.
     indent(out, depth);
     out.push_str(&u.kind);
-    out.push('\n');
+
+    if let Some(id) = &u.id {
+        out.push_str(" id=\"");
+        out.push_str(id);
+        out.push('"');
+    }
+
+    // Unknown properties in sorted key order (BTreeMap iteration is sorted).
+    for (key, prop) in &u.unknown_props {
+        out.push(' ');
+        out.push_str(key);
+        out.push('=');
+        out.push_str(&fmt_unknown_property(prop));
+    }
+
+    if u.children.is_empty() {
+        out.push('\n');
+    } else {
+        out.push_str(" {\n");
+        write_children_block(&u.children, out, depth);
+        indent(out, depth);
+        out.push_str("}\n");
+    }
 }

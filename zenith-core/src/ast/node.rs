@@ -608,6 +608,13 @@ pub struct ConnectorNode {
 pub struct UnknownNode {
     /// The KDL node name (e.g. `"sparkle"`, `"table"`, `"chart"`).
     pub kind: String,
+    /// The node's `id` attribute, if present. Captured first-class so unknown
+    /// nodes are addressable and participate in duplicate-id detection.
+    pub id: Option<String>,
+    /// All other attributes, preserved with typed values + annotations.
+    pub unknown_props: BTreeMap<String, UnknownProperty>,
+    /// Child nodes (may be known OR unknown), preserved for lossless round-trip.
+    pub children: Vec<Node>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
 }
@@ -1154,5 +1161,8 @@ pub enum Node {
     // route + markers + visual fields). Boxing keeps `Node` compact for the
     // `large_enum_variant` lint, mirroring `Rect`/`Text`/`Table`/`Shape`.
     Connector(Box<ConnectorNode>),
-    Unknown(UnknownNode),
+    // Boxed: `UnknownNode` now carries preserved props + recursive children for
+    // lossless forward-compat round-trip. Boxing keeps `Node` compact for the
+    // `large_enum_variant` lint, mirroring `Rect`/`Text`/`Table`/`Shape`.
+    Unknown(Box<UnknownNode>),
 }

@@ -2147,9 +2147,38 @@ pub(super) fn walk_node(
                     u.kind
                 ),
                 u.source_span,
-                None,
+                u.id.clone(),
             ));
-            // Unknown nodes have no children in the v0 AST; nothing to recurse.
+            // Register the id (if any) so the unknown node is addressable and
+            // participates in duplicate-id detection alongside known nodes.
+            if let Some(id) = &u.id {
+                register_id(id, seen_ids, diagnostics);
+            }
+            // The unknown_props are opaque (preserved verbatim) — do NOT
+            // token-validate them.
+            //
+            // Recurse into children so nested KNOWN nodes (e.g. a `rect` inside
+            // an unknown parent) are still validated for token refs, duplicate
+            // ids, etc. The unknown parent's layout semantics are unknown, so
+            // children must NOT trigger `node.missing_geometry`: pass
+            // `in_flow_parent = true` to make their geometry optional.
+            for child in &u.children {
+                walk_node(
+                    child,
+                    seen_ids,
+                    referenced_token_ids,
+                    resolved_tokens,
+                    declared_asset_ids,
+                    declared_style_ids,
+                    declared_component_ids,
+                    component_local_ids,
+                    all_node_ids,
+                    page_px_bounds,
+                    true,
+                    enclosing_frame,
+                    diagnostics,
+                );
+            }
         }
     }
 }
@@ -2406,7 +2435,7 @@ pub(super) fn node_id_and_span(node: &Node) -> (&str, Option<crate::ast::Span>) 
         Node::Table(n) => (&n.id, n.source_span),
         Node::Shape(n) => (&n.id, n.source_span),
         Node::Connector(n) => (&n.id, n.source_span),
-        Node::Unknown(n) => (&n.kind, n.source_span),
+        Node::Unknown(n) => (n.id.as_deref().unwrap_or(&n.kind), n.source_span),
     }
 }
 

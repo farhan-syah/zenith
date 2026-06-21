@@ -547,10 +547,13 @@ fn unknown_node_kind_produces_warning_not_error() {
         vec![],
         vec![minimal_page(
             "page.one",
-            vec![Node::Unknown(UnknownNode {
+            vec![Node::Unknown(Box::new(UnknownNode {
                 kind: "sparkle".to_owned(),
+                id: None,
+                unknown_props: std::collections::BTreeMap::new(),
+                children: Vec::new(),
                 source_span: None,
-            })],
+            }))],
         )],
     );
     let report = validate(&doc);
@@ -571,6 +574,76 @@ fn unknown_node_kind_produces_warning_not_error() {
         .find(|d| d.code == "node.unknown_kind")
         .expect("should exist");
     assert_eq!(diag.severity, Severity::Warning);
+}
+
+/// Build an unknown node with the given id and children (no unknown props).
+fn unknown_node(kind: &str, id: Option<&str>, children: Vec<Node>) -> Node {
+    Node::Unknown(Box::new(UnknownNode {
+        kind: kind.to_owned(),
+        id: id.map(str::to_owned),
+        unknown_props: BTreeMap::new(),
+        children,
+        source_span: None,
+    }))
+}
+
+/// **Unknown node id participates in duplicate-id detection**: an unknown node
+/// whose `id` collides with another node's id must trigger `id.duplicate`,
+/// proving the unknown node's id is registered like a known node's.
+#[test]
+fn unknown_node_id_participates_in_duplicate_detection() {
+    let doc = doc_with(
+        vec![],
+        vec![minimal_page(
+            "page.one",
+            vec![
+                minimal_rect("node.dup", None),
+                unknown_node("sparkle", Some("node.dup"), vec![]),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "id.duplicate"),
+        "unknown node id must participate in duplicate detection. codes: {:?}",
+        codes(&report)
+    );
+    // It still warns about the unknown kind.
+    assert!(
+        has_code(&report, "node.unknown_kind"),
+        "codes: {:?}",
+        codes(&report)
+    );
+    assert!(report.has_errors());
+}
+
+/// **Known child of an unknown node is still validated**: a `rect` with a bad
+/// token ref declared inside an unknown parent must still produce its
+/// `token.unknown_reference` diagnostic, proving child recursion descends into
+/// known children of unknown nodes.
+#[test]
+fn known_child_of_unknown_node_is_validated() {
+    let doc = doc_with(
+        vec![], // no tokens defined → the ref is dangling
+        vec![minimal_page(
+            "page.one",
+            vec![unknown_node(
+                "sparkle",
+                Some("fx"),
+                vec![minimal_rect(
+                    "inner.rect",
+                    Some(token_ref("color.does.not.exist")),
+                )],
+            )],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "token.unknown_reference"),
+        "a known child's bad token ref must be validated. codes: {:?}",
+        codes(&report)
+    );
+    assert!(report.has_errors());
 }
 
 // ── Test 8: defined-but-unreferenced token → token.unused (Advisory) ─

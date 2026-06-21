@@ -382,7 +382,12 @@ fn strip_node_span(node: &mut crate::ast::Node) {
         }
         Node::Shape(s) => s.source_span = None,
         Node::Connector(c) => c.source_span = None,
-        Node::Unknown(u) => u.source_span = None,
+        Node::Unknown(u) => {
+            u.source_span = None;
+            for child in &mut u.children {
+                strip_node_span(child);
+            }
+        }
     }
 }
 
@@ -3440,5 +3445,166 @@ fn test_shape_parse_format_round_trip() {
         strip_spans(doc).body.pages[0].children,
         strip_spans(doc2).body.pages[0].children,
         "shape must survive a parse → format → parse round-trip"
+    );
+}
+
+/// **Unknown-node lossless round-trip**: an unrecognized `filter` node carrying
+/// an id, annotated properties, and unknown-kind `param` children must survive
+/// parse → format → parse with its id, every property (incl. type annotations),
+/// and all children preserved. This is the forward-compatibility cornerstone:
+/// an older Zenith preserves node kinds it doesn't understand. Note `param` is
+/// itself an unknown node, so this exercises unknown-within-unknown recursion.
+#[test]
+fn test_unknown_node_lossless_round_trip() {
+    use crate::ast::UnknownValue;
+    let src = r##"zenith version=1 {
+  project id="proj.unk" name="Unk"
+  tokens format="zenith-token-v1" {
+    token id="color.navy" type="color" value="#001f54"
+    token id="color.gold" type="color" value="#d4af37"
+  }
+  styles {
+  }
+  document id="doc.unk" title="Unk" {
+    page id="page.one" w=(px)640 h=(px)360 {
+      filter id="fx.duo" kind="duotone" target="page.cover" {
+        param name="dark" value=(token)"color.navy"
+        param name="light" value=(token)"color.gold"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+
+    // The `filter` node parsed into an UnknownNode with id + props + children.
+    let unknown = match &doc.body.pages[0].children[0] {
+        Node::Unknown(u) => u,
+        other => panic!("expected Unknown node, got {other:?}"),
+    };
+    assert_eq!(unknown.kind, "filter");
+    assert_eq!(unknown.id.as_deref(), Some("fx.duo"));
+    assert!(
+        unknown.unknown_props.contains_key("kind"),
+        "kind property must be preserved"
+    );
+    assert!(
+        unknown.unknown_props.contains_key("target"),
+        "target property must be preserved"
+    );
+    // id is captured first-class, NOT duplicated into unknown_props.
+    assert!(
+        !unknown.unknown_props.contains_key("id"),
+        "id must be captured first-class, not in unknown_props"
+    );
+    assert_eq!(unknown.children.len(), 2, "both param children preserved");
+    // The children are themselves unknown nodes with annotated `value` props.
+    let dark = match &unknown.children[0] {
+        Node::Unknown(c) => c,
+        other => panic!("expected Unknown param child, got {other:?}"),
+    };
+    assert_eq!(dark.kind, "param");
+    let value = dark
+        .unknown_props
+        .get("value")
+        .expect("param child must carry a `value` property");
+    assert_eq!(value.ty.as_deref(), Some("token"), "annotation preserved");
+    assert_eq!(
+        value.value,
+        UnknownValue::String("color.navy".to_owned()),
+        "token ref string preserved"
+    );
+
+    // The formatted output must contain the kind, id, props, children, and the
+    // annotation on the nested value.
+    let formatted = format_document(&doc).expect("format must succeed");
+    let text = String::from_utf8_lossy(&formatted);
+    assert!(text.contains("filter"), "formatted output keeps the kind");
+    assert!(text.contains("id=\"fx.duo\""), "formatted output keeps id");
+    assert!(
+        text.contains("target=\"page.cover\""),
+        "formatted output keeps target prop"
+    );
+    assert!(
+        text.contains("kind=\"duotone\""),
+        "formatted output keeps kind prop"
+    );
+    assert!(text.contains("param"), "formatted output keeps children");
+    assert!(
+        text.contains("value=(token)\"color.navy\""),
+        "formatted output keeps the value annotation on a nested child"
+    );
+
+    // Full round-trip stability: parse → format → parse yields the same AST.
+    let doc2 = adapter
+        .parse(&formatted)
+        .expect("re-parse after format must succeed");
+    assert_eq!(
+        strip_spans(doc).body.pages[0].children,
+        strip_spans(doc2.clone()).body.pages[0].children,
+        "unknown node (id, props incl ty, children) must survive parse → format → parse"
+    );
+    // Idempotence: format twice → identical bytes.
+    let formatted2 = format_document(&doc2).expect("format 2 must succeed");
+    assert_eq!(
+        formatted, formatted2,
+        "unknown node formatting must be idempotent"
+    );
+}
+
+/// **Nested KNOWN child survives an unknown parent**: a real `rect` declared
+/// inside an unrecognized node must round-trip as a `Node::Rect` child (with
+/// its attributes), proving that known children of an unknown container are
+/// transformed and re-emitted, not collapsed into opaque text.
+#[test]
+fn test_unknown_node_preserves_known_child() {
+    let src = r##"zenith version=1 {
+  project id="proj.unk2" name="Unk2"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#101010"
+  }
+  styles {
+  }
+  document id="doc.unk2" title="Unk2" {
+    page id="page.one" w=(px)640 h=(px)360 {
+      sparkle id="s1" {
+        rect id="inner" x=(px)5 y=(px)6 w=(px)20 h=(px)30 fill=(token)"color.bg"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let unknown = match &doc.body.pages[0].children[0] {
+        Node::Unknown(u) => u,
+        other => panic!("expected Unknown node, got {other:?}"),
+    };
+    assert_eq!(unknown.kind, "sparkle");
+    assert_eq!(unknown.children.len(), 1);
+    let rect = match &unknown.children[0] {
+        Node::Rect(r) => r,
+        other => panic!("expected a real Rect child, got {other:?}"),
+    };
+    assert_eq!(rect.id, "inner");
+
+    let formatted = format_document(&doc).expect("format must succeed");
+    let doc2 = adapter
+        .parse(&formatted)
+        .expect("re-parse after format must succeed");
+    // The known rect child survives as a Node::Rect after the round-trip.
+    let unknown2 = match &doc2.body.pages[0].children[0] {
+        Node::Unknown(u) => u,
+        other => panic!("expected Unknown node after round-trip, got {other:?}"),
+    };
+    assert!(
+        matches!(&unknown2.children[0], Node::Rect(r) if r.id == "inner"),
+        "known rect child must survive the round-trip as a Node::Rect"
+    );
+    assert_eq!(
+        strip_spans(doc).body.pages[0].children,
+        strip_spans(doc2).body.pages[0].children,
+        "unknown node with a known child must survive parse → format → parse"
     );
 }

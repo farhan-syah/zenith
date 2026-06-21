@@ -1351,3 +1351,56 @@ page id="page.gr5" w=(px)200 h=(px)200 {
     );
     assert!(matches!(cmds[6], SceneCommand::PopClip));
 }
+
+// ── Unknown node: subtree skipped, no commands, advisory emitted ───────
+
+#[test]
+fn unknown_node_with_children_emits_no_commands() {
+    // An unrecognized `sparkle` node carries a real rect child. Because the
+    // unknown parent's layout semantics are unknown, the WHOLE subtree is
+    // skipped at compile time: NO scene commands are emitted for it or its
+    // children, and the existing `scene.unsupported_node` advisory fires.
+    let src = r##"zenith version=1 {
+  project id="proj.uk" name="UK"
+  tokens format="zenith-token-v1" {
+token id="color.r" type="color" value="#ff0000"
+  }
+  styles {}
+  document id="doc.uk" title="UK" {
+page id="page.uk" w=(px)320 h=(px)200 {
+  sparkle id="fx" {
+    rect id="inner" x=(px)10 y=(px)10 w=(px)50 h=(px)50 fill=(token)"color.r"
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+
+    // The unknown subtree is skipped: no fill commands for the node or its
+    // rect child.
+    let fills = fill_rects(&result);
+    assert!(
+        fills.is_empty(),
+        "unknown node subtree must emit no FillRect commands; got: {fills:?}"
+    );
+    assert!(
+        !result.scene.commands.iter().any(|c| matches!(
+            c,
+            SceneCommand::FillRect { .. } | SceneCommand::FillEllipse { .. }
+        )),
+        "unknown node subtree must emit no fill commands; got: {:?}",
+        result.scene.commands
+    );
+
+    // The existing unsupported-node advisory must still fire.
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "scene.unsupported_node"),
+        "unknown node must emit the scene.unsupported_node advisory; got: {:?}",
+        result.diagnostics
+    );
+}

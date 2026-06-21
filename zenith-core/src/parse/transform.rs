@@ -1339,10 +1339,13 @@ fn transform_node(node: &KdlNode) -> Result<Node, ParseError> {
         "table" => transform_table(node).map(|t| Node::Table(Box::new(t))),
         "shape" => transform_shape(node).map(|s| Node::Shape(Box::new(s))),
         "connector" => transform_connector(node).map(|c| Node::Connector(Box::new(c))),
-        _ => Ok(Node::Unknown(UnknownNode {
+        _ => Ok(Node::Unknown(Box::new(UnknownNode {
             kind: node.name().value().to_owned(),
+            id: optional_string_prop(node, "id").map(str::to_owned),
+            unknown_props: collect_unknown_props(node, &["id"]),
+            children: transform_children(node)?,
             source_span: node_span(node),
-        })),
+        }))),
     }
 }
 
