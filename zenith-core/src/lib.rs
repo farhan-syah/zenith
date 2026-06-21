@@ -19,15 +19,16 @@ pub mod validate;
 // Curated flat re-exports for the most-used public surface.
 pub use asset::{AssetData, AssetProvider, BytesAssetProvider};
 pub use ast::{
-    AssetBlock, AssetDecl, AssetKind, CodeNode, ComponentDef, ConnectorNode, Dimension, Document,
-    DocumentBody, EllipseNode, FieldNode, FilterKind, FilterLiteral, FilterOp, FootnoteNode,
-    FrameNode, GradientKind, GradientLiteral, GradientStopRef, GroupNode, ImageNode, InstanceNode,
-    LibraryDef, LineNode, MaskLiteral, MaskShape, MasterDef, Node, ObjectPosition, Override, Page,
-    Point, PolygonNode, PolylineNode, Project, PropertyValue, ProvenanceDef, RectNode,
-    STYLE_RECOGNIZED_KEYS, SafeZone, SafeZoneType, SectionDef, ShadowLayerRef, ShadowLiteral,
-    ShapeNode, Span, Style, StyleBlock, TableCell, TableColumn, TableNode, TableRow, TextNode,
-    TextSpan, TocNode, Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit, UnknownNode,
-    UnknownProperty, UnknownStyleProp, UnknownValue, canonicalize_style_key, dim_to_px,
+    ActionDef, AssetBlock, AssetDecl, AssetKind, CodeNode, ComponentDef, ConnectorNode, Dimension,
+    Document, DocumentBody, EllipseNode, FieldNode, FilterKind, FilterLiteral, FilterOp,
+    FootnoteNode, FrameNode, GradientKind, GradientLiteral, GradientStopRef, GroupNode, ImageNode,
+    InstanceNode, LibraryDef, LineNode, MaskLiteral, MaskShape, MasterDef, Node, ObjectPosition,
+    Override, Page, Point, PolygonNode, PolylineNode, Project, PropertyValue, ProvenanceDef,
+    RectNode, STYLE_RECOGNIZED_KEYS, SafeZone, SafeZoneType, SectionDef, ShadowLayerRef,
+    ShadowLiteral, ShapeNode, Span, Style, StyleBlock, TableCell, TableColumn, TableNode, TableRow,
+    TextNode, TextSpan, TocNode, Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit,
+    UnknownNode, UnknownProperty, UnknownStyleProp, UnknownValue, canonicalize_style_key,
+    dim_to_px,
 };
 pub use color::{
     Cmyk, cmyk_to_hex, cmyk_to_srgb, contrast_ratio, parse_cmyk, parse_rgb, relative_luminance,

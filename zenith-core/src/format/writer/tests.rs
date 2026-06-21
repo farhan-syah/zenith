@@ -316,6 +316,10 @@ fn strip_spans(mut doc: crate::ast::Document) -> crate::ast::Document {
     for library in &mut doc.libraries {
         library.source_span = None;
     }
+    // Actions
+    for action in &mut doc.actions {
+        action.source_span = None;
+    }
     // Sections
     for section in &mut doc.sections {
         section.source_span = None;
@@ -3857,6 +3861,101 @@ fn test_provenance_round_trip() {
         strip_spans(doc).provenance,
         strip_spans(reparsed).provenance,
         "provenance must survive a parse → format → parse round-trip (idempotent)"
+    );
+}
+
+// ── actions: parse, serialize, and round-trip ─────────────────────────
+
+/// **Serialize round-trip**: parse a doc with an `actions` block (two action
+/// entries — one carrying every field plus an annotated unknown prop, one
+/// minimal) → format → re-parse → actions identical (spans stripped). Also
+/// assert all fields are emitted, the block comes AFTER `provenance`, and the
+/// annotated unknown prop and the `tx` JSON payload survive. Mirrors
+/// `test_provenance_round_trip`.
+#[test]
+fn test_actions_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.act" name="ACT"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  actions {
+    action id="apply-brand-kit" label="Apply Brand Kit" version="1.0.0" meta=(token)"x" {
+      tx "{\"ops\":[{\"op\":\"update_token_value\",\"id\":\"color.brand\",\"value\":\"#e11d48\"}]}"
+    }
+    action id="reset-spacing" {
+      tx "{\"ops\":[]}"
+    }
+  }
+  document id="doc.act" title="ACT" {
+    page id="pg1" w=(px)640 h=(px)360 {
+      rect id="r1" x=(px)0 y=(px)0 w=(px)10 h=(px)10
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+
+    assert_eq!(doc.actions.len(), 2, "expected 2 actions");
+    let brand = &doc.actions[0];
+    assert_eq!(brand.id, "apply-brand-kit");
+    assert_eq!(brand.label.as_deref(), Some("Apply Brand Kit"));
+    assert_eq!(brand.version.as_deref(), Some("1.0.0"));
+    assert!(
+        brand.tx_json.contains("update_token_value"),
+        "tx_json must contain the op name"
+    );
+    let meta = brand
+        .unknown_props
+        .get("meta")
+        .expect("annotated unknown prop must be preserved");
+    assert_eq!(
+        meta.ty.as_deref(),
+        Some("token"),
+        "unknown prop annotation must survive"
+    );
+
+    let reset = &doc.actions[1];
+    assert_eq!(reset.id, "reset-spacing");
+    assert_eq!(reset.label, None);
+    assert_eq!(reset.version, None);
+
+    let formatted = format_document(&doc).expect("format");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("utf8");
+
+    assert!(
+        formatted_str
+            .contains(r#"action id="apply-brand-kit" label="Apply Brand Kit" version="1.0.0""#),
+        "formatted output must contain the full action line; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains(r#"action id="reset-spacing""#),
+        "formatted output must contain the minimal action line; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains("update_token_value"),
+        "tx payload must survive formatting; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains(r#"meta=(token)"x""#),
+        "annotated unknown prop must round-trip; got:\n{formatted_str}"
+    );
+
+    // actions must appear after provenance and before document.
+    let actions_at = formatted_str.find("actions {").expect("actions block");
+    let doc_at = formatted_str.find("document ").expect("document block");
+    assert!(
+        actions_at < doc_at,
+        "actions must be emitted before document; got:\n{formatted_str}"
+    );
+
+    let reparsed = adapter.parse(&formatted).expect("re-parse");
+    assert_eq!(
+        strip_spans(doc).actions,
+        strip_spans(reparsed).actions,
+        "actions must survive a parse → format → parse round-trip (idempotent)"
     );
 }
 

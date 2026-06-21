@@ -9,6 +9,7 @@ use kdl::{KdlDocument, KdlEntry, KdlNode, KdlValue};
 
 use crate::ast::{
     Span,
+    action::ActionDef,
     asset::{AssetBlock, AssetDecl, AssetKind},
     document::{
         ComponentDef, Document, DocumentBody, Fold, MasterDef, Page, Project, SafeZone,
@@ -407,6 +408,7 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
     let mut project: Option<Project> = None;
     let mut assets = AssetBlock::default();
     let mut libraries: Vec<LibraryDef> = Vec::new();
+    let mut actions: Vec<ActionDef> = Vec::new();
     let mut tokens = TokenBlock::default();
     let mut styles = StyleBlock::default();
     let mut components: Vec<ComponentDef> = Vec::new();
@@ -425,6 +427,9 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
             }
             "libraries" => {
                 libraries = transform_libraries(child)?;
+            }
+            "actions" => {
+                actions = transform_actions(child)?;
             }
             "tokens" => {
                 tokens = transform_tokens(child)?;
@@ -475,6 +480,7 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
         project,
         assets,
         libraries,
+        actions,
         tokens,
         styles,
         components,
@@ -596,6 +602,69 @@ fn transform_library_def(node: &KdlNode) -> Result<LibraryDef, ParseError> {
         id,
         version,
         hash,
+        source_span,
+        unknown_props,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
+
+const ACTION_KNOWN_PROPS: &[&str] = &["id", "label", "version"];
+
+/// Transform the document-level `actions { … }` block into a list of
+/// [`ActionDef`]. Each `action id="…" label="…" version="…" { tx "…" }` is a
+/// block node whose `tx` child carries the opaque JSON payload as a positional
+/// string argument; non-`action` children inside the block are silently ignored
+/// (forward-compat). Mirrors [`transform_libraries`].
+fn transform_actions(node: &KdlNode) -> Result<Vec<ActionDef>, ParseError> {
+    let mut defs: Vec<ActionDef> = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "action" {
+                defs.push(transform_action_def(child)?);
+            }
+        }
+    }
+    Ok(defs)
+}
+
+fn transform_action_def(node: &KdlNode) -> Result<ActionDef, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+    let label = optional_string_prop(node, "label").map(str::to_owned);
+    let version = optional_string_prop(node, "version").map(str::to_owned);
+    let unknown_props = collect_unknown_props(node, ACTION_KNOWN_PROPS);
+    let source_span = node_span(node);
+
+    // The `tx_json` payload lives in a `tx` child node whose first positional
+    // argument is the decoded string. Exactly like `content` in CodeNode, the
+    // value is stored decoded; the writer re-encodes it on format.
+    let tx_json = node
+        .children()
+        .and_then(|doc| {
+            doc.nodes().iter().find_map(|child| {
+                if child.name().value() != "tx" {
+                    return None;
+                }
+                child.get(0).and_then(|v| match v {
+                    KdlValue::String(s) => Some(s.clone()),
+                    _ => None,
+                })
+            })
+        })
+        .ok_or_else(|| {
+            ParseError::spanless(
+                ParseErrorCode::InvalidPropertyValue,
+                format!("node `action` id=\"{id}\" is missing required `tx` child node"),
+            )
+        })?;
+
+    Ok(ActionDef {
+        id,
+        label,
+        version,
+        tx_json,
         source_span,
         unknown_props,
     })

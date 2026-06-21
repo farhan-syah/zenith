@@ -6,7 +6,7 @@
 //! Rules (from doc 08 and doc 16):
 //! - Two-space indentation per nesting level.
 //! - Root `zenith` node at column 0.
-//! - Child order under `zenith`: project, assets, libraries, tokens, styles, components, masters, sections, provenance, document.
+//! - Child order under `zenith`: project, assets, libraries, tokens, styles, components, masters, sections, provenance, actions, document.
 //! - Structural containers (`tokens`, `styles`, `document`, `page`) always emit
 //!   a brace block, even when empty.
 //! - Leaf nodes (`project`, a `rect` with no children) emit a single line.
@@ -30,7 +30,7 @@
 use std::fmt::Write as _;
 
 use crate::ast::{
-    AssetBlock, AssetDecl, ComponentDef, Dimension, Document, LibraryDef, MasterDef,
+    ActionDef, AssetBlock, AssetDecl, ComponentDef, Dimension, Document, LibraryDef, MasterDef,
     ObjectPosition, Project, PropertyValue, ProvenanceDef, SectionDef, Unit, UnknownProperty,
     UnknownValue,
 };
@@ -271,7 +271,7 @@ fn write_document(doc: &Document, out: &mut String) {
     write_opt_str(out, "page-parity-start", &doc.page_parity_start);
     out.push_str(" {\n");
 
-    // Child order: project, assets, libraries, tokens, styles, components, masters, sections, provenance, document.
+    // Child order: project, assets, libraries, tokens, styles, components, masters, sections, provenance, actions, document.
     if let Some(proj) = &doc.project {
         write_project(proj, out, 1);
     }
@@ -283,6 +283,7 @@ fn write_document(doc: &Document, out: &mut String) {
     write_master_block(&doc.masters, out, 1);
     write_section_block(&doc.sections, out, 1);
     write_provenance_block(&doc.provenance, out, 1);
+    write_action_block(&doc.actions, out, 1);
     write_document_body(&doc.body, out, 1);
 
     out.push('}');
@@ -555,6 +556,71 @@ fn write_provenance_block(provenance: &[ProvenanceDef], out: &mut String, depth:
             out.push_str(&fmt_unknown_property(prop));
         }
         out.push('\n');
+    }
+    indent(out, depth);
+    out.push_str("}\n");
+}
+
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
+
+/// Emit the `actions { … }` block.
+///
+/// Stable position: after `provenance`, before `document`. Emitted ONLY when at
+/// least one action is declared, so documents without actions keep their
+/// existing canonical form (and round-trip) unchanged. Each action emits:
+///
+/// ```text
+/// action id="…" label="…" version="…" {
+///   tx "…"
+/// }
+/// ```
+///
+/// Optional attributes are omitted when `None`. Unknown props follow known
+/// ones in BTreeMap key order. The `tx` payload is emitted as a single escaped
+/// string child node (same encoding as `content` in a `code` node), so
+/// characters that require escaping (`"`, `\`, `\n`, etc.) survive
+/// round-trips. Mirrors [`write_provenance_block`].
+fn write_action_block(actions: &[ActionDef], out: &mut String, depth: usize) {
+    if actions.is_empty() {
+        return;
+    }
+    indent(out, depth);
+    out.push_str("actions {\n");
+    for def in actions {
+        indent(out, depth + 1);
+        out.push_str("action id=\"");
+        out.push_str(&def.id);
+        out.push('"');
+        if let Some(label) = &def.label {
+            out.push_str(" label=\"");
+            out.push_str(&escape_kdl_string(label));
+            out.push('"');
+        }
+        if let Some(version) = &def.version {
+            out.push_str(" version=\"");
+            out.push_str(version);
+            out.push('"');
+        }
+        // Unknown properties in sorted key order (BTreeMap iteration is sorted).
+        for (key, prop) in &def.unknown_props {
+            out.push(' ');
+            out.push_str(key);
+            out.push('=');
+            out.push_str(&fmt_unknown_property(prop));
+        }
+        out.push_str(" {\n");
+        // Emit the tx payload as a single escaped-string child node. This
+        // mirrors how `code` nodes emit their `content` child: the JSON is
+        // stored decoded and re-encoded here so quotes and backslashes survive
+        // round-trips.
+        indent(out, depth + 2);
+        out.push_str("tx \"");
+        out.push_str(&escape_kdl_string(&def.tx_json));
+        out.push_str("\"\n");
+        indent(out, depth + 1);
+        out.push_str("}\n");
     }
     indent(out, depth);
     out.push_str("}\n");

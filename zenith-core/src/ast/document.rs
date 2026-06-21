@@ -1,6 +1,7 @@
 //! Top-level document AST types.
 
 use super::Span;
+use super::action::ActionDef;
 use super::asset::AssetBlock;
 use super::library::LibraryDef;
 use super::node::Node;
@@ -277,6 +278,10 @@ pub struct Document {
     /// entry declares an external library dependency (id/version/hash). The engine
     /// preserves and validates these but does not fetch package content.
     pub libraries: Vec<LibraryDef>,
+    /// Action declarations; empty when the `actions` block is absent. Each entry
+    /// declares a named transaction script (id/label/version/tx_json). The engine
+    /// round-trips the `tx` payload verbatim without parsing it.
+    pub actions: Vec<ActionDef>,
     pub tokens: TokenBlock,
     pub styles: StyleBlock,
     /// Reusable component definitions; empty when the `components` block is
@@ -420,6 +425,7 @@ mod parity_tests {
             project: None,
             assets: AssetBlock::default(),
             libraries: Vec::new(),
+            actions: Vec::new(),
             tokens: TokenBlock::default(),
             styles: StyleBlock::default(),
             components: Vec::new(),

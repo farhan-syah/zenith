@@ -296,6 +296,7 @@ fn doc_with(tokens: Vec<Token>, pages: Vec<Page>) -> Document {
         project: None,
         assets: AssetBlock::default(),
         libraries: Vec::new(),
+        actions: Vec::new(),
         tokens: TokenBlock {
             format: "zenith-token-v1".to_owned(),
             tokens,
@@ -1930,6 +1931,7 @@ fn doc_with_assets(assets: Vec<AssetDecl>) -> Document {
             source_span: None,
         },
         libraries: Vec::new(),
+        actions: Vec::new(),
         tokens: TokenBlock {
             format: "zenith-token-v1".to_owned(),
             tokens: vec![],
@@ -2957,6 +2959,7 @@ fn doc_with_styles(tokens: Vec<Token>, styles: Vec<Style>, pages: Vec<Page>) -> 
         project: None,
         assets: AssetBlock::default(),
         libraries: Vec::new(),
+        actions: Vec::new(),
         tokens: TokenBlock {
             format: "zenith-token-v1".to_owned(),
             tokens,
