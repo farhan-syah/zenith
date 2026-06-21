@@ -404,16 +404,19 @@ pub fn validate(doc: &Document) -> ValidationReport {
 
     // ── Provenance records ────────────────────────────────────────────────
     // Each `origin` id participates in the GLOBAL id-uniqueness set. The record
-    // cross-references a target (a document node id OR a declared token id) AND a
-    // declared library id, all of which must exist (`all_node_ids` is fully built
-    // above, before the page walk; `declared_token_ids`/`declared_library_ids`
-    // are collected alongside it).
+    // cross-references a target (a document node id OR a declared token id OR a
+    // declared action id) AND a declared library id, all of which must exist
+    // (`all_node_ids` is fully built above, before the page walk;
+    // `declared_token_ids`/`declared_library_ids`/`declared_action_ids` are
+    // collected alongside it).
+    let declared_action_ids: HashSet<String> = doc.actions.iter().map(|a| a.id.clone()).collect();
     for prov in &doc.provenance {
         register_id(&prov.id, &mut seen_ids, &mut diagnostics);
         validate_provenance_def(
             prov,
             &all_node_ids,
             &declared_token_ids,
+            &declared_action_ids,
             &declared_library_ids,
             &mut diagnostics,
         );
@@ -939,10 +942,11 @@ fn validate_library_decl(decl: &LibraryDef, diagnostics: &mut Vec<Diagnostic>) {
 }
 
 /// Validate a single [`ProvenanceDef`] beyond ID uniqueness:
-/// - `node` must reference an existing document node OR a declared token →
-///   `provenance.unknown_node` (Error). A provenance record links a LOCAL target
-///   (a node, or a token imported from a library) back to its origin, so a
-///   declared token id is an accepted target. Mirrors `master.unknown_reference`.
+/// - `node` must reference an existing document node OR a declared token OR a
+///   declared action → `provenance.unknown_node` (Error). A provenance record
+///   links a LOCAL target (a node, a token imported from a library, or a
+///   declared action) back to its origin, so declared token and action ids are
+///   accepted targets. Mirrors `master.unknown_reference`.
 /// - `library` must reference a library declared in the `libraries` block →
 ///   `provenance.unknown_library` (Error).
 /// - unknown properties → `provenance.unknown_property` (Warning).
@@ -950,14 +954,18 @@ fn validate_provenance_def(
     prov: &ProvenanceDef,
     all_node_ids: &HashSet<String>,
     declared_token_ids: &HashSet<String>,
+    declared_action_ids: &HashSet<String>,
     declared_library_ids: &HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if !all_node_ids.contains(&prov.node) && !declared_token_ids.contains(&prov.node) {
+    if !all_node_ids.contains(&prov.node)
+        && !declared_token_ids.contains(&prov.node)
+        && !declared_action_ids.contains(&prov.node)
+    {
         diagnostics.push(Diagnostic::error(
             "provenance.unknown_node",
             format!(
-                "provenance '{}': references node or token '{}' which does not exist",
+                "provenance '{}': references node, token, or action '{}' which does not exist",
                 prov.id, prov.node
             ),
             prov.source_span,

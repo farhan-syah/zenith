@@ -6012,6 +6012,7 @@ fn library_unknown_property_produces_warning() {
 
 // ── provenance: cross-reference validation ────────────────────────────
 
+use crate::ast::action::ActionDef;
 use crate::ast::provenance::ProvenanceDef;
 
 /// A document with the given provenance records, libraries, and page children.
@@ -6174,4 +6175,47 @@ fn provenance_unknown_property_produces_warning() {
     assert_eq!(diag.severity, Severity::Warning);
     // The unknown-property warning is not itself an error; node + library resolve.
     assert!(!report.has_errors());
+}
+
+#[test]
+fn provenance_node_may_be_a_declared_action() {
+    // A provenance record whose `node` is a declared ACTION id validates clean —
+    // an action imported from a library is a valid provenance target.
+    let prov = minimal_provenance("prov.brand", "apply-brand-kit", "@acme/brand-kit");
+    let mut doc = doc_with_provenance(vec![prov], vec![minimal_library("@acme/brand-kit")], vec![]);
+    doc.actions.push(ActionDef {
+        id: "apply-brand-kit".to_owned(),
+        label: Some("Apply Brand Kit".to_owned()),
+        version: None,
+        tx_json: "{}".to_owned(),
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    });
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "provenance.unknown_node"),
+        "a provenance record targeting a declared action must not fire unknown_node; got {:?}",
+        codes(&report)
+    );
+    assert!(!report.has_errors());
+}
+
+#[test]
+fn provenance_node_nonexistent_id_still_errors() {
+    // Negative case: a provenance `node` that matches neither any node id, nor
+    // any declared token id, nor any declared action id must still fire
+    // `provenance.unknown_node`.
+    let prov = minimal_provenance("prov.ghost2", "does-not-exist", "@acme/brand-kit");
+    let doc = doc_with_provenance(
+        vec![prov],
+        vec![minimal_library("@acme/brand-kit")],
+        vec![minimal_rect("btn", None)],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "provenance.unknown_node"),
+        "a provenance record with a non-existent node/token/action id must error; got {:?}",
+        codes(&report)
+    );
+    assert!(report.has_errors());
 }

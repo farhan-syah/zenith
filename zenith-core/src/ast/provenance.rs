@@ -18,7 +18,8 @@ pub struct ProvenanceDef {
     /// This record's own unique id. Required.
     pub id: String,
     /// The id of the document node this provenance describes. Required; must
-    /// reference an existing node.
+    /// reference an existing node id, a declared token id, or a declared action
+    /// id.
     pub node: String,
     /// The declared library/package id this node originated from. Required; must
     /// reference a `library` declared in the `libraries` block.
