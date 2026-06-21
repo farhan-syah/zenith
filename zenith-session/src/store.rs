@@ -94,6 +94,19 @@ pub fn put_object_with_hash(
     Ok(())
 }
 
+/// The on-disk (compressed) byte size of the object addressed by `hash`.
+/// Errors if the object does not exist.
+pub fn object_size(
+    fs: &impl Fs,
+    paths: &StorePaths,
+    doc_id: &str,
+    hash: &str,
+) -> Result<u64, SessionError> {
+    let path = object_path(paths, doc_id, hash)?;
+    let bytes = fs.read(&path)?;
+    Ok(u64::try_from(bytes.len()).unwrap_or(u64::MAX))
+}
+
 /// Load and decompress the object addressed by `hash` for `doc_id`.
 pub fn get_object(
     fs: &impl Fs,
@@ -241,6 +254,35 @@ mod tests {
             raw.len() < 10_000,
             "expected compressed size ({}) to be smaller than 10000",
             raw.len()
+        );
+    }
+
+    #[test]
+    fn object_size_returns_stored_length() {
+        let (fs, paths) = setup();
+        let content = b"some stored content";
+        let hash = put_object(&fs, &paths, "doc1", content).unwrap();
+
+        let stored_path = paths.objects_dir("doc1").join(&hash[..2]).join(&hash[2..]);
+        let raw = fs.read(&stored_path).unwrap();
+        let expected = u64::try_from(raw.len()).unwrap();
+
+        let size = object_size(&fs, &paths, "doc1", &hash).unwrap();
+        assert!(size > 0, "stored size must be nonzero");
+        assert_eq!(
+            size, expected,
+            "object_size must match the raw stored file length"
+        );
+    }
+
+    #[test]
+    fn object_size_missing_hash_errors() {
+        let (fs, paths) = setup();
+        let missing = object_hash(b"never stored");
+        let result = object_size(&fs, &paths, "doc1", &missing);
+        assert!(
+            result.is_err(),
+            "object_size for a missing hash must return Err"
         );
     }
 }

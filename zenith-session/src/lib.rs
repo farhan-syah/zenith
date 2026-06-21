@@ -40,12 +40,17 @@ pub use gc::{GcReport, gc};
 pub use identity::{DocMeta, Outcome, Reconciled, reconcile};
 pub use layout::StorePaths;
 pub use manifest::{HistoryRecord, append_record, read_records};
-pub use retention::{RetentionPolicy, ThinReport, apply_thinning, thin_versions};
+pub use retention::{
+    CapReport, MaintainReport, RetentionPolicy, ThinReport, apply_caps, apply_thinning, maintain,
+    thin_versions,
+};
 pub use revspec::{resolve_revspec, resolve_revspec_for};
 pub use session::{
     RecordOutcome, SessionState, clear_session, current_content, record_state, redo, undo,
 };
-pub use store::{get_object, has_object, object_hash, put_object, put_object_with_hash};
+pub use store::{
+    get_object, has_object, object_hash, object_size, put_object, put_object_with_hash,
+};
 pub use tier2::{
     VersionOutcome, list_versions, record_version, resolve_version, restore_content,
     version_content,

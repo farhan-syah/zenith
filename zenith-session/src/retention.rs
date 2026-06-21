@@ -11,8 +11,10 @@ use std::time::UNIX_EPOCH;
 
 use crate::adapter::{Clock, Fs};
 use crate::error::SessionError;
+use crate::gc::{GcReport, gc};
 use crate::layout::StorePaths;
 use crate::manifest::{HistoryRecord, read_records};
+use crate::store::object_size;
 
 // ── Time constants (ms) ───────────────────────────────────────────────────────
 
@@ -36,6 +38,11 @@ pub struct RetentionPolicy {
     /// Below this age, keep one per day (ms).
     pub daily_below: u128,
     // at/above daily_below → weekly buckets
+    /// Maximum number of versions to retain (named versions and the latest are
+    /// exempt from being dropped, but DO count toward the total).
+    pub max_versions: usize,
+    /// Maximum total compressed bytes of objects referenced by retained versions.
+    pub max_object_bytes: u64,
 }
 
 impl Default for RetentionPolicy {
@@ -44,6 +51,8 @@ impl Default for RetentionPolicy {
             keep_all_below: MS_PER_HOUR,
             hourly_below: MS_PER_DAY,
             daily_below: 30 * MS_PER_DAY,
+            max_versions: 500,
+            max_object_bytes: 10 * 1024 * 1024,
         }
     }
 }
@@ -128,6 +137,45 @@ pub struct ThinReport {
     pub dropped: usize,
 }
 
+/// Rewrite `versions.jsonl` for `doc_id` keeping only the versions whose id is
+/// in `keep` (preserving original order, id and seq), re-linking each kept
+/// record's `parent` to the previous kept record (first kept → None).
+/// Returns `(kept, dropped)`.
+pub(crate) fn rewrite_versions_keeping(
+    fs: &impl Fs,
+    paths: &StorePaths,
+    doc_id: &str,
+    versions: &[HistoryRecord],
+    keep: &BTreeSet<String>,
+) -> Result<(usize, usize), SessionError> {
+    let mut kept_records: Vec<HistoryRecord> = Vec::new();
+    let mut prev_kept_id: Option<String> = None;
+    let mut dropped = 0usize;
+    for v in versions {
+        if keep.contains(&v.id) {
+            let mut r = v.clone();
+            r.parent = prev_kept_id.clone();
+            prev_kept_id = Some(v.id.clone());
+            kept_records.push(r);
+        } else {
+            dropped += 1;
+        }
+    }
+    let mut bytes: Vec<u8> = Vec::new();
+    for r in &kept_records {
+        let mut line = serde_json::to_vec(r)
+            .map_err(|e| SessionError::new(format!("serialize version: {e}")))?;
+        line.push(b'\n');
+        bytes.extend_from_slice(&line);
+    }
+    let vpath = paths.versions_file(doc_id);
+    if let Some(parent) = vpath.parent() {
+        fs.create_dir_all(parent)?;
+    }
+    fs.write(&vpath, &bytes)?;
+    Ok((kept_records.len(), dropped))
+}
+
 /// Apply `policy` to `doc_id`'s versions: drop thinned-out versions and rewrite
 /// `versions.jsonl`, re-linking each kept version's parent to the previous kept
 /// version.
@@ -141,8 +189,7 @@ pub fn apply_thinning(
     doc_id: &str,
     policy: &RetentionPolicy,
 ) -> Result<ThinReport, SessionError> {
-    let vpath = paths.versions_file(doc_id);
-    let versions = read_records(fs, &vpath)?;
+    let versions = read_records(fs, &paths.versions_file(doc_id))?;
     if versions.is_empty() {
         return Ok(ThinReport {
             kept: 0,
@@ -158,39 +205,106 @@ pub fn apply_thinning(
         .unwrap_or(0);
 
     let keep = thin_versions(&versions, now_ms, policy);
+    let (kept, dropped) = rewrite_versions_keeping(fs, paths, doc_id, &versions, &keep)?;
+    Ok(ThinReport { kept, dropped })
+}
 
-    let mut kept_records: Vec<HistoryRecord> = Vec::new();
-    let mut prev_kept_id: Option<String> = None;
-    let mut dropped = 0usize;
+// ── Caps ──────────────────────────────────────────────────────────────────────
 
+/// Outcome of an [`apply_caps`] pass.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CapReport {
+    pub kept: usize,
+    pub dropped: usize,
+}
+
+/// Enforce the per-doc count and size caps: drop the OLDEST unnamed, non-latest
+/// versions until at most `max_versions` remain AND the total compressed size of
+/// objects referenced by retained versions is at most `max_object_bytes`. Named
+/// versions and the latest version are never dropped. Rewrites `versions.jsonl`
+/// (re-linking parents). Orphaned objects are reclaimed by a later gc pass.
+pub fn apply_caps(
+    fs: &impl Fs,
+    paths: &StorePaths,
+    doc_id: &str,
+    policy: &RetentionPolicy,
+) -> Result<CapReport, SessionError> {
+    let versions = read_records(fs, &paths.versions_file(doc_id))?;
+    if versions.is_empty() {
+        return Ok(CapReport {
+            kept: 0,
+            dropped: 0,
+        });
+    }
+
+    // Precompute each distinct snapshot hash's stored size ONCE (avoid O(n²) IO).
+    let mut sizes: BTreeMap<String, u64> = BTreeMap::new();
     for v in &versions {
-        if keep.contains(&v.id) {
-            let mut r = v.clone();
-            r.parent = prev_kept_id.clone();
-            prev_kept_id = Some(v.id.clone());
-            kept_records.push(r);
-        } else {
-            dropped += 1;
+        if !sizes.contains_key(&v.snapshot) {
+            let sz = object_size(fs, paths, doc_id, &v.snapshot).unwrap_or(0);
+            sizes.insert(v.snapshot.clone(), sz);
         }
     }
 
-    // Rewrite versions.jsonl with exactly the kept records (overwrite, not append).
-    let mut bytes: Vec<u8> = Vec::new();
-    for r in &kept_records {
-        let mut line = serde_json::to_vec(r)
-            .map_err(|e| SessionError::new(format!("serialize version: {e}")))?;
-        line.push(b'\n');
-        bytes.extend_from_slice(&line);
+    let latest_id = versions.last().map(|v| v.id.clone());
+    let mut keep: BTreeSet<String> = versions.iter().map(|v| v.id.clone()).collect();
+
+    // Helper: total bytes of DISTINCT object hashes referenced by the kept set.
+    let referenced_bytes = |keep: &BTreeSet<String>| -> u64 {
+        let mut seen: BTreeSet<&str> = BTreeSet::new();
+        let mut total: u64 = 0;
+        for v in &versions {
+            if keep.contains(&v.id) && seen.insert(v.snapshot.as_str()) {
+                total = total.saturating_add(*sizes.get(&v.snapshot).unwrap_or(&0));
+            }
+        }
+        total
+    };
+
+    // Drop oldest unnamed, non-latest versions until under both caps.
+    for v in &versions {
+        let over =
+            keep.len() > policy.max_versions || referenced_bytes(&keep) > policy.max_object_bytes;
+        if !over {
+            break;
+        }
+        let is_latest = latest_id.as_deref() == Some(v.id.as_str());
+        if v.label.is_none() && !is_latest && keep.contains(&v.id) {
+            keep.remove(&v.id);
+        }
     }
 
-    if let Some(parent) = vpath.parent() {
-        fs.create_dir_all(parent)?;
-    }
-    fs.write(&vpath, &bytes)?;
+    let (kept, dropped) = rewrite_versions_keeping(fs, paths, doc_id, &versions, &keep)?;
+    Ok(CapReport { kept, dropped })
+}
 
-    Ok(ThinReport {
-        kept: kept_records.len(),
-        dropped,
+// ── Maintain ──────────────────────────────────────────────────────────────────
+
+/// Combined outcome of a [`maintain`] pass.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MaintainReport {
+    pub thinned: ThinReport,
+    pub capped: CapReport,
+    pub collected: GcReport,
+}
+
+/// Full durable-retention pass for `doc_id`: thin by age, enforce caps, then
+/// garbage-collect now-unreferenced objects. The single entry point a host calls
+/// periodically (e.g. on close or on a timer).
+pub fn maintain(
+    fs: &impl Fs,
+    paths: &StorePaths,
+    clock: &impl Clock,
+    doc_id: &str,
+    policy: &RetentionPolicy,
+) -> Result<MaintainReport, SessionError> {
+    let thinned = apply_thinning(fs, paths, clock, doc_id, policy)?;
+    let capped = apply_caps(fs, paths, doc_id, policy)?;
+    let collected = gc(fs, paths, doc_id)?;
+    Ok(MaintainReport {
+        thinned,
+        capped,
+        collected,
     })
 }
 
@@ -221,6 +335,22 @@ mod tests {
 
     fn policy() -> RetentionPolicy {
         RetentionPolicy::default()
+    }
+
+    /// Seed via tier2::record_version with a fixed-increment FakeClock.
+    fn seed_via_tier2(
+        fs: &MemFs,
+        paths: &StorePaths,
+        doc_id: &str,
+        contents: &[&[u8]],
+        labels: &[Option<&str>],
+        base_ms: u64,
+    ) {
+        for (i, content) in contents.iter().enumerate() {
+            let clock = FakeClock(UNIX_EPOCH + Duration::from_millis(base_ms + i as u64 * 100));
+            let label = labels.get(i).copied().flatten();
+            crate::tier2::record_version(fs, paths, &clock, doc_id, content, label, None).unwrap();
+        }
     }
 
     // ── Pure thin_versions tests ──────────────────────────────────────────────
@@ -480,5 +610,187 @@ mod tests {
         assert!(ids.contains(&"v0"), "named version v0 must be preserved");
         assert!(ids.contains(&"v2"), "latest v2 must be preserved");
         assert_eq!(report.kept + report.dropped, 3);
+    }
+
+    // ── apply_caps tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn apply_caps_count_drops_oldest_unnamed() {
+        let fs = MemFs::new();
+        let paths = StorePaths::new("/store");
+        let doc_id = "caps_count";
+
+        // Seed 5 unnamed versions with distinct content so objects differ.
+        seed_via_tier2(
+            &fs,
+            &paths,
+            doc_id,
+            &[b"c0", b"c1", b"c2", b"c3", b"c4"],
+            &[None, None, None, None, None],
+            1_000,
+        );
+
+        let policy = RetentionPolicy {
+            max_versions: 3,
+            max_object_bytes: u64::MAX,
+            ..Default::default()
+        };
+        let report = apply_caps(&fs, &paths, doc_id, &policy).unwrap();
+        assert_eq!(report.kept, 3, "should keep exactly 3");
+        assert_eq!(report.dropped, 2, "should drop the 2 oldest");
+
+        let kept_back = read_records(&fs, &paths.versions_file(doc_id)).unwrap();
+        assert_eq!(kept_back.len(), 3);
+
+        // Latest (v4) must survive.
+        assert_eq!(kept_back.last().map(|r| r.id.as_str()), Some("v4"));
+        // v0 and v1 (oldest unnamed) must be gone.
+        assert!(kept_back.iter().all(|r| r.id != "v0"), "v0 must be dropped");
+        assert!(kept_back.iter().all(|r| r.id != "v1"), "v1 must be dropped");
+        // v2 is the new first kept; its parent must be None.
+        assert_eq!(kept_back[0].id, "v2");
+        assert_eq!(
+            kept_back[0].parent, None,
+            "first kept must have parent None"
+        );
+    }
+
+    #[test]
+    fn apply_caps_keeps_named() {
+        let fs = MemFs::new();
+        let paths = StorePaths::new("/store");
+        let doc_id = "caps_named";
+
+        // v0 named, v1–v3 unnamed.
+        seed_via_tier2(
+            &fs,
+            &paths,
+            doc_id,
+            &[b"n0", b"u1", b"u2", b"u3"],
+            &[Some("keep-me"), None, None, None],
+            1_000,
+        );
+
+        let policy = RetentionPolicy {
+            max_versions: 2,
+            max_object_bytes: u64::MAX,
+            ..Default::default()
+        };
+        let report = apply_caps(&fs, &paths, doc_id, &policy).unwrap();
+
+        let kept_back = read_records(&fs, &paths.versions_file(doc_id)).unwrap();
+        let ids: Vec<&str> = kept_back.iter().map(|r| r.id.as_str()).collect();
+
+        // Named v0 must survive even though it is oldest.
+        assert!(ids.contains(&"v0"), "named version must survive caps");
+        // Latest (v3) must survive.
+        assert!(ids.contains(&"v3"), "latest must survive caps");
+        assert_eq!(report.kept, kept_back.len());
+    }
+
+    #[test]
+    fn apply_caps_size_cap() {
+        let fs = MemFs::new();
+        let paths = StorePaths::new("/store");
+        let doc_id = "caps_size";
+
+        // Three versions with sizeable, distinct content.
+        let big0 = vec![b'A'; 2_000];
+        let big1 = vec![b'B'; 2_000];
+        let big2 = vec![b'C'; 2_000];
+        seed_via_tier2(
+            &fs,
+            &paths,
+            doc_id,
+            &[&big0, &big1, &big2],
+            &[None, None, None],
+            1_000,
+        );
+
+        // Get the compressed size of one object so we can set the cap tight.
+        let versions = read_records(&fs, &paths.versions_file(doc_id)).unwrap();
+        let one_obj_size =
+            crate::store::object_size(&fs, &paths, doc_id, &versions[0].snapshot).unwrap_or(1);
+        // Cap to just above one object's size — forces dropping at least one old unnamed.
+        let policy = RetentionPolicy {
+            max_versions: usize::MAX,
+            max_object_bytes: one_obj_size + 1,
+            ..Default::default()
+        };
+
+        let report = apply_caps(&fs, &paths, doc_id, &policy).unwrap();
+        assert!(
+            report.dropped >= 1,
+            "at least one old unnamed must be dropped by size cap"
+        );
+
+        let kept_back = read_records(&fs, &paths.versions_file(doc_id)).unwrap();
+        assert!(
+            kept_back.iter().any(|r| r.id == "v2"),
+            "latest (v2) must always survive"
+        );
+    }
+
+    #[test]
+    fn apply_caps_empty_noop() {
+        let fs = MemFs::new();
+        let paths = StorePaths::new("/store");
+        let report = apply_caps(&fs, &paths, "empty_doc", &RetentionPolicy::default()).unwrap();
+        assert_eq!(
+            report,
+            CapReport {
+                kept: 0,
+                dropped: 0
+            }
+        );
+    }
+
+    // ── maintain test ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn maintain_runs_all_passes() {
+        let fs = MemFs::new();
+        let paths = StorePaths::new("/store");
+        let doc_id = "maintain_doc";
+
+        // Seed several versions via record_version so objects are real.
+        let base_ms: u64 = 0;
+        seed_via_tier2(
+            &fs,
+            &paths,
+            doc_id,
+            &[b"m0", b"m1", b"m2", b"m3", b"m4"],
+            &[None, None, Some("tagged"), None, None],
+            base_ms,
+        );
+
+        // Use a clock well into the future so age-based thinning can act.
+        let future_ms = 90 * 24 * 3_600_000_u64; // 90 days
+        let clock = FakeClock(UNIX_EPOCH + Duration::from_millis(future_ms));
+
+        let report = maintain(&fs, &paths, &clock, doc_id, &RetentionPolicy::default()).unwrap();
+
+        // All three sub-reports must exist without error; the file must be readable.
+        let kept_back = read_records(&fs, &paths.versions_file(doc_id)).unwrap();
+        assert!(
+            !kept_back.is_empty(),
+            "at least the latest must survive maintain"
+        );
+
+        // Latest content must be intact.
+        let last_id = kept_back.last().map(|r| r.id.clone()).unwrap();
+        let content = crate::tier2::version_content(&fs, &paths, doc_id, &last_id).unwrap();
+        assert_eq!(
+            content, b"m4",
+            "latest version content must be intact after maintain"
+        );
+
+        // GC kept at least as many objects as surviving distinct snapshots.
+        let distinct_snapshots: std::collections::BTreeSet<&str> =
+            kept_back.iter().map(|r| r.snapshot.as_str()).collect();
+        assert!(
+            report.collected.kept >= distinct_snapshots.len(),
+            "gc must have kept at least the surviving snapshots' objects"
+        );
     }
 }
