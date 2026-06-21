@@ -60,6 +60,13 @@ impl StorePaths {
     pub fn session_dir(&self, doc_id: &str) -> PathBuf {
         self.doc_dir(doc_id).join("session")
     }
+
+    /// Persisted per-doc metadata file.
+    ///
+    /// `<root>/docs/<doc_id>/meta.json`
+    pub fn meta_file(&self, doc_id: &str) -> PathBuf {
+        self.doc_dir(doc_id).join("meta.json")
+    }
 }
 
 #[cfg(test)]
@@ -103,5 +110,13 @@ mod tests {
     fn different_doc_ids_produce_different_paths() {
         let p = paths();
         assert_ne!(p.doc_dir("alpha"), p.doc_dir("beta"));
+    }
+
+    #[test]
+    fn meta_file() {
+        assert_eq!(
+            paths().meta_file("doc1"),
+            PathBuf::from("/data/docs/doc1/meta.json")
+        );
     }
 }
