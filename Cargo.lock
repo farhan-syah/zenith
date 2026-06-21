@@ -1318,9 +1318,11 @@ name = "zenith-session"
 version = "0.0.0"
 dependencies = [
  "dirs",
+ "flate2",
  "getrandom 0.4.3",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
 ]
 
