@@ -183,12 +183,12 @@ pub fn add(
             };
             let mut summary = String::new();
             summary.push_str(&format!(
-                "added {}#{} as filter token '{}'\n",
-                outcome.pkg_id, outcome.item, outcome.token_id
+                "added {}#{} as {} token '{}'\n",
+                outcome.pkg_id, outcome.item, outcome.apply_property, outcome.token_id
             ));
             summary.push_str(&format!(
-                "  apply with: filter=(token)\"{}\"\n",
-                outcome.token_id
+                "  apply with: {}=(token)\"{}\"\n",
+                outcome.apply_property, outcome.token_id
             ));
             summary.push_str(&format!("  dependencies: {}\n", deps));
             summary.push_str(&format!("  provenance: {}", outcome.provenance_id));

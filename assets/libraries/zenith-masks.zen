@@ -1,0 +1,34 @@
+zenith version=1 {
+  project id="@zenith/masks" name="Zenith Masks"
+  assets {
+  }
+  libraries {
+    library id="@zenith/masks" version="1.0.0"
+  }
+  tokens format="zenith-token-v1" {
+    token id="vignette" type="mask" {
+      rounded radius=64 feather=72 invert=#true
+    }
+    token id="spotlight" type="mask" {
+      ellipse feather=64
+    }
+    token id="soft-rect" type="mask" {
+      rect feather=40
+    }
+    token id="soft-card" type="mask" {
+      rounded radius=48 feather=32
+    }
+    token id="portrait" type="mask" {
+      ellipse feather=80 invert=#true
+    }
+    token id="oval-clip" type="mask" {
+      ellipse
+    }
+  }
+  styles {
+  }
+  document id="pack.preview" title="Zenith Masks" {
+    page id="pack.pg" name="Preview" w=(px)100 h=(px)100 {
+    }
+  }
+}

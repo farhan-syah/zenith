@@ -43,6 +43,10 @@ pub const EMBEDDED_PACKS: &[(&str, &str)] = &[
         "@zenith/filters",
         include_str!("../../assets/libraries/zenith-filters.zen"),
     ),
+    (
+        "@zenith/masks",
+        include_str!("../../assets/libraries/zenith-masks.zen"),
+    ),
 ];
 
 /// Where a [`LibraryPack`] was loaded from.
@@ -106,8 +110,19 @@ pub struct LibraryPack {
     /// Where the pack came from.
     pub source: PackSource,
     /// The items the pack provides: component ids first (in source order),
-    /// then filter-token ids (in source order).
+    /// then exportable token ids (in source order).
     pub items: Vec<PackItem>,
+}
+
+/// Whether a token type is an EXPORTABLE library item (addressable as
+/// `<pkg>#<token-id>` and copied by `materialize_token`).
+///
+/// Effect tokens — `filter` and `mask` — are self-contained, applyable units
+/// that other documents reference by id, so they are exported items. Color /
+/// dimension / gradient / shadow tokens are dependencies pulled in transitively
+/// when an exported token (or component) needs them, not standalone items.
+fn is_exportable_token(ty: &TokenType) -> bool {
+    matches!(ty, TokenType::Filter | TokenType::Mask)
 }
 
 /// An error produced while parsing a pack.
@@ -186,7 +201,7 @@ pub fn parse_pack(source: &str, source_kind: PackSource) -> Result<LibraryPack, 
         doc.tokens
             .tokens
             .iter()
-            .filter(|t| t.token_type == TokenType::Filter)
+            .filter(|t| is_exportable_token(&t.token_type))
             .map(|t| PackItem {
                 id: t.id.clone(),
                 kind: ItemKind::Token,
@@ -749,9 +764,11 @@ pub struct TokenAddOutcome {
     pub pkg_id: String,
     /// The item name within the pack (e.g. `noir`).
     pub item: String,
-    /// The copied filter-token id (kept as-is, e.g. `noir`).
+    /// The copied token id (kept as-is, e.g. `noir` or `vignette`).
     pub token_id: String,
-    /// Color-token deps copied alongside the filter token (sorted, deduped).
+    /// The property the copied token is applied through: `"filter"` or `"mask"`.
+    pub apply_property: &'static str,
+    /// Dependency tokens copied alongside the item token (sorted, deduped).
     pub dep_token_ids: Vec<String>,
     /// The unique id of the recorded provenance entry.
     pub provenance_id: String,
@@ -852,21 +869,21 @@ pub fn materialize_token(
     let pack_doc = load_pack_document(pack)?;
 
     // 2. Find the FILTER token named `item`. ───────────────────────────────────
-    let filter_token = pack_doc
+    let item_token = pack_doc
         .tokens
         .tokens
         .iter()
-        .find(|t| t.id == item && t.token_type == TokenType::Filter)
+        .find(|t| t.id == item && is_exportable_token(&t.token_type))
         .ok_or_else(|| {
             let available: Vec<&str> = pack_doc
                 .tokens
                 .tokens
                 .iter()
-                .filter(|t| t.token_type == TokenType::Filter)
+                .filter(|t| is_exportable_token(&t.token_type))
                 .map(|t| t.id.as_str())
                 .collect();
             AddError::new(format!(
-                "unknown filter token '{}' in package '{}' (available: {})",
+                "unknown token item '{}' in package '{}' (available: {})",
                 item,
                 pkg_id,
                 if available.is_empty() {
@@ -879,8 +896,15 @@ pub fn materialize_token(
 
     let mut warnings: Vec<String> = Vec::new();
 
-    // 3. Collect transitive color-token deps. ──────────────────────────────────
-    let dep_ids = collect_filter_dep_ids(filter_token, &pack_doc.tokens.tokens);
+    // The property the token is applied through, and (for filters) its deps.
+    let apply_property = match item_token.token_type {
+        TokenType::Mask => "mask",
+        _ => "filter",
+    };
+
+    // 3. Collect transitive color-token deps (filter duotone colors; none for
+    //    masks, which are self-contained). ─────────────────────────────────────
+    let dep_ids = collect_filter_dep_ids(item_token, &pack_doc.tokens.tokens);
 
     // 4. Ensure the target's tokens block has a format. ────────────────────────
     if target.tokens.format.is_empty() {
@@ -894,7 +918,7 @@ pub fn materialize_token(
             to_copy.push(tok.clone());
         }
     }
-    to_copy.push(filter_token.clone());
+    to_copy.push(item_token.clone());
     copy_tokens(&to_copy, &mut target.tokens.tokens, &mut warnings);
 
     // 6. Record the libraries import entry. ────────────────────────────────────
@@ -937,6 +961,7 @@ pub fn materialize_token(
         pkg_id: pkg_id.to_owned(),
         item: item.to_owned(),
         token_id,
+        apply_property,
         dep_token_ids: dep_ids.into_iter().collect(),
         provenance_id,
         warnings,
@@ -1468,6 +1493,41 @@ mod tests {
             "errors: {:?}",
             hard_errors(&target)
         );
+    }
+
+    #[test]
+    fn embedded_masks_pack_lists_mask_token_items() {
+        let packs = resolve_packs(None);
+        let masks = packs
+            .iter()
+            .find(|p| p.id == "@zenith/masks")
+            .expect("@zenith/masks embedded");
+        // Mask tokens are exported as token items.
+        assert!(
+            masks
+                .items
+                .iter()
+                .any(|it| it.id == "vignette" && it.kind == ItemKind::Token),
+            "vignette listed as a token item"
+        );
+        assert!(masks.items.iter().any(|it| it.id == "spotlight"));
+    }
+
+    #[test]
+    fn materialize_token_mask_applies_via_mask_property_no_deps() {
+        let mut target = parse_target();
+        let packs = resolve_packs(None);
+        let outcome =
+            materialize_token(&mut target, &packs, "@zenith/masks", "vignette", "vignette")
+                .expect("materialize_token ok");
+        // The mask token is copied; masks are self-contained (no deps).
+        assert!(target.tokens.tokens.iter().any(|t| t.id == "vignette"));
+        assert!(outcome.dep_token_ids.is_empty());
+        // It applies through the `mask` property (not `filter`).
+        assert_eq!(outcome.apply_property, "mask");
+        // Provenance recorded against the token id.
+        assert!(target.provenance.iter().any(|p| p.node == "vignette"));
+        assert!(hard_errors(&target).is_empty());
     }
 
     #[test]
