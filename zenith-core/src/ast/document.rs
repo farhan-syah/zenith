@@ -225,6 +225,11 @@ pub struct Document {
     /// PNG is always sRGB); a future PDF backend consults it. An invalid value
     /// is preserved here verbatim and surfaced as a validation warning.
     pub colorspace: Option<String>,
+    /// Stable document identity: an optional ULID minted at document creation,
+    /// stored verbatim as a Crockford base-32 string (no special characters, no
+    /// escaping). `None` when the author omitted `doc-id`. This is pure
+    /// metadata — render and compile code must not read it.
+    pub doc_id: Option<String>,
     /// Mirrored book margins toggle. `Some(true)` → page margins mirror by page
     /// parity (recto = odd 1-based page → inner margin on LEFT; verso = even →
     /// inner margin on RIGHT). `Some(false)` or `None` (default) → margins are
@@ -413,6 +418,7 @@ mod parity_tests {
         Document {
             version: 1,
             colorspace: None,
+            doc_id: None,
             mirror_margins: None,
             facing_pages: None,
             spread_gutter: None,

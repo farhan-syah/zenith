@@ -353,6 +353,15 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
     // an unrecognized value is preserved verbatim for a precise warning.
     let colorspace = optional_string_prop(zenith_node, "colorspace").map(str::to_owned);
 
+    // Optional stable document identity (`doc-id="01ARZ3NDEKTSV4RRFFQ69G5FAV"`).
+    // The value is a ULID (Crockford base-32) minted at document creation; it
+    // is preserved verbatim without validation — the parser accepts whatever
+    // string the author wrote and lets the validator decide. Both the hyphenated
+    // and underscored spellings are accepted for forward-compat.
+    let doc_id = optional_string_prop(zenith_node, "doc-id")
+        .or_else(|| optional_string_prop(zenith_node, "doc_id"))
+        .map(str::to_owned);
+
     // Optional mirrored-margins toggle (`mirror-margins=#true`). Forward-compat:
     // both the hyphenated and underscored spellings are accepted.
     let mirror_margins = optional_bool_prop(zenith_node, "mirror-margins")
@@ -468,6 +477,7 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
     Ok(Document {
         version,
         colorspace,
+        doc_id,
         mirror_margins,
         facing_pages,
         spread_gutter,

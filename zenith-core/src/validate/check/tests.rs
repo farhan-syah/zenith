@@ -284,6 +284,7 @@ fn doc_with(tokens: Vec<Token>, pages: Vec<Page>) -> Document {
     Document {
         version: 1,
         colorspace: None,
+        doc_id: None,
         mirror_margins: None,
         facing_pages: None,
         spread_gutter: None,
@@ -1916,6 +1917,7 @@ fn doc_with_assets(assets: Vec<AssetDecl>) -> Document {
     Document {
         version: 1,
         colorspace: None,
+        doc_id: None,
         mirror_margins: None,
         facing_pages: None,
         spread_gutter: None,
@@ -2947,6 +2949,7 @@ fn doc_with_styles(tokens: Vec<Token>, styles: Vec<Style>, pages: Vec<Page>) -> 
     Document {
         version: 1,
         colorspace: None,
+        doc_id: None,
         mirror_margins: None,
         facing_pages: None,
         spread_gutter: None,

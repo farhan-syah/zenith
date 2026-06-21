@@ -4194,3 +4194,80 @@ fn test_unknown_node_preserves_known_child() {
         "unknown node with a known child must survive parse → format → parse"
     );
 }
+
+/// **`doc-id` round-trip**: a root `zenith` node carrying `doc-id="my-doc-123"`
+/// must parse onto `doc.doc_id`, be re-emitted verbatim by the formatter, and
+/// survive a parse → format → parse cycle with byte-identical output.
+#[test]
+fn test_doc_id_round_trips() {
+    let src = r##"zenith version=1 doc-id="my-doc-123" {
+  project id="proj.did" name="DocId"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#ffffff"
+  }
+  styles {
+  }
+  document id="doc.did" title="DocId" {
+    page id="page.one" w=(px)640 h=(px)360 {
+      rect id="r" x=(px)0 y=(px)0 w=(px)640 h=(px)360 fill=(token)"color.bg"
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+
+    assert_eq!(
+        doc.doc_id.as_deref(),
+        Some("my-doc-123"),
+        "doc-id must parse onto doc.doc_id"
+    );
+
+    let formatted = format_document(&doc).expect("format must succeed");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("utf8");
+
+    assert!(
+        formatted_str.contains("doc-id=\"my-doc-123\""),
+        "formatted output must contain doc-id=\"my-doc-123\"; got:\n{formatted_str}"
+    );
+
+    let reparsed = adapter.parse(&formatted).expect("re-parse after format");
+    assert_eq!(
+        doc.doc_id, reparsed.doc_id,
+        "doc_id must round-trip identically"
+    );
+
+    // Idempotency: format twice → byte-identical output.
+    let formatted2 = format_document(&reparsed).expect("format 2 must succeed");
+    assert_eq!(
+        formatted, formatted2,
+        "doc-id formatting must be idempotent"
+    );
+}
+
+/// **`doc-id` absent is `None`**: a root `zenith` node without a `doc-id`
+/// attribute must produce `doc.doc_id == None` after parsing.
+#[test]
+fn test_doc_id_absent_is_none() {
+    let src = r##"zenith version=1 {
+  project id="proj.nodid" name="NoDid"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#ffffff"
+  }
+  styles {
+  }
+  document id="doc.nodid" title="NoDid" {
+    page id="page.one" w=(px)640 h=(px)360 {
+      rect id="r" x=(px)0 y=(px)0 w=(px)640 h=(px)360 fill=(token)"color.bg"
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+
+    assert!(
+        doc.doc_id.is_none(),
+        "doc_id must be None when doc-id is absent from the zenith node"
+    );
+}

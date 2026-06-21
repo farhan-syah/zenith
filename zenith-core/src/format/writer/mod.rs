@@ -253,6 +253,10 @@ fn write_document(doc: &Document, out: &mut String) {
     // Optional export color space attribute, emitted right after version so the
     // canonical form round-trips (parse → format → parse is byte-stable).
     write_opt_str(out, "colorspace", &doc.colorspace);
+    // Optional stable document identity (ULID, Crockford base-32). Value is
+    // always safe to emit without escaping (no special characters). Emitted
+    // right after colorspace — grouped with version/colorspace as identity metadata.
+    write_opt_str(out, "doc-id", &doc.doc_id);
     write_opt_bool(out, "mirror-margins", &doc.mirror_margins);
     // Facing-pages and spread-gutter are emitted right after mirror-margins (the
     // spread-layout metadata group). Both are omitted when None so a document
