@@ -171,6 +171,12 @@ pub fn add(
         .map(|it| it.kind);
 
     let summary = match item_kind {
+        Some(ItemKind::Action) => {
+            return Err(AddCmdErr::new(
+                "applying action items via 'library add' is not yet implemented",
+                2,
+            ));
+        }
         Some(ItemKind::Token) => {
             // TOKEN item: copy the filter token + color deps; no instance, no page.
             let outcome =
@@ -527,6 +533,47 @@ mod tests {
             serde_json::from_str(&artifact.json).expect("scene json parses");
         let commands = scene["commands"].as_array().expect("commands array");
         assert!(!commands.is_empty(), "applied filter compiles to commands");
+    }
+
+    #[test]
+    fn add_action_item_returns_not_yet_implemented_error() {
+        // Build a minimal project pack that declares an action item so the
+        // resolver can surface it as `ItemKind::Action`.
+        const ACTION_PACK_SRC: &str = r#"zenith version=1 {
+  project id="@test/actions" name="Test Actions"
+  libraries { library id="@test/actions" version="1.0.0" }
+  actions {
+    action id="apply-brand-kit" {
+      tx "{\"ops\":[]}"
+    }
+  }
+  document id="d" title="x" {
+    page id="pg" w=(px)100 h=(px)100 {
+    }
+  }
+}
+"#;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let lib_dir = dir.path().join("libraries");
+        std::fs::create_dir_all(&lib_dir).expect("create libraries dir");
+        std::fs::write(lib_dir.join("actions.zen"), ACTION_PACK_SRC).expect("write pack");
+
+        let err = add(
+            TARGET_SRC,
+            "@test/actions#apply-brand-kit",
+            Some(dir.path()),
+            None,
+            (0.0, 0.0),
+            None,
+        )
+        .expect_err("action item must return an error");
+        assert_eq!(err.exit_code, 2);
+        assert!(
+            err.message
+                .contains("applying action items via 'library add' is not yet implemented"),
+            "msg: {}",
+            err.message
+        );
     }
 
     #[test]

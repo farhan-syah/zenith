@@ -8,8 +8,9 @@
 //! ```
 //!
 //! That entry's `id` is the package id and `version` is the pack version. A
-//! pack's ITEMS are its `components`: item `decision` in pack
-//! `@zenith/flowchart` is addressed `@zenith/flowchart#decision`.
+//! pack's ITEMS are its `components`, filter/mask `tokens`, and `actions`:
+//! item `decision` in pack `@zenith/flowchart` is addressed
+//! `@zenith/flowchart#decision`.
 //!
 //! PRESET packs are embedded in the binary via [`include_str!`] (see
 //! [`EMBEDDED_PACKS`]); PROJECT packs live in `<project_dir>/libraries/*.zen`
@@ -70,23 +71,27 @@ impl PackSource {
 
 /// What kind of thing a pack item is.
 ///
-/// A pack exports COMPONENT items (materialized as an instance on a page) and
+/// A pack exports COMPONENT items (materialized as an instance on a page),
 /// TOKEN items (filter tokens, copied into the target's tokens block with their
-/// color-token dependencies — no instance, no page required).
+/// color-token dependencies — no instance, no page required), and ACTION items
+/// (addressed as `<pkg>#<action-id>`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ItemKind {
     /// A component item, addressed `<pkg>#<component-id>`.
     Component,
     /// A filter-token item, addressed `<pkg>#<token-id>`.
     Token,
+    /// An action item, addressed `<pkg>#<action-id>`.
+    Action,
 }
 
 impl ItemKind {
-    /// A short, stable label for human/JSON output: `"component"` or `"token"`.
+    /// A short, stable label for human/JSON output: `"component"`, `"token"`, or `"action"`.
     pub fn label(&self) -> &'static str {
         match self {
             ItemKind::Component => "component",
             ItemKind::Token => "token",
+            ItemKind::Action => "action",
         }
     }
 }
@@ -94,9 +99,9 @@ impl ItemKind {
 /// A single exported item of a [`LibraryPack`]: its id plus its kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackItem {
-    /// The item id (a component id or a filter-token id).
+    /// The item id (a component id, a filter-token id, or an action id).
     pub id: String,
-    /// Whether the item is a component or a filter token.
+    /// Whether the item is a component, a filter token, or an action.
     pub kind: ItemKind,
 }
 
@@ -110,7 +115,8 @@ pub struct LibraryPack {
     /// Where the pack came from.
     pub source: PackSource,
     /// The items the pack provides: component ids first (in source order),
-    /// then exportable token ids (in source order).
+    /// then exportable token ids (in source order), then action ids (in source
+    /// order).
     pub items: Vec<PackItem>,
 }
 
@@ -207,6 +213,10 @@ pub fn parse_pack(source: &str, source_kind: PackSource) -> Result<LibraryPack, 
                 kind: ItemKind::Token,
             }),
     );
+    items.extend(doc.actions.iter().map(|a| PackItem {
+        id: a.id.clone(),
+        kind: ItemKind::Action,
+    }));
 
     Ok(LibraryPack {
         id: self_entry.id.clone(),
@@ -1374,6 +1384,34 @@ mod tests {
                     kind: ItemKind::Component
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn parse_pack_with_actions_lists_action_items() {
+        const ACTION_PACK_SRC: &str = r#"zenith version=1 {
+  project id="@test/actions" name="Test Actions"
+  libraries { library id="@test/actions" version="1.0.0" }
+  actions {
+    action id="apply-brand-kit" {
+      tx "{\"ops\":[]}"
+    }
+  }
+  document id="d" title="x" {
+    page id="pg" w=(px)100 h=(px)100 {
+    }
+  }
+}
+"#;
+        let pack = parse_pack(ACTION_PACK_SRC, PackSource::Preset).expect("action pack parses");
+        assert_eq!(pack.id, "@test/actions");
+        assert!(
+            pack.items.contains(&PackItem {
+                id: "apply-brand-kit".to_owned(),
+                kind: ItemKind::Action,
+            }),
+            "action item must be present; items: {:?}",
+            pack.items
         );
     }
 
