@@ -113,18 +113,26 @@ pub struct ResolvedShadowLayer {
 }
 
 /// A resolved filter: an ordered list of filter ops, applied in source order.
-/// Filters carry no color refs, so there is no second cross-check pass.
+/// Duotone ops carry shadow/highlight color token ids; their existence and type
+/// are checked at the scene-compile layer (not here) to keep the resolver
+/// single-pass, exactly like shadow/gradient color refs.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedFilter {
     /// Ordered list of resolved ops, in source order.
     pub ops: Vec<ResolvedFilterOp>,
 }
 
-/// A single resolved filter op: a kind plus an optional finite amount.
+/// A single resolved filter op: a kind plus an optional finite amount. A
+/// `Duotone` op also carries its shadow/highlight color token ids (validated to
+/// both be present); other kinds leave them `None`. Their existence/type is
+/// checked at the scene-compile layer (the resolver records them as referenced
+/// in the visual check, exactly like shadow/gradient color refs).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedFilterOp {
     pub kind: FilterKind,
     pub amount: Option<f64>,
+    pub shadow: Option<String>,
+    pub highlight: Option<String>,
 }
 
 /// A successfully resolved token (type + value pair).
@@ -863,7 +871,7 @@ fn validate_shadow(
 }
 
 /// Validate a filter literal: require ≥1 op, each amount (when present) finite.
-/// Filters carry no color refs, so there is no second cross-check pass.
+/// Duotone op color-token existence/type is checked at the scene-compile layer.
 fn validate_filter(
     token_id: &str,
     literal: &TokenLiteral,
@@ -913,9 +921,34 @@ fn validate_filter(
             ));
             return None;
         }
+        // A duotone op blends between two color tokens; both are required.
+        // Non-duotone ops ignore any stray shadow/highlight props.
+        if op.kind == FilterKind::Duotone {
+            let missing = match (op.shadow.is_some(), op.highlight.is_some()) {
+                (true, true) => None,
+                (false, true) => Some("shadow"),
+                (true, false) => Some("highlight"),
+                (false, false) => Some("shadow and highlight"),
+            };
+            if let Some(which) = missing {
+                diagnostics.push(Diagnostic::error(
+                    "filter.duotone_missing_color",
+                    format!(
+                        "filter token '{}' has a duotone op missing {}; \
+                         a duotone op requires both shadow and highlight color tokens",
+                        token_id, which
+                    ),
+                    span,
+                    Some(token_id.to_owned()),
+                ));
+                return None;
+            }
+        }
         resolved_ops.push(ResolvedFilterOp {
             kind: op.kind,
             amount: op.amount,
+            shadow: op.shadow.clone(),
+            highlight: op.highlight.clone(),
         });
     }
 
@@ -1896,8 +1929,37 @@ mod tests {
             value: TokenValue::Literal(TokenLiteral::Filter(FilterLiteral {
                 ops: ops
                     .into_iter()
-                    .map(|(kind, amount)| FilterOp { kind, amount })
+                    .map(|(kind, amount)| FilterOp {
+                        kind,
+                        amount,
+                        shadow: None,
+                        highlight: None,
+                    })
                     .collect(),
+            })),
+            source_span: None,
+        }
+    }
+
+    /// Build a filter token with a single `duotone` op carrying the given
+    /// shadow/highlight color token ids (either may be `None` to exercise the
+    /// missing-color diagnostic).
+    fn duotone_filter_token(
+        id: &str,
+        shadow: Option<&str>,
+        highlight: Option<&str>,
+        amount: Option<f64>,
+    ) -> Token {
+        Token {
+            id: id.to_owned(),
+            token_type: TokenType::Filter,
+            value: TokenValue::Literal(TokenLiteral::Filter(FilterLiteral {
+                ops: vec![FilterOp {
+                    kind: FilterKind::Duotone,
+                    amount,
+                    shadow: shadow.map(str::to_owned),
+                    highlight: highlight.map(str::to_owned),
+                }],
             })),
             source_span: None,
         }
@@ -1971,5 +2033,57 @@ mod tests {
             codes(&r.diagnostics)
         );
         assert!(!r.resolved.contains_key("filter.bad-shape"));
+    }
+
+    #[test]
+    fn resolves_duotone_with_both_colors() {
+        let b = block(vec![
+            literal_token(
+                "color.sh",
+                TokenType::Color,
+                TokenLiteral::String("#000000".to_owned()),
+            ),
+            literal_token(
+                "color.hi",
+                TokenType::Color,
+                TokenLiteral::String("#ffffff".to_owned()),
+            ),
+            duotone_filter_token("filter.duo", Some("color.sh"), Some("color.hi"), Some(0.8)),
+        ]);
+        let r = resolve_tokens(&b);
+        assert!(
+            r.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            r.diagnostics
+        );
+        match &r.resolved["filter.duo"].value {
+            ResolvedValue::Filter(f) => {
+                assert_eq!(f.ops.len(), 1);
+                assert_eq!(f.ops[0].kind, FilterKind::Duotone);
+                assert_eq!(f.ops[0].amount, Some(0.8));
+                assert_eq!(f.ops[0].shadow.as_deref(), Some("color.sh"));
+                assert_eq!(f.ops[0].highlight.as_deref(), Some("color.hi"));
+            }
+            other => panic!("expected filter, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn duotone_missing_highlight_produces_missing_color() {
+        let b = block(vec![
+            literal_token(
+                "color.sh",
+                TokenType::Color,
+                TokenLiteral::String("#000000".to_owned()),
+            ),
+            duotone_filter_token("filter.duo", Some("color.sh"), None, None),
+        ]);
+        let r = resolve_tokens(&b);
+        assert!(
+            has_code(&r.diagnostics, "filter.duotone_missing_color"),
+            "codes: {:?}",
+            codes(&r.diagnostics)
+        );
+        assert!(!r.resolved.contains_key("filter.duo"));
     }
 }

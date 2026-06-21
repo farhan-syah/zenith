@@ -67,6 +67,11 @@ pub enum FilterKind {
     Brightness,
     Contrast,
     HueRotate,
+    /// Duotone: maps each pixel's luma to a blend between a shadow color (dark
+    /// areas) and a highlight color (light areas), with an optional `amount` mix
+    /// factor against the original. This is the only kind that references color
+    /// tokens (carried on [`FilterOp::shadow`] / [`FilterOp::highlight`]).
+    Duotone,
 }
 
 impl FilterKind {
@@ -80,6 +85,7 @@ impl FilterKind {
             "brightness" => Some(Self::Brightness),
             "contrast" => Some(Self::Contrast),
             "hue-rotate" => Some(Self::HueRotate),
+            "duotone" => Some(Self::Duotone),
             _ => None,
         }
     }
@@ -95,6 +101,7 @@ impl FilterKind {
             Self::Brightness => "brightness",
             Self::Contrast => "contrast",
             Self::HueRotate => "hue-rotate",
+            Self::Duotone => "duotone",
         }
     }
 }
@@ -114,8 +121,15 @@ pub struct FilterLiteral {
 pub struct FilterOp {
     /// The filter operation kind.
     pub kind: FilterKind,
-    /// The optional amount for this op.
+    /// The optional amount for this op. For `Duotone` this is the mix factor
+    /// against the original (default applied later); for scalar kinds it is the
+    /// op's own amount.
     pub amount: Option<f64>,
+    /// Shadow color token id (dark-area color) — `Some` only for `Duotone` ops.
+    pub shadow: Option<String>,
+    /// Highlight color token id (light-area color) — `Some` only for `Duotone`
+    /// ops.
+    pub highlight: Option<String>,
 }
 
 /// Whether a gradient token is linear or radial.

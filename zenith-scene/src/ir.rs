@@ -190,27 +190,29 @@ pub struct ShadowSpec {
 
 // ── Filter ──────────────────────────────────────────────────────────────────
 
-/// The kind of a single color-filter operation.
-///
-/// Scene-local mirror of `zenith_core::FilterKind` — the scene IR stays
-/// decoupled from the core AST, exactly as [`ShadowSpec`] carries a scene-local
-/// [`Color`] rather than a core type. The compile step maps core → scene.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
-pub enum FilterKind {
-    Grayscale,
-    Invert,
-    Sepia,
-    Saturate,
-    Brightness,
-    Contrast,
-    HueRotate,
-}
-
 /// A single color-filter operation applied to captured ink (straight-alpha math).
+///
+/// Each variant carries its already-resolved scalar payload (the per-kind
+/// `amount`, defaults substituted at compile time). `Duotone` additionally
+/// carries its two resolved colors — the scene IR stays decoupled from the core
+/// AST, exactly as [`ShadowSpec`] carries a scene-local [`Color`] rather than a
+/// color-token id. The compile step maps core → scene.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
-pub struct FilterSpec {
-    pub kind: FilterKind,
-    pub amount: f64,
+pub enum FilterSpec {
+    Grayscale(f64),
+    Invert(f64),
+    Sepia(f64),
+    Saturate(f64),
+    Brightness(f64),
+    Contrast(f64),
+    HueRotate(f64),
+    /// Maps luma to a blend between `shadow` (dark) and `highlight` (light),
+    /// then mixes with the original by `amount`.
+    Duotone {
+        amount: f64,
+        shadow: Color,
+        highlight: Color,
+    },
 }
 
 // ── Fit mode ────────────────────────────────────────────────────────────────

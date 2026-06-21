@@ -110,6 +110,19 @@ fn write_token(token: &Token, out: &mut String, depth: usize) {
         for op in &f.ops {
             indent(out, depth + 1);
             out.push_str(op.kind.as_op_name());
+            // Order: name, shadow, highlight, amount. `shadow`/`highlight` are
+            // emitted only for duotone ops (mirrors the shadow-layer color
+            // emission); the round-trip parser reads them back by name.
+            if let Some(shadow) = &op.shadow {
+                out.push_str(" shadow=(token)\"");
+                out.push_str(shadow);
+                out.push('"');
+            }
+            if let Some(highlight) = &op.highlight {
+                out.push_str(" highlight=(token)\"");
+                out.push_str(highlight);
+                out.push('"');
+            }
             if let Some(amount) = op.amount {
                 out.push_str(" amount=");
                 out.push_str(&fmt_f64(amount));

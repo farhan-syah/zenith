@@ -955,6 +955,20 @@ fn layer_color_token(node: &KdlNode) -> Option<String> {
     }
 }
 
+/// Read a `<key>=(token)"id"` color-token reference off `node`, if present.
+///
+/// Generalizes the `(token)` annotation idiom from `layer_color_token` /
+/// `stop_color_token` to an arbitrary prop name (e.g. `shadow`/`highlight` on a
+/// duotone filter op). Any other shape (missing, unannotated, non-string)
+/// yields `None`.
+fn optional_token_ref_prop(node: &KdlNode, key: &str) -> Option<String> {
+    let entry = node.entry(key)?;
+    match (entry_annotation(entry), entry.value()) {
+        (Some("token"), KdlValue::String(s)) => Some(s.clone()),
+        _ => None,
+    }
+}
+
 /// Build a shadow `TokenValue` from a `token` node's `layer` children. Each
 /// layer reads `dx`/`dy`/`blur` as `(px)` dimensions (pixel value taken
 /// directly; absent → 0) plus a `color=(token)"id"` color token id. Infallible:
@@ -1006,7 +1020,16 @@ fn transform_filter(node: &KdlNode) -> TokenValue {
                 continue;
             };
             let amount = optional_f64_prop(child, "amount");
-            ops.push(FilterOp { kind, amount });
+            // `shadow`/`highlight` are color token refs, only meaningful for a
+            // `duotone` op. Non-duotone ops simply won't carry them → `None`.
+            let shadow = optional_token_ref_prop(child, "shadow");
+            let highlight = optional_token_ref_prop(child, "highlight");
+            ops.push(FilterOp {
+                kind,
+                amount,
+                shadow,
+                highlight,
+            });
         }
     }
 

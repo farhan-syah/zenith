@@ -2,8 +2,7 @@
 
 use zenith_core::{AssetProvider, BytesAssetProvider, FontProvider, default_provider};
 use zenith_scene::{
-    Color, FilterKind, FilterSpec, GradientPaint, GradientStop, Rect, Scene, SceneCommand,
-    SceneGlyph,
+    Color, FilterSpec, GradientPaint, GradientStop, Rect, Scene, SceneCommand, SceneGlyph,
 };
 
 use super::render_pdf;
@@ -283,10 +282,7 @@ fn unfiltered_fill_rect_embeds_no_image() {
 fn filtered_fill_rect_embeds_image_xobject() {
     let mut scene = Scene::new(60.0, 40.0);
     scene.commands.push(SceneCommand::BeginFilter {
-        filters: vec![FilterSpec {
-            kind: FilterKind::Grayscale,
-            amount: 1.0,
-        }],
+        filters: vec![FilterSpec::Grayscale(1.0)],
     });
     scene.commands.push(SceneCommand::FillRect {
         x: 10.0,
@@ -316,10 +312,7 @@ fn filtered_fill_rect_embeds_image_xobject() {
 fn filtered_region_render_is_byte_identical() {
     let mut scene = Scene::new(80.0, 50.0);
     scene.commands.push(SceneCommand::BeginFilter {
-        filters: vec![FilterSpec {
-            kind: FilterKind::Sepia,
-            amount: 1.0,
-        }],
+        filters: vec![FilterSpec::Sepia(1.0)],
     });
     scene.commands.push(SceneCommand::FillRect {
         x: 5.0,

@@ -2377,10 +2377,12 @@ fn filter_emits_begin_end_bracket() {
     });
     let filters = begin.expect("a BeginFilter must be emitted");
     assert_eq!(filters.len(), 2, "two filter ops: {filters:?}");
-    assert_eq!(filters[0].kind, zenith_scene::FilterKind::Grayscale);
-    assert_eq!(filters[0].amount, 1.0, "grayscale default amount is 1.0");
-    assert_eq!(filters[1].kind, zenith_scene::FilterKind::Brightness);
-    assert_eq!(filters[1].amount, 0.5);
+    assert_eq!(
+        filters[0],
+        zenith_scene::FilterSpec::Grayscale(1.0),
+        "grayscale default amount is 1.0"
+    );
+    assert_eq!(filters[1], zenith_scene::FilterSpec::Brightness(0.5));
 
     // Bracket is balanced, Begin precedes a draw which precedes End.
     let begin_idx = cmds

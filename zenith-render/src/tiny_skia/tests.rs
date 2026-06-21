@@ -1952,16 +1952,10 @@ fn read_pixel(pm: &tiny_skia::Pixmap) -> (u8, u8, u8, u8) {
 #[test]
 fn apply_filters_grayscale_collapses_to_luma() {
     use super::filter::apply_filters;
-    use zenith_scene::{FilterKind, FilterSpec};
+    use zenith_scene::FilterSpec;
 
     let mut pm = opaque_pixel(255, 0, 0);
-    apply_filters(
-        &mut pm,
-        &[FilterSpec {
-            kind: FilterKind::Grayscale,
-            amount: 1.0,
-        }],
-    );
+    apply_filters(&mut pm, &[FilterSpec::Grayscale(1.0)]);
     let (r, g, b, a) = read_pixel(&pm);
     // luma of pure red = 0.2126 → 0.2126*255 ≈ 54.
     assert_eq!(r, g, "grayscale: R == G");
@@ -1974,16 +1968,10 @@ fn apply_filters_grayscale_collapses_to_luma() {
 #[test]
 fn apply_filters_invert_flips_channels() {
     use super::filter::apply_filters;
-    use zenith_scene::{FilterKind, FilterSpec};
+    use zenith_scene::FilterSpec;
 
     let mut pm = opaque_pixel(10, 20, 30);
-    apply_filters(
-        &mut pm,
-        &[FilterSpec {
-            kind: FilterKind::Invert,
-            amount: 1.0,
-        }],
-    );
+    apply_filters(&mut pm, &[FilterSpec::Invert(1.0)]);
     let (r, g, b, a) = read_pixel(&pm);
     assert_eq!((r, g, b), (245, 235, 225), "1 - channel");
     assert_eq!(a, 255, "alpha is unchanged");
@@ -1993,16 +1981,10 @@ fn apply_filters_invert_flips_channels() {
 #[test]
 fn apply_filters_brightness_zero_is_black() {
     use super::filter::apply_filters;
-    use zenith_scene::{FilterKind, FilterSpec};
+    use zenith_scene::FilterSpec;
 
     let mut pm = opaque_pixel(200, 100, 50);
-    apply_filters(
-        &mut pm,
-        &[FilterSpec {
-            kind: FilterKind::Brightness,
-            amount: 0.0,
-        }],
-    );
+    apply_filters(&mut pm, &[FilterSpec::Brightness(0.0)]);
     let (r, g, b, a) = read_pixel(&pm);
     assert_eq!((r, g, b), (0, 0, 0), "brightness 0 → black");
     assert_eq!(a, 255, "alpha is unchanged");
@@ -2013,16 +1995,10 @@ fn apply_filters_brightness_zero_is_black() {
 fn apply_filters_skips_transparent_pixel() {
     use super::filter::apply_filters;
     use tiny_skia::Pixmap;
-    use zenith_scene::{FilterKind, FilterSpec};
+    use zenith_scene::FilterSpec;
 
     let mut pm = Pixmap::new(1, 1).expect("1x1 pixmap"); // all zero (transparent)
-    apply_filters(
-        &mut pm,
-        &[FilterSpec {
-            kind: FilterKind::Invert,
-            amount: 1.0,
-        }],
-    );
+    apply_filters(&mut pm, &[FilterSpec::Invert(1.0)]);
     assert_eq!(read_pixel(&pm), (0, 0, 0, 0), "transparent pixel untouched");
 }
 
@@ -2031,21 +2007,60 @@ fn apply_filters_skips_transparent_pixel() {
 #[test]
 fn apply_filters_is_deterministic() {
     use super::filter::apply_filters;
-    use zenith_scene::{FilterKind, FilterSpec};
+    use zenith_scene::FilterSpec;
 
-    let filters = [
-        FilterSpec {
-            kind: FilterKind::Sepia,
-            amount: 1.0,
-        },
-        FilterSpec {
-            kind: FilterKind::HueRotate,
-            amount: 90.0,
-        },
-    ];
+    let filters = [FilterSpec::Sepia(1.0), FilterSpec::HueRotate(90.0)];
     let mut a = opaque_pixel(123, 45, 200);
     let mut b = opaque_pixel(123, 45, 200);
     apply_filters(&mut a, &filters);
     apply_filters(&mut b, &filters);
     assert_eq!(a.data(), b.data(), "same input + filters → identical bytes");
+}
+
+/// `Duotone` with shadow=black, highlight=white, amount=1.0 maps luma onto the
+/// black→white axis: pure black → ≈shadow (black), pure white → ≈highlight
+/// (white), mid-gray → ≈gray (luma-mapped). Determinism is also checked.
+#[test]
+fn apply_filters_duotone_maps_luma_between_colors() {
+    use super::filter::apply_filters;
+    use zenith_scene::{Color, FilterSpec};
+
+    let duo = FilterSpec::Duotone {
+        amount: 1.0,
+        shadow: Color::srgb(0, 0, 0, 255),
+        highlight: Color::srgb(255, 255, 255, 255),
+    };
+
+    // Pure black input → luma 0 → shadow color (black).
+    let mut black = opaque_pixel(0, 0, 0);
+    apply_filters(&mut black, &[duo]);
+    assert_eq!(read_pixel(&black), (0, 0, 0, 255), "black → shadow");
+
+    // Pure white input → luma 1 → highlight color (white).
+    let mut white = opaque_pixel(255, 255, 255);
+    apply_filters(&mut white, &[duo]);
+    assert_eq!(
+        read_pixel(&white),
+        (255, 255, 255, 255),
+        "white → highlight"
+    );
+
+    // Mid-gray input → luma ≈ 0.5 → gray; R==G==B and ~mid.
+    let mut gray = opaque_pixel(128, 128, 128);
+    apply_filters(&mut gray, &[duo]);
+    let (r, g, b, a) = read_pixel(&gray);
+    assert_eq!(r, g, "duotone gray: R == G");
+    assert_eq!(g, b, "duotone gray: G == B");
+    assert!(
+        (i32::from(r) - 128).abs() <= 2,
+        "luma-mapped ≈ 128, got {r}"
+    );
+    assert_eq!(a, 255, "alpha is unchanged");
+
+    // Determinism: two identical inputs → identical bytes.
+    let mut c1 = opaque_pixel(70, 140, 210);
+    let mut c2 = opaque_pixel(70, 140, 210);
+    apply_filters(&mut c1, &[duo]);
+    apply_filters(&mut c2, &[duo]);
+    assert_eq!(c1.data(), c2.data(), "duotone is deterministic");
 }

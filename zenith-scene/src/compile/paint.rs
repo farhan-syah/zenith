@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use zenith_core::{Diagnostic, GradientKind, PropertyValue, ResolvedToken, ResolvedValue};
 
 use crate::color::{parse_color, parse_srgb_hex};
-use crate::ir::{Color, FilterKind, FilterSpec, GradientPaint, GradientStop, ShadowSpec};
+use crate::ir::{Color, FilterSpec, GradientPaint, GradientStop, ShadowSpec};
 
 /// Build an [`ir::Color`](Color) from a resolved color token, preserving its
 /// CMYK origin when present. Returns `None` only when the resolved value is not
@@ -208,10 +208,13 @@ pub(super) fn resolve_property_shadow(
 /// or `None`.
 ///
 /// Mirrors [`resolve_property_shadow`]: returns `Some` only when `prop` is a
-/// `TokenRef` whose token resolved to a `ResolvedValue::Filter`. Each op's core
-/// [`zenith_core::FilterKind`] is mapped to the scene-local [`FilterKind`], and
-/// the per-kind default `amount` is substituted when the op carries `None`.
-/// Returns `None` for non-filter props, or when the op list is empty.
+/// `TokenRef` whose token resolved to a `ResolvedValue::Filter`. Each core op is
+/// mapped to a [`FilterSpec`] variant carrying its resolved scalar payload; the
+/// per-kind default `amount` is substituted when the op leaves it unspecified.
+/// For `Duotone`, the op's shadow/highlight color-token ids are resolved to
+/// concrete [`Color`]s (the same lookup [`resolve_property_shadow`] uses); if
+/// either color is missing or unresolvable, that op is SKIPPED. Returns `None`
+/// for non-filter props, or when no op survives.
 pub(super) fn resolve_property_filter(
     prop: &PropertyValue,
     resolved: &BTreeMap<String, ResolvedToken>,
@@ -226,26 +229,44 @@ pub(super) fn resolve_property_filter(
 
     let mut ops: Vec<FilterSpec> = Vec::with_capacity(f.ops.len());
     for op in &f.ops {
-        let kind = match op.kind {
-            zenith_core::FilterKind::Grayscale => FilterKind::Grayscale,
-            zenith_core::FilterKind::Invert => FilterKind::Invert,
-            zenith_core::FilterKind::Sepia => FilterKind::Sepia,
-            zenith_core::FilterKind::Saturate => FilterKind::Saturate,
-            zenith_core::FilterKind::Brightness => FilterKind::Brightness,
-            zenith_core::FilterKind::Contrast => FilterKind::Contrast,
-            zenith_core::FilterKind::HueRotate => FilterKind::HueRotate,
+        // Default amounts match the historical scalar defaults: 1.0 for every
+        // kind except hue-rotate (0.0 degrees) and duotone (1.0 mix factor).
+        let spec = match op.kind {
+            zenith_core::FilterKind::Grayscale => FilterSpec::Grayscale(op.amount.unwrap_or(1.0)),
+            zenith_core::FilterKind::Invert => FilterSpec::Invert(op.amount.unwrap_or(1.0)),
+            zenith_core::FilterKind::Sepia => FilterSpec::Sepia(op.amount.unwrap_or(1.0)),
+            zenith_core::FilterKind::Saturate => FilterSpec::Saturate(op.amount.unwrap_or(1.0)),
+            zenith_core::FilterKind::Brightness => FilterSpec::Brightness(op.amount.unwrap_or(1.0)),
+            zenith_core::FilterKind::Contrast => FilterSpec::Contrast(op.amount.unwrap_or(1.0)),
+            zenith_core::FilterKind::HueRotate => FilterSpec::HueRotate(op.amount.unwrap_or(0.0)),
+            zenith_core::FilterKind::Duotone => {
+                // Resolve both color tokens; skip the op if either is missing
+                // or not a color, mirroring how unresolvable shadow layers skip.
+                let (Some(shadow_id), Some(highlight_id)) =
+                    (op.shadow.as_deref(), op.highlight.as_deref())
+                else {
+                    continue;
+                };
+                let Some(shadow) = resolved
+                    .get(shadow_id)
+                    .and_then(|rt| color_from_resolved(&rt.value))
+                else {
+                    continue;
+                };
+                let Some(highlight) = resolved
+                    .get(highlight_id)
+                    .and_then(|rt| color_from_resolved(&rt.value))
+                else {
+                    continue;
+                };
+                FilterSpec::Duotone {
+                    amount: op.amount.unwrap_or(1.0),
+                    shadow,
+                    highlight,
+                }
+            }
         };
-        // Per-kind default amount when the op leaves it unspecified.
-        let amount = op.amount.unwrap_or(match kind {
-            FilterKind::Grayscale
-            | FilterKind::Invert
-            | FilterKind::Sepia
-            | FilterKind::Saturate
-            | FilterKind::Brightness
-            | FilterKind::Contrast => 1.0,
-            FilterKind::HueRotate => 0.0,
-        });
-        ops.push(FilterSpec { kind, amount });
+        ops.push(spec);
     }
 
     if ops.is_empty() {

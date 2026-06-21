@@ -88,6 +88,20 @@ pub(super) fn check_visual_prop(
                 }
             }
 
+            // A filter token may carry duotone ops that reference shadow/highlight
+            // color tokens transitively — record them so they are not falsely
+            // flagged `token.unused`.
+            if let ResolvedValue::Filter(f) = &resolved.value {
+                for op in &f.ops {
+                    if let Some(c) = &op.shadow {
+                        referenced_token_ids.insert(c.clone());
+                    }
+                    if let Some(c) = &op.highlight {
+                        referenced_token_ids.insert(c.clone());
+                    }
+                }
+            }
+
             // Type compatibility check.
             let type_ok = match expect {
                 VisualExpect::Color => {

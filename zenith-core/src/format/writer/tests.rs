@@ -1719,6 +1719,101 @@ fn test_filter_node_prop_wrong_type() {
     );
 }
 
+/// **Duotone filter round-trip**: a duotone op carrying both `shadow` and
+/// `highlight` color-token refs (plus `amount`) must parse→format→parse
+/// byte-stably and emit `duotone shadow=(token)"…" highlight=(token)"…" amount=…`.
+#[test]
+fn test_duotone_filter_token_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.duo" name="Duo"
+  tokens format="zenith-token-v1" {
+    token id="color.sh" type="color" value="#000000"
+    token id="color.hi" type="color" value="#ffffff"
+    token id="filter.duo" type="filter" {
+      duotone shadow=(token)"color.sh" highlight=(token)"color.hi" amount=0.8
+    }
+  }
+  styles {
+  }
+  document id="doc.duo" title="Duo" {
+    page id="p" w=(px)100 h=(px)100 {
+      text id="headline" x=(px)0 y=(px)0 w=(px)100 h=(px)40 filter=(token)"filter.duo" {
+        span "Hi"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc1 = adapter.parse(src.as_bytes()).expect("parse 1");
+    let s1 = format_document(&doc1).expect("format 1");
+    let formatted = String::from_utf8(s1.clone()).expect("utf8");
+
+    assert!(
+        formatted.contains(
+            "duotone shadow=(token)\"color.sh\" highlight=(token)\"color.hi\" amount=0.8"
+        ),
+        "expected duotone op with both colors and amount; got:\n{formatted}"
+    );
+
+    // Idempotency.
+    let doc2 = adapter.parse(&s1).expect("parse 2");
+    let s2 = format_document(&doc2).expect("format 2");
+    assert_eq!(
+        formatted,
+        String::from_utf8(s2).expect("utf8"),
+        "duotone formatting must be idempotent"
+    );
+
+    // AST round-trip (spans stripped).
+    assert_eq!(
+        strip_spans(doc1),
+        strip_spans(doc2),
+        "duotone AST must survive format round-trip"
+    );
+}
+
+/// **Duotone color refs are used transitively**: a node referencing a duotone
+/// filter token records the duotone's shadow/highlight color tokens as used, so
+/// neither is falsely flagged `token.unused`.
+#[test]
+fn test_duotone_color_refs_not_unused() {
+    let src = r##"zenith version=1 {
+  project id="proj.duo" name="Duo"
+  tokens format="zenith-token-v1" {
+    token id="color.sh" type="color" value="#000000"
+    token id="color.hi" type="color" value="#ffffff"
+    token id="filter.duo" type="filter" {
+      duotone shadow=(token)"color.sh" highlight=(token)"color.hi"
+    }
+  }
+  styles {
+  }
+  document id="doc.duo" title="Duo" {
+    page id="p" w=(px)100 h=(px)100 {
+      text id="headline" x=(px)0 y=(px)0 w=(px)100 h=(px)40 filter=(token)"filter.duo" {
+        span "Hi"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+    let report = crate::validate::validate(&doc);
+
+    let unused: Vec<&str> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "token.unused")
+        .filter_map(|d| d.subject_id.as_deref())
+        .collect();
+    assert!(
+        !unused.contains(&"color.sh") && !unused.contains(&"color.hi"),
+        "duotone color tokens must be recorded as used; unused: {unused:?}"
+    );
+}
+
 /// **Booleans**: `visible=#false` must emit with `#false`, not `false` or `"false"`.
 #[test]
 fn test_boolean_format() {

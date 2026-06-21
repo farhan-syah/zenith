@@ -13,7 +13,7 @@
 //! is never modified by a color filter; fully-transparent pixels are skipped.
 
 use tiny_skia::Pixmap;
-use zenith_scene::{FilterKind, FilterSpec};
+use zenith_scene::FilterSpec;
 
 use super::pixels::premultiplied_to_straight;
 
@@ -109,54 +109,79 @@ pub(crate) fn apply_filters_straight(rgba: &mut [u8], filters: &[FilterSpec]) {
 /// Apply a single filter op to straight-alpha RGB in `[0,1]` (unclamped output;
 /// the caller clamps each channel after every op).
 fn apply_one(spec: &FilterSpec, r: f64, g: f64, b: f64) -> (f64, f64, f64) {
-    // Luma weights (Rec. 709), shared by grayscale and saturate.
+    // Luma weights (Rec. 709), shared by grayscale, saturate, and duotone.
     const RW: f64 = 0.2126;
     const GW: f64 = 0.7152;
     const BW: f64 = 0.0722;
-    match spec.kind {
-        FilterKind::Grayscale => {
-            let a = spec.amount.clamp(0.0, 1.0);
+    match *spec {
+        FilterSpec::Grayscale(amount) => {
+            let a = amount.clamp(0.0, 1.0);
             let luma = RW * r + GW * g + BW * b;
             (lerp(r, luma, a), lerp(g, luma, a), lerp(b, luma, a))
         }
-        FilterKind::Invert => {
-            let a = spec.amount.clamp(0.0, 1.0);
+        FilterSpec::Invert(amount) => {
+            let a = amount.clamp(0.0, 1.0);
             (
                 lerp(r, 1.0 - r, a),
                 lerp(g, 1.0 - g, a),
                 lerp(b, 1.0 - b, a),
             )
         }
-        FilterKind::Sepia => {
-            let a = spec.amount.clamp(0.0, 1.0);
+        FilterSpec::Sepia(amount) => {
+            let a = amount.clamp(0.0, 1.0);
             let sr = 0.393 * r + 0.769 * g + 0.189 * b;
             let sg = 0.349 * r + 0.686 * g + 0.168 * b;
             let sb = 0.272 * r + 0.534 * g + 0.131 * b;
             (lerp(r, sr, a), lerp(g, sg, a), lerp(b, sb, a))
         }
-        FilterKind::Saturate => {
+        FilterSpec::Saturate(amount) => {
             // SVG feColorMatrix saturate matrix with s = amount.
-            let s = spec.amount;
+            let s = amount;
             let out_r = (RW + (1.0 - RW) * s) * r + (GW - GW * s) * g + (BW - BW * s) * b;
             let out_g = (RW - RW * s) * r + (GW + (1.0 - GW) * s) * g + (BW - BW * s) * b;
             let out_b = (RW - RW * s) * r + (GW - GW * s) * g + (BW + (1.0 - BW) * s) * b;
             (out_r, out_g, out_b)
         }
-        FilterKind::Brightness => {
-            let a = spec.amount;
+        FilterSpec::Brightness(amount) => {
+            let a = amount;
             (r * a, g * a, b * a)
         }
-        FilterKind::Contrast => {
-            let a = spec.amount;
+        FilterSpec::Contrast(amount) => {
+            let a = amount;
             (
                 (r - 0.5) * a + 0.5,
                 (g - 0.5) * a + 0.5,
                 (b - 0.5) * a + 0.5,
             )
         }
-        FilterKind::HueRotate => {
+        FilterSpec::Duotone {
+            amount,
+            shadow,
+            highlight,
+        } => {
+            // Straight [0,1] endpoints from the two colors.
+            let sh = (
+                f64::from(shadow.r) / 255.0,
+                f64::from(shadow.g) / 255.0,
+                f64::from(shadow.b) / 255.0,
+            );
+            let hi = (
+                f64::from(highlight.r) / 255.0,
+                f64::from(highlight.g) / 255.0,
+                f64::from(highlight.b) / 255.0,
+            );
+            let luma = RW * r + GW * g + BW * b;
+            // Map luma → shadow..highlight (dark→shadow, light→highlight).
+            let d_r = lerp(sh.0, hi.0, luma);
+            let d_g = lerp(sh.1, hi.1, luma);
+            let d_b = lerp(sh.2, hi.2, luma);
+            // Mix the duotone color with the original by `amount`.
+            let t = amount.clamp(0.0, 1.0);
+            (lerp(r, d_r, t), lerp(g, d_g, t), lerp(b, d_b, t))
+        }
+        FilterSpec::HueRotate(amount) => {
             // SVG feColorMatrix hueRotate matrix; amount is in DEGREES.
-            let rad = spec.amount.to_radians();
+            let rad = amount.to_radians();
             let cos = rad.cos();
             let sin = rad.sin();
             let m00 = 0.213 + cos * 0.787 - sin * 0.213;
