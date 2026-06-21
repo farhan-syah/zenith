@@ -6,7 +6,7 @@
 //! Rules (from doc 08 and doc 16):
 //! - Two-space indentation per nesting level.
 //! - Root `zenith` node at column 0.
-//! - Child order under `zenith`: project, assets, tokens, styles, document.
+//! - Child order under `zenith`: project, assets, libraries, tokens, styles, components, masters, sections, document.
 //! - Structural containers (`tokens`, `styles`, `document`, `page`) always emit
 //!   a brace block, even when empty.
 //! - Leaf nodes (`project`, a `rect` with no children) emit a single line.
@@ -21,7 +21,8 @@
 //!
 //! The implementation is split across focused submodules:
 //! - this module root holds the public entry point, the `zenith`/`project`/
-//!   `assets` orchestration, and the shared low-level primitives;
+//!   `assets`/`libraries`/`components`/`masters`/`sections` orchestration, and
+//!   the shared low-level primitives;
 //! - [`tokens`] writes the `tokens` block;
 //! - [`styles`] writes the `styles` block;
 //! - [`nodes`] writes the `document` body, pages, and every node kind.
@@ -29,8 +30,8 @@
 use std::fmt::Write as _;
 
 use crate::ast::{
-    AssetBlock, AssetDecl, ComponentDef, Dimension, Document, MasterDef, ObjectPosition, Project,
-    PropertyValue, SectionDef, Unit, UnknownProperty, UnknownValue,
+    AssetBlock, AssetDecl, ComponentDef, Dimension, Document, LibraryDef, MasterDef,
+    ObjectPosition, Project, PropertyValue, SectionDef, Unit, UnknownProperty, UnknownValue,
 };
 use crate::error::FormatError;
 
@@ -269,11 +270,12 @@ fn write_document(doc: &Document, out: &mut String) {
     write_opt_str(out, "page-parity-start", &doc.page_parity_start);
     out.push_str(" {\n");
 
-    // Child order: project, assets, tokens, styles, document.
+    // Child order: project, assets, libraries, tokens, styles, components, masters, sections, document.
     if let Some(proj) = &doc.project {
         write_project(proj, out, 1);
     }
     write_asset_block(&doc.assets, out, 1);
+    write_library_block(&doc.libraries, out, 1);
     write_token_block(&doc.tokens, out, 1);
     write_style_block(&doc.styles, out, 1);
     write_component_block(&doc.components, out, 1);
@@ -462,4 +464,50 @@ fn write_asset_decl(decl: &AssetDecl, out: &mut String, depth: usize) {
     }
 
     out.push('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Libraries
+// ---------------------------------------------------------------------------
+
+/// Emit the `libraries { … }` block.
+///
+/// Stable position: after `assets`, before `tokens`. Emitted ONLY when at least
+/// one library is declared, so documents without imported packages keep their
+/// existing canonical form (and round-trip) unchanged. Each library emits a
+/// single leaf line: `library id="…" version="…" hash="…"`, with optional
+/// attributes omitted when `None`, then any unknown props in BTreeMap key order.
+/// Mirrors [`write_section_block`].
+fn write_library_block(libraries: &[LibraryDef], out: &mut String, depth: usize) {
+    if libraries.is_empty() {
+        return;
+    }
+    indent(out, depth);
+    out.push_str("libraries {\n");
+    for def in libraries {
+        indent(out, depth + 1);
+        out.push_str("library id=\"");
+        out.push_str(&def.id);
+        out.push('"');
+        if let Some(version) = &def.version {
+            out.push_str(" version=\"");
+            out.push_str(version);
+            out.push('"');
+        }
+        if let Some(hash) = &def.hash {
+            out.push_str(" hash=\"");
+            out.push_str(hash);
+            out.push('"');
+        }
+        // Unknown properties in sorted key order (BTreeMap iteration is sorted).
+        for (key, prop) in &def.unknown_props {
+            out.push(' ');
+            out.push_str(key);
+            out.push('=');
+            out.push_str(&fmt_unknown_property(prop));
+        }
+        out.push('\n');
+    }
+    indent(out, depth);
+    out.push_str("}\n");
 }

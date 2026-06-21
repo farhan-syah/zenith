@@ -312,6 +312,10 @@ fn strip_spans(mut doc: crate::ast::Document) -> crate::ast::Document {
             strip_node_span(node);
         }
     }
+    // Libraries
+    for library in &mut doc.libraries {
+        library.source_span = None;
+    }
     // Sections
     for section in &mut doc.sections {
         section.source_span = None;
@@ -3370,6 +3374,81 @@ fn test_sections_round_trip() {
         strip_spans(doc).sections,
         strip_spans(reparsed).sections,
         "sections must survive a parse → format → parse round-trip"
+    );
+}
+
+// ── libraries: parse, serialize, and round-trip ───────────────────────
+
+/// **Serialize round-trip**: parse a doc with a `libraries` block (id/version/
+/// hash plus an annotated unknown prop) → format → re-parse → libraries
+/// identical (spans stripped). Also assert the formatted output contains both
+/// `library` lines with their id/version/hash and that the annotated unknown
+/// prop survives. Mirrors `test_sections_round_trip`.
+#[test]
+fn test_libraries_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.lib" name="LIB"
+  libraries {
+    library id="@acme/brand-kit" version="1.4.0" hash="sha256-abc" registry=(token)"x"
+    library id="@acme/icons" version="2.0.1"
+  }
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.lib" title="LIB" {
+    page id="pg1" w=(px)640 h=(px)360 {
+      rect id="r1" x=(px)0 y=(px)0 w=(px)10 h=(px)10 fill=(token)"c"
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+
+    assert_eq!(doc.libraries.len(), 2, "expected 2 libraries");
+    let brand = &doc.libraries[0];
+    assert_eq!(brand.id, "@acme/brand-kit");
+    assert_eq!(brand.version.as_deref(), Some("1.4.0"));
+    assert_eq!(brand.hash.as_deref(), Some("sha256-abc"));
+    let registry = brand
+        .unknown_props
+        .get("registry")
+        .expect("annotated unknown prop must be preserved");
+    assert_eq!(
+        registry.ty.as_deref(),
+        Some("token"),
+        "unknown prop annotation must survive"
+    );
+
+    let formatted = format_document(&doc).expect("format");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("utf8");
+
+    assert!(
+        formatted_str.contains(r#"library id="@acme/brand-kit" version="1.4.0" hash="sha256-abc""#),
+        "formatted output must contain the brand-kit library line; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains(r#"library id="@acme/icons" version="2.0.1""#),
+        "formatted output must contain the icons library line; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains(r#"registry=(token)"x""#),
+        "annotated unknown prop must round-trip; got:\n{formatted_str}"
+    );
+    // Canonical order: assets, then libraries, then tokens.
+    let libs_at = formatted_str.find("libraries {").expect("libraries block");
+    let tokens_at = formatted_str.find("tokens ").expect("tokens block");
+    assert!(
+        libs_at < tokens_at,
+        "libraries must be emitted before tokens; got:\n{formatted_str}"
+    );
+
+    let reparsed = adapter.parse(&formatted).expect("re-parse");
+    assert_eq!(
+        strip_spans(doc).libraries,
+        strip_spans(reparsed).libraries,
+        "libraries must survive a parse → format → parse round-trip (idempotent)"
     );
 }
 

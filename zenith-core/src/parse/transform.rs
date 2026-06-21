@@ -14,6 +14,7 @@ use crate::ast::{
         ComponentDef, Document, DocumentBody, Fold, MasterDef, Page, Project, SafeZone,
         SafeZoneType, SectionDef,
     },
+    library::LibraryDef,
     node::{
         CodeNode, ConnectorNode, EllipseNode, FieldNode, FootnoteNode, FrameNode, GroupNode,
         ImageNode, InstanceNode, LineNode, Node, ObjectPosition, Override, Point, PolygonNode,
@@ -403,6 +404,7 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
 
     let mut project: Option<Project> = None;
     let mut assets = AssetBlock::default();
+    let mut libraries: Vec<LibraryDef> = Vec::new();
     let mut tokens = TokenBlock::default();
     let mut styles = StyleBlock::default();
     let mut components: Vec<ComponentDef> = Vec::new();
@@ -417,6 +419,9 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
             }
             "assets" => {
                 assets = transform_assets(child)?;
+            }
+            "libraries" => {
+                libraries = transform_libraries(child)?;
             }
             "tokens" => {
                 tokens = transform_tokens(child)?;
@@ -463,6 +468,7 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
         margin_bottom,
         project,
         assets,
+        libraries,
         tokens,
         styles,
         components,
@@ -547,6 +553,44 @@ fn transform_section_def(node: &KdlNode) -> Result<SectionDef, ParseError> {
         folio_style,
         start_page,
         source_span: node_span(node),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Libraries
+// ---------------------------------------------------------------------------
+
+const LIBRARY_KNOWN_PROPS: &[&str] = &["id", "version", "hash"];
+
+/// Transform the document-level `libraries { … }` block into a list of
+/// [`LibraryDef`]. Each `library id="…" version="…" hash="…"` is a leaf marker
+/// (it takes no children); non-`library` children inside the block are silently
+/// ignored (forward-compat). Mirrors [`transform_sections`].
+fn transform_libraries(node: &KdlNode) -> Result<Vec<LibraryDef>, ParseError> {
+    let mut defs: Vec<LibraryDef> = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "library" {
+                defs.push(transform_library_def(child)?);
+            }
+        }
+    }
+    Ok(defs)
+}
+
+fn transform_library_def(node: &KdlNode) -> Result<LibraryDef, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+    let version = optional_string_prop(node, "version").map(str::to_owned);
+    let hash = optional_string_prop(node, "hash").map(str::to_owned);
+    let unknown_props = collect_unknown_props(node, LIBRARY_KNOWN_PROPS);
+    let source_span = node_span(node);
+
+    Ok(LibraryDef {
+        id,
+        version,
+        hash,
+        source_span,
+        unknown_props,
     })
 }
 

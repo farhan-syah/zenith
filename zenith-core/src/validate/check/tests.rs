@@ -11,6 +11,7 @@ use crate::ast::asset::{AssetBlock, AssetDecl, AssetKind};
 use crate::ast::document::{
     Document, DocumentBody, Fold, MasterDef, Page, SafeZone, SafeZoneType, SectionDef,
 };
+use crate::ast::library::LibraryDef;
 use crate::ast::node::ImageNode;
 use crate::ast::node::{
     CodeNode, ConnectorNode, EllipseNode, FieldNode, FrameNode, GroupNode, LineNode, Node,
@@ -288,6 +289,7 @@ fn doc_with(tokens: Vec<Token>, pages: Vec<Page>) -> Document {
         margin_bottom: None,
         project: None,
         assets: AssetBlock::default(),
+        libraries: Vec::new(),
         tokens: TokenBlock {
             format: "zenith-token-v1".to_owned(),
             tokens,
@@ -1898,6 +1900,7 @@ fn doc_with_assets(assets: Vec<AssetDecl>) -> Document {
             assets,
             source_span: None,
         },
+        libraries: Vec::new(),
         tokens: TokenBlock {
             format: "zenith-token-v1".to_owned(),
             tokens: vec![],
@@ -2921,6 +2924,7 @@ fn doc_with_styles(tokens: Vec<Token>, styles: Vec<Style>, pages: Vec<Page>) -> 
         margin_bottom: None,
         project: None,
         assets: AssetBlock::default(),
+        libraries: Vec::new(),
         tokens: TokenBlock {
             format: "zenith-token-v1".to_owned(),
             tokens,
@@ -5867,5 +5871,93 @@ fn table_clean_no_unknown_property_warning() {
         "clean table must not emit node.unknown_property; got {:?}",
         codes(&report)
     );
+    assert!(!report.has_errors());
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Library block validation tests
+// ══════════════════════════════════════════════════════════════════════
+
+/// Helper: build a document with the given libraries appended to a
+/// single-page doc.
+fn doc_with_libraries(libraries: Vec<LibraryDef>, pages: Vec<Page>) -> Document {
+    let mut doc = doc_with(vec![], pages);
+    doc.libraries = libraries;
+    doc
+}
+
+fn minimal_library(id: &str) -> LibraryDef {
+    LibraryDef {
+        id: id.to_owned(),
+        version: None,
+        hash: None,
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    }
+}
+
+#[test]
+fn clean_libraries_block_no_diagnostics() {
+    let lib = LibraryDef {
+        id: "@acme/brand-kit".to_owned(),
+        version: Some("1.4.0".to_owned()),
+        hash: Some("sha256-abc".to_owned()),
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    };
+    let doc = doc_with_libraries(vec![lib], vec![minimal_page("p1", vec![])]);
+    let report = validate(&doc);
+    assert!(
+        report.diagnostics.is_empty(),
+        "a well-formed libraries block must produce no diagnostics; got: {:?}",
+        codes(&report)
+    );
+    assert!(!report.has_errors());
+}
+
+#[test]
+fn library_duplicate_id_is_error() {
+    let a = minimal_library("@acme/brand-kit");
+    let b = minimal_library("@acme/brand-kit"); // duplicate id
+    let doc = doc_with_libraries(vec![a, b], vec![minimal_page("p1", vec![])]);
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "id.duplicate"),
+        "two libraries sharing an id must trigger id.duplicate; got {:?}",
+        codes(&report)
+    );
+    assert!(report.has_errors());
+}
+
+#[test]
+fn library_unknown_property_produces_warning() {
+    let mut unknown_props = BTreeMap::new();
+    unknown_props.insert(
+        "registry".to_owned(),
+        crate::ast::node::UnknownProperty {
+            value: crate::ast::node::UnknownValue::String("x".to_owned()),
+            ty: Some("token".to_owned()),
+        },
+    );
+    let lib = LibraryDef {
+        id: "@acme/brand-kit".to_owned(),
+        version: None,
+        hash: None,
+        source_span: None,
+        unknown_props,
+    };
+    let doc = doc_with_libraries(vec![lib], vec![minimal_page("p1", vec![])]);
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "library.unknown_property"),
+        "an unknown prop on a library must warn; got {:?}",
+        codes(&report)
+    );
+    let diag = report
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "library.unknown_property")
+        .expect("should exist");
+    assert_eq!(diag.severity, Severity::Warning);
     assert!(!report.has_errors());
 }

@@ -44,6 +44,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use crate::ast::asset::{AssetDecl, AssetKind};
 use crate::ast::document::Document;
+use crate::ast::library::LibraryDef;
 use crate::ast::style::{Style, StyleBlock};
 use crate::ast::value::{PropertyValue, Unit, dim_to_px};
 use crate::color::parse_rgb;
@@ -257,6 +258,14 @@ pub fn validate(doc: &Document) -> ValidationReport {
     for decl in &doc.assets.assets {
         register_id(&decl.id, &mut seen_ids, &mut diagnostics);
         validate_asset_decl(decl, &mut diagnostics);
+    }
+
+    // ── Library IDs and per-declaration checks ────────────────────────────
+    // Library ids share the global id namespace (like asset/token/style ids),
+    // so duplicate library declarations and collisions are caught here.
+    for decl in &doc.libraries {
+        register_id(&decl.id, &mut seen_ids, &mut diagnostics);
+        validate_library_decl(decl, &mut diagnostics);
     }
 
     // ── Component definitions ─────────────────────────────────────────────
@@ -871,6 +880,26 @@ fn validate_asset_decl(decl: &AssetDecl, diagnostics: &mut Vec<Diagnostic>) {
             "asset.unknown_property",
             format!(
                 "asset '{}': unknown property '{}' (version-relative; \
+                 may be valid in a later schema version)",
+                decl.id, prop_name
+            ),
+            decl.source_span,
+            Some(decl.id.clone()),
+        ));
+    }
+}
+
+/// Validate a single [`LibraryDef`] beyond ID uniqueness:
+/// - unknown properties → `library.unknown_property` (Warning)
+///
+/// `version`/`hash` are free-form strings in v0 (a lockfile/external tool owns
+/// their format), so no format enforcement is performed here.
+fn validate_library_decl(decl: &LibraryDef, diagnostics: &mut Vec<Diagnostic>) {
+    for prop_name in decl.unknown_props.keys() {
+        diagnostics.push(Diagnostic::warning(
+            "library.unknown_property",
+            format!(
+                "library '{}': unknown property '{}' (version-relative; \
                  may be valid in a later schema version)",
                 decl.id, prop_name
             ),

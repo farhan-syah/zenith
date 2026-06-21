@@ -2,6 +2,7 @@
 
 use super::Span;
 use super::asset::AssetBlock;
+use super::library::LibraryDef;
 use super::node::Node;
 use super::style::StyleBlock;
 use super::token::TokenBlock;
@@ -271,6 +272,10 @@ pub struct Document {
     pub project: Option<Project>,
     /// Asset declarations; empty when the `assets` block is absent.
     pub assets: AssetBlock,
+    /// Imported-package manifest; empty when the `libraries` block is absent. Each
+    /// entry declares an external library dependency (id/version/hash). The engine
+    /// preserves and validates these but does not fetch package content.
+    pub libraries: Vec<LibraryDef>,
     pub tokens: TokenBlock,
     pub styles: StyleBlock,
     /// Reusable component definitions; empty when the `components` block is
@@ -404,6 +409,7 @@ mod parity_tests {
             margin_bottom: None,
             project: None,
             assets: AssetBlock::default(),
+            libraries: Vec::new(),
             tokens: TokenBlock::default(),
             styles: StyleBlock::default(),
             components: Vec::new(),

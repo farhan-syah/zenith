@@ -2,6 +2,7 @@
 
 pub mod asset;
 pub mod document;
+pub mod library;
 pub mod node;
 pub mod span;
 pub mod style;
@@ -14,6 +15,7 @@ pub use document::{
     ComponentDef, Document, DocumentBody, Fold, MasterDef, Page, Project, SafeZone, SafeZoneType,
     SectionDef,
 };
+pub use library::LibraryDef;
 pub use node::{
     CodeNode, ConnectorNode, EllipseNode, FieldNode, FootnoteNode, FrameNode, GroupNode, ImageNode,
     InstanceNode, LineNode, Node, ObjectPosition, Override, Point, PolygonNode, PolylineNode,
