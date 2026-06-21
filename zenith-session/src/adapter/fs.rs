@@ -40,6 +40,10 @@ pub trait Fs {
     /// Returns an error if the parent directory does not exist.
     fn write(&self, path: &Path, data: &[u8]) -> Result<(), SessionError>;
 
+    /// Append `data` to the file at `path`, creating it if absent. Like `write`,
+    /// it errors if the parent directory does not exist.
+    fn append(&self, path: &Path, data: &[u8]) -> Result<(), SessionError>;
+
     /// List immediate children (files and directories) of `path`, sorted for
     /// deterministic iteration.
     fn read_dir(&self, path: &Path) -> Result<Vec<PathBuf>, SessionError>;
@@ -77,6 +81,16 @@ impl Fs for OsFs {
 
     fn write(&self, path: &Path, data: &[u8]) -> Result<(), SessionError> {
         std::fs::write(path, data)?;
+        Ok(())
+    }
+
+    fn append(&self, path: &Path, data: &[u8]) -> Result<(), SessionError> {
+        use std::io::Write as _;
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        f.write_all(data)?;
         Ok(())
     }
 
@@ -194,6 +208,25 @@ impl Fs for MemFs {
             )));
         }
         inner.files.insert(path.to_path_buf(), data.to_vec());
+        Ok(())
+    }
+
+    fn append(&self, path: &Path, data: &[u8]) -> Result<(), SessionError> {
+        let mut inner = self.inner.borrow_mut();
+        let parent = path
+            .parent()
+            .ok_or_else(|| SessionError::new("path has no parent directory"))?;
+        if !inner.dirs.contains(parent) {
+            return Err(SessionError::new(format!(
+                "parent directory does not exist: {}",
+                parent.display()
+            )));
+        }
+        inner
+            .files
+            .entry(path.to_path_buf())
+            .or_default()
+            .extend_from_slice(data);
         Ok(())
     }
 
@@ -341,6 +374,36 @@ mod tests {
         assert!(!fs.exists(&parent));
         assert!(!fs.exists(&child_dir));
         assert!(!fs.exists(&child_dir.join("f.txt")));
+    }
+
+    #[test]
+    fn memfs_append_creates_then_accumulates() {
+        let fs = MemFs::new();
+        let dir = PathBuf::from("/data");
+        let file = dir.join("journal.txt");
+        fs.create_dir_all(&dir).unwrap();
+        fs.append(&file, b"hello ").unwrap();
+        fs.append(&file, b"world").unwrap();
+        assert_eq!(fs.read(&file).unwrap(), b"hello world");
+    }
+
+    #[test]
+    fn memfs_append_without_parent_errors() {
+        let fs = MemFs::new();
+        let file = PathBuf::from("/missing/dir/journal.txt");
+        let result = fs.append(&file, b"data");
+        assert!(result.is_err(), "expected error when parent dir is absent");
+    }
+
+    #[test]
+    fn memfs_append_then_read_roundtrip() {
+        let fs = MemFs::new();
+        let dir = PathBuf::from("/logs");
+        let file = dir.join("log.txt");
+        fs.create_dir_all(&dir).unwrap();
+        fs.append(&file, b"line one\n").unwrap();
+        fs.append(&file, b"line two\n").unwrap();
+        assert_eq!(fs.read(&file).unwrap(), b"line one\nline two\n");
     }
 
     #[test]
