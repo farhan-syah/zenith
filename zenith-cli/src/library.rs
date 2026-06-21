@@ -49,6 +49,10 @@ pub const EMBEDDED_PACKS: &[(&str, &str)] = &[
         "@zenith/masks",
         include_str!("../../assets/libraries/zenith-masks.zen"),
     ),
+    (
+        "@zenith/brand-kit",
+        include_str!("../../assets/libraries/zenith-brand-kit.zen"),
+    ),
 ];
 
 /// Where a [`LibraryPack`] was loaded from.
@@ -1736,6 +1740,57 @@ mod tests {
             "vignette listed as a token item"
         );
         assert!(masks.items.iter().any(|it| it.id == "spotlight"));
+    }
+
+    #[test]
+    fn embedded_brand_kit_pack_lists_action_items() {
+        let packs = resolve_packs(None);
+        let brand = packs
+            .iter()
+            .find(|p| p.id == "@zenith/brand-kit")
+            .expect("@zenith/brand-kit embedded");
+        // Actions are exported as action items.
+        assert!(
+            brand
+                .items
+                .iter()
+                .any(|it| it.id == "apply-2026" && it.kind == ItemKind::Action),
+            "apply-2026 listed as an action item"
+        );
+        assert!(brand.items.iter().any(|it| it.id == "apply-mono"));
+    }
+
+    #[test]
+    fn embedded_brand_kit_action_applies_via_materialize_action() {
+        const TARGET: &str = r##"zenith version=1 {
+  project id="proj.x" name="Target"
+  tokens format="zenith-token-v1" {
+    token id="color.brand" type="color" value="#000000"
+    token id="color.accent" type="color" value="#000000"
+    token id="color.ink" type="color" value="#000000"
+  }
+  styles {}
+  document id="d" title="x" {
+    page id="pg" w=(px)400 h=(px)300 {}
+  }
+}
+"##;
+        let packs = resolve_packs(None);
+        let outcome = materialize_action(TARGET, &packs, "@zenith/brand-kit", "apply-2026")
+            .expect("materialize_action ok");
+        let final_src = outcome.final_source.expect("accepted → final_source");
+        // The 2026 palette is applied and the action is recorded with provenance.
+        assert!(
+            final_src.contains("#e11d48"),
+            "brand color applied:\n{}",
+            final_src
+        );
+        assert!(final_src.contains("#3b82f6"), "accent color applied");
+        assert!(final_src.contains("apply-2026"), "action recorded in doc");
+        assert!(
+            outcome.provenance_id.is_some(),
+            "provenance recorded for the applied action"
+        );
     }
 
     #[test]

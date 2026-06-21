@@ -1,0 +1,22 @@
+zenith version=1 {
+  project id="@zenith/brand-kit" name="Zenith Brand Kit"
+  assets {
+  }
+  libraries {
+    library id="@zenith/brand-kit" version="1.0.0"
+  }
+  actions {
+    action id="apply-2026" label="Apply 2026 Brand" version="1.0.0" {
+      tx "{\"ops\":[{\"op\":\"update_token_value\",\"id\":\"color.brand\",\"value\":\"#e11d48\"},{\"op\":\"update_token_value\",\"id\":\"color.accent\",\"value\":\"#3b82f6\"},{\"op\":\"update_token_value\",\"id\":\"color.ink\",\"value\":\"#0f172a\"}]}"
+    }
+    action id="apply-mono" label="Apply Mono Brand" version="1.0.0" {
+      tx "{\"ops\":[{\"op\":\"update_token_value\",\"id\":\"color.brand\",\"value\":\"#111827\"},{\"op\":\"update_token_value\",\"id\":\"color.accent\",\"value\":\"#6b7280\"},{\"op\":\"update_token_value\",\"id\":\"color.ink\",\"value\":\"#111827\"}]}"
+    }
+  }
+  styles {
+  }
+  document id="pack.preview" title="Zenith Brand Kit" {
+    page id="pack.pg" name="Preview" w=(px)100 h=(px)100 {
+    }
+  }
+}
