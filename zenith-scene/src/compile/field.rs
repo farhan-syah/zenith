@@ -194,6 +194,7 @@ pub(super) fn resolve_field_to_text(field: &FieldNode, ctx: &FieldCtx) -> Option
         text_indent: None,
         bullet: None,
         bullet_gap: None,
+        anchor: None,
         spans: vec![TextSpan {
             text,
             fill: None,
@@ -645,6 +646,7 @@ mod tests {
     fn page_count_field() -> FieldNode {
         FieldNode {
             id: "total".to_owned(),
+            anchor: None,
             name: None,
             role: None,
             field_type: "page-count".to_owned(),
@@ -945,6 +947,7 @@ mod tests {
     fn page_number_field(folio_style: Option<&str>, suppress_first: Option<bool>) -> FieldNode {
         FieldNode {
             id: "pn".to_owned(),
+            anchor: None,
             name: None,
             role: None,
             field_type: "page-number".to_owned(),
@@ -972,6 +975,7 @@ mod tests {
     fn running_head_field(suppress_first: Option<bool>) -> FieldNode {
         FieldNode {
             id: "rh".to_owned(),
+            anchor: None,
             name: None,
             role: None,
             field_type: "running-head".to_owned(),
@@ -1207,6 +1211,7 @@ mod tests {
     fn section_field(field_type: &str, folio_style: Option<&str>) -> FieldNode {
         FieldNode {
             id: "sf".to_owned(),
+            anchor: None,
             name: None,
             role: None,
             field_type: field_type.to_owned(),

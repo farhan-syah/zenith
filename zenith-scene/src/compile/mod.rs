@@ -15,6 +15,7 @@
 //! entry points, the per-subtree [`RenderCtx`], and the [`compile_node`]
 //! dispatcher that routes each node kind to its submodule.
 
+mod anchor;
 mod chain;
 mod container;
 mod crop;
@@ -39,6 +40,7 @@ use zenith_layout::RustybuzzEngine;
 
 use crate::ir::{Rect, Scene, SceneCommand};
 
+use anchor::{AnchorMap, build_anchor_map};
 use chain::{ChainAssignments, resolve_chains_document};
 use container::{compile_frame, compile_group, compile_instance};
 use field::{
@@ -344,6 +346,12 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
         }
     }
 
+    // ── Step 5b: anchor pre-pass (PAGE-LOCAL) ────────────────────────────
+    // Walk page top-level children once, building a map from node id to the
+    // derived (x, y) for nodes that carry a recognized `anchor` attribute and
+    // have px-resolvable w/h. Built once; threaded read-only into compile_node.
+    let anchors = build_anchor_map(page, page_w, page_h);
+
     // ── Step 6: threaded-text chain pre-pass (DOCUMENT-WIDE) ─────────────
     // Resolve every text chain ONCE across ALL pages (deterministic
     // page-then-source-order walk into frames + groups), distributing each
@@ -478,6 +486,7 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
                 &mut diagnostics,
                 &chains,
                 &flows,
+                &anchors,
                 &field_ctx,
                 root_ctx,
             );
@@ -497,6 +506,7 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
             &mut diagnostics,
             &chains,
             &flows,
+            &anchors,
             &field_ctx,
             root_ctx,
         );
@@ -516,6 +526,7 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
         fonts,
         &engine,
         &chains,
+        &anchors,
         &field_ctx,
         &mut scene.commands,
         &mut diagnostics,
@@ -599,6 +610,7 @@ pub(super) fn compile_node(
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
     flows: &TableFlowAssignments,
+    anchors: &AnchorMap,
     field_ctx: &FieldCtx,
     ctx: RenderCtx,
 ) -> f64 {
@@ -610,11 +622,27 @@ pub(super) fn compile_node(
 
     match node {
         Node::Rect(rect) => {
-            compile_rect(rect, resolved, style_map, commands, diagnostics, ctx);
+            compile_rect(
+                rect,
+                resolved,
+                style_map,
+                commands,
+                diagnostics,
+                anchors,
+                ctx,
+            );
             0.0
         }
         Node::Ellipse(ellipse) => {
-            compile_ellipse(ellipse, resolved, style_map, commands, diagnostics, ctx);
+            compile_ellipse(
+                ellipse,
+                resolved,
+                style_map,
+                commands,
+                diagnostics,
+                anchors,
+                ctx,
+            );
             0.0
         }
         Node::Text(text) => compile_text(
@@ -628,6 +656,7 @@ pub(super) fn compile_node(
             chains,
             field_ctx.footnote_markers,
             field_ctx.node_boxes,
+            anchors,
             ctx,
         ),
         Node::Line(line) => {
@@ -646,6 +675,7 @@ pub(super) fn compile_node(
                 diagnostics,
                 chains,
                 flows,
+                anchors,
                 field_ctx,
                 ctx,
             );
@@ -663,6 +693,7 @@ pub(super) fn compile_node(
                 diagnostics,
                 chains,
                 flows,
+                anchors,
                 field_ctx,
                 ctx,
             );
@@ -680,6 +711,7 @@ pub(super) fn compile_node(
                 diagnostics,
                 chains,
                 flows,
+                anchors,
                 field_ctx,
                 ctx,
             );
@@ -702,6 +734,7 @@ pub(super) fn compile_node(
                     chains,
                     field_ctx.footnote_markers,
                     field_ctx.node_boxes,
+                    anchors,
                     ctx,
                 );
             }
@@ -726,13 +759,14 @@ pub(super) fn compile_node(
                     chains,
                     field_ctx.footnote_markers,
                     field_ctx.node_boxes,
+                    anchors,
                     ctx,
                 );
             }
             0.0
         }
         Node::Image(image) => {
-            compile_image(image, resolved, commands, diagnostics, ctx);
+            compile_image(image, resolved, commands, diagnostics, anchors, ctx);
             0.0
         }
         Node::Polygon(poly) => {
@@ -751,6 +785,7 @@ pub(super) fn compile_node(
             engine,
             commands,
             diagnostics,
+            anchors,
             ctx,
         ),
         Node::Table(table) => {
@@ -765,6 +800,7 @@ pub(super) fn compile_node(
                 diagnostics,
                 chains,
                 flows,
+                anchors,
                 field_ctx,
                 ctx,
             );
@@ -782,6 +818,7 @@ pub(super) fn compile_node(
                 chains,
                 field_ctx.footnote_markers,
                 field_ctx.node_boxes,
+                anchors,
                 ctx,
             );
             0.0

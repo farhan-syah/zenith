@@ -16,6 +16,7 @@ use zenith_layout::RustybuzzEngine;
 use crate::ir::{LineCap, SceneCommand, StrokeAlign};
 
 use super::RenderCtx;
+use super::anchor::AnchorMap;
 use super::chain::ChainAssignments;
 use super::paint::{
     NodeEffect, apply_gradient_opacity, emit_node_with_effects, resolve_property_color,
@@ -25,7 +26,8 @@ use super::paint::{
 use super::style_prop;
 use super::text::{MeasureEnv, compile_text, measure_text_wrapped_height, resolve_text_families};
 use super::util::{
-    blend_mode_ir, px, resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag,
+    blend_mode_ir, missing_geometry_diag, px, resolve_anchored_axis, resolve_property_dimension_px,
+    rotation_degrees, unsupported_unit_diag,
 };
 
 /// Resolve dashed-stroke parameters from raw node fields.
@@ -65,6 +67,7 @@ pub(super) fn compile_rect(
     style_map: &BTreeMap<&str, &Style>,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
+    anchors: &AnchorMap,
     ctx: RenderCtx,
 ) {
     // Skip invisible rects.
@@ -72,39 +75,10 @@ pub(super) fn compile_rect(
         return;
     }
 
-    // Resolve geometry — all four are required; skip if any is absent
-    // or uses an unsupported unit.
-    let (Some(x_dim), Some(y_dim), Some(w_dim), Some(h_dim)) = (&rect.x, &rect.y, &rect.w, &rect.h)
-    else {
-        diagnostics.push(Diagnostic::advisory(
-            "scene.missing_geometry",
-            format!(
-                "rect '{}' is missing one or more geometry properties (x, y, w, h); \
-                 skipped",
-                rect.id
-            ),
-            rect.source_span,
-            Some(rect.id.clone()),
-        ));
-        return;
-    };
-
-    let Some(x_raw) = dim_to_px(x_dim.value, &x_dim.unit) else {
-        diagnostics.push(unsupported_unit_diag(
-            "rect",
-            &rect.id,
-            "x",
-            rect.source_span,
-        ));
-        return;
-    };
-    let Some(y_raw) = dim_to_px(y_dim.value, &y_dim.unit) else {
-        diagnostics.push(unsupported_unit_diag(
-            "rect",
-            &rect.id,
-            "y",
-            rect.source_span,
-        ));
+    // Resolve geometry — w and h are always required. x and y may be
+    // derived from a page-relative anchor when absent.
+    let (Some(w_dim), Some(h_dim)) = (&rect.w, &rect.h) else {
+        diagnostics.push(missing_geometry_diag("rect", &rect.id, rect.source_span));
         return;
     };
     let Some(w) = dim_to_px(w_dim.value, &w_dim.unit) else {
@@ -123,6 +97,32 @@ pub(super) fn compile_rect(
             "h",
             rect.source_span,
         ));
+        return;
+    };
+
+    // Anchor-derived (x, y): look up the pre-pass map when x or y is absent.
+    let anchor_xy = anchors.get(&rect.id).copied();
+
+    let Some(x_raw) = resolve_anchored_axis(
+        "rect",
+        &rect.id,
+        "x",
+        rect.x.as_ref(),
+        anchor_xy.map(|(ax, _)| ax),
+        rect.source_span,
+        diagnostics,
+    ) else {
+        return;
+    };
+    let Some(y_raw) = resolve_anchored_axis(
+        "rect",
+        &rect.id,
+        "y",
+        rect.y.as_ref(),
+        anchor_xy.map(|(_, ay)| ay),
+        rect.source_span,
+        diagnostics,
+    ) else {
         return;
     };
 
@@ -513,6 +513,7 @@ pub(super) fn compile_ellipse(
     style_map: &BTreeMap<&str, &Style>,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
+    anchors: &AnchorMap,
     ctx: RenderCtx,
 ) {
     // Skip invisible ellipses.
@@ -520,38 +521,12 @@ pub(super) fn compile_ellipse(
         return;
     }
 
-    // Resolve geometry — all four are required; skip if any is absent
-    // or uses an unsupported unit.
-    let (Some(x_dim), Some(y_dim), Some(w_dim), Some(h_dim)) =
-        (&ellipse.x, &ellipse.y, &ellipse.w, &ellipse.h)
-    else {
-        diagnostics.push(Diagnostic::advisory(
-            "scene.missing_geometry",
-            format!(
-                "ellipse '{}' is missing one or more geometry properties (x, y, w, h); \
-                 skipped",
-                ellipse.id
-            ),
-            ellipse.source_span,
-            Some(ellipse.id.clone()),
-        ));
-        return;
-    };
-
-    let Some(x_raw) = dim_to_px(x_dim.value, &x_dim.unit) else {
-        diagnostics.push(unsupported_unit_diag(
+    // Resolve geometry — w and h are always required. x and y may be
+    // derived from a page-relative anchor when absent.
+    let (Some(w_dim), Some(h_dim)) = (&ellipse.w, &ellipse.h) else {
+        diagnostics.push(missing_geometry_diag(
             "ellipse",
             &ellipse.id,
-            "x",
-            ellipse.source_span,
-        ));
-        return;
-    };
-    let Some(y_raw) = dim_to_px(y_dim.value, &y_dim.unit) else {
-        diagnostics.push(unsupported_unit_diag(
-            "ellipse",
-            &ellipse.id,
-            "y",
             ellipse.source_span,
         ));
         return;
@@ -572,6 +547,32 @@ pub(super) fn compile_ellipse(
             "h",
             ellipse.source_span,
         ));
+        return;
+    };
+
+    // Anchor-derived (x, y): look up the pre-pass map when x or y is absent.
+    let anchor_xy = anchors.get(&ellipse.id).copied();
+
+    let Some(x_raw) = resolve_anchored_axis(
+        "ellipse",
+        &ellipse.id,
+        "x",
+        ellipse.x.as_ref(),
+        anchor_xy.map(|(ax, _)| ax),
+        ellipse.source_span,
+        diagnostics,
+    ) else {
+        return;
+    };
+    let Some(y_raw) = resolve_anchored_axis(
+        "ellipse",
+        &ellipse.id,
+        "y",
+        ellipse.y.as_ref(),
+        anchor_xy.map(|(_, ay)| ay),
+        ellipse.source_span,
+        diagnostics,
+    ) else {
         return;
     };
 
@@ -1448,6 +1449,7 @@ pub(super) fn compile_shape(
     chains: &ChainAssignments,
     footnote_markers: &BTreeMap<String, String>,
     node_boxes: &BTreeMap<String, (f64, f64, f64, f64)>,
+    anchors: &AnchorMap,
     ctx: RenderCtx,
 ) {
     // Skip invisible shapes.
@@ -1455,40 +1457,10 @@ pub(super) fn compile_shape(
         return;
     }
 
-    // Resolve geometry — all four are required; skip if any is absent or uses
-    // an unsupported unit.
-    let (Some(x_dim), Some(y_dim), Some(w_dim), Some(h_dim)) =
-        (&shape.x, &shape.y, &shape.w, &shape.h)
-    else {
-        diagnostics.push(Diagnostic::advisory(
-            "scene.missing_geometry",
-            format!(
-                "shape '{}' is missing one or more geometry properties (x, y, w, h); \
-                 skipped",
-                shape.id
-            ),
-            shape.source_span,
-            Some(shape.id.clone()),
-        ));
-        return;
-    };
-
-    let Some(x_raw) = dim_to_px(x_dim.value, &x_dim.unit) else {
-        diagnostics.push(unsupported_unit_diag(
-            "shape",
-            &shape.id,
-            "x",
-            shape.source_span,
-        ));
-        return;
-    };
-    let Some(y_raw) = dim_to_px(y_dim.value, &y_dim.unit) else {
-        diagnostics.push(unsupported_unit_diag(
-            "shape",
-            &shape.id,
-            "y",
-            shape.source_span,
-        ));
+    // Resolve geometry — w and h are always required. x and y may be
+    // derived from a page-relative anchor when absent.
+    let (Some(w_dim), Some(h_dim)) = (&shape.w, &shape.h) else {
+        diagnostics.push(missing_geometry_diag("shape", &shape.id, shape.source_span));
         return;
     };
     let Some(w) = dim_to_px(w_dim.value, &w_dim.unit) else {
@@ -1507,6 +1479,32 @@ pub(super) fn compile_shape(
             "h",
             shape.source_span,
         ));
+        return;
+    };
+
+    // Anchor-derived (x, y): look up the pre-pass map when x or y is absent.
+    let anchor_xy = anchors.get(&shape.id).copied();
+
+    let Some(x_raw) = resolve_anchored_axis(
+        "shape",
+        &shape.id,
+        "x",
+        shape.x.as_ref(),
+        anchor_xy.map(|(ax, _)| ax),
+        shape.source_span,
+        diagnostics,
+    ) else {
+        return;
+    };
+    let Some(y_raw) = resolve_anchored_axis(
+        "shape",
+        &shape.id,
+        "y",
+        shape.y.as_ref(),
+        anchor_xy.map(|(_, ay)| ay),
+        shape.source_span,
+        diagnostics,
+    ) else {
         return;
     };
 
@@ -1639,6 +1637,7 @@ pub(super) fn compile_shape(
         chains,
         footnote_markers,
         node_boxes,
+        anchors,
         x,
         y,
         w,
@@ -1675,6 +1674,7 @@ fn emit_shape_label(
     chains: &ChainAssignments,
     footnote_markers: &BTreeMap<String, String>,
     node_boxes: &BTreeMap<String, (f64, f64, f64, f64)>,
+    anchors: &AnchorMap,
     x: f64,
     y: f64,
     w: f64,
@@ -1749,6 +1749,7 @@ fn emit_shape_label(
         text_indent: None,
         bullet: None,
         bullet_gap: None,
+        anchor: None,
         spans: shape.spans.clone(),
         source_span: shape.source_span,
         unknown_props: BTreeMap::new(),
@@ -1801,6 +1802,7 @@ fn emit_shape_label(
         chains,
         footnote_markers,
         node_boxes,
+        anchors,
         label_ctx,
     );
 }

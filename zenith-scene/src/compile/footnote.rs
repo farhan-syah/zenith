@@ -35,6 +35,7 @@ use zenith_layout::RustybuzzEngine;
 use crate::ir::{Color, SceneCommand};
 
 use super::RenderCtx;
+use super::anchor::AnchorMap;
 use super::chain::ChainAssignments;
 use super::field::FieldCtx;
 use super::paint::resolve_property_color;
@@ -140,6 +141,7 @@ fn synth_footnote_text(fnote: &FootnoteNode, marker: &str, x: f64, y: f64, w: f6
         text_indent: None,
         bullet: None,
         bullet_gap: None,
+        anchor: None,
         spans,
         source_span: fnote.source_span,
         unknown_props: BTreeMap::new(),
@@ -167,6 +169,7 @@ pub(super) fn compile_footnote_zone(
     fonts: &dyn FontProvider,
     engine: &RustybuzzEngine,
     chains: &ChainAssignments,
+    anchors: &AnchorMap,
     field_ctx: &FieldCtx,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
@@ -228,6 +231,7 @@ pub(super) fn compile_footnote_zone(
             markers,
             // Footnotes never use text-runaround exclusion.
             &BTreeMap::new(),
+            anchors,
             RenderCtx::measure(),
         );
         // A footnote that measured to zero height (e.g. all-empty content) still
@@ -317,6 +321,7 @@ pub(super) fn compile_footnote_zone(
             markers,
             // Footnotes never use text-runaround exclusion.
             &BTreeMap::new(),
+            anchors,
             ctx,
         );
         cursor_y += h + FOOTNOTE_GAP;

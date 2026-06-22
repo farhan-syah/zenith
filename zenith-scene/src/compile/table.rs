@@ -33,6 +33,7 @@ use zenith_layout::RustybuzzEngine;
 
 use crate::ir::SceneCommand;
 
+use super::anchor::AnchorMap;
 use super::chain::ChainAssignments;
 use super::field::FieldCtx;
 use super::paint::resolve_property_color;
@@ -409,6 +410,7 @@ pub(super) fn compile_table(
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
     flows: &TableFlowAssignments,
+    anchors: &AnchorMap,
     field_ctx: &FieldCtx,
     ctx: RenderCtx,
 ) {
@@ -590,6 +592,7 @@ pub(super) fn compile_table(
                 diagnostics,
                 chains,
                 flows,
+                anchors,
                 field_ctx,
                 ctx,
                 is_header,
@@ -619,6 +622,7 @@ pub(super) fn compile_table(
                 diagnostics,
                 chains,
                 flows,
+                anchors,
                 field_ctx,
                 ctx,
                 is_header,
@@ -775,6 +779,7 @@ fn emit_cell_no_border(
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
     flows: &TableFlowAssignments,
+    anchors: &AnchorMap,
     field_ctx: &FieldCtx,
     ctx: RenderCtx,
     is_header: bool,
@@ -819,6 +824,7 @@ fn emit_cell_no_border(
         diagnostics,
         chains,
         flows,
+        anchors,
         field_ctx,
         ctx,
     );
@@ -850,6 +856,7 @@ fn emit_cell_children(
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
     flows: &TableFlowAssignments,
+    anchors: &AnchorMap,
     field_ctx: &FieldCtx,
     ctx: RenderCtx,
 ) {
@@ -968,6 +975,7 @@ fn emit_cell_children(
                 diagnostics,
                 chains,
                 flows,
+                anchors,
                 field_ctx,
                 child_ctx,
             );
@@ -1005,6 +1013,7 @@ fn emit_cell_children(
             diagnostics,
             chains,
             flows,
+            anchors,
             field_ctx,
             child_ctx,
         );
@@ -1095,6 +1104,7 @@ fn emit_cell(
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
     flows: &TableFlowAssignments,
+    anchors: &AnchorMap,
     field_ctx: &FieldCtx,
     ctx: RenderCtx,
     is_header: bool,
@@ -1179,6 +1189,7 @@ fn emit_cell(
         diagnostics,
         chains,
         flows,
+        anchors,
         field_ctx,
         ctx,
     );

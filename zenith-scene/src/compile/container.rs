@@ -12,6 +12,7 @@ use zenith_layout::RustybuzzEngine;
 
 use crate::ir::SceneCommand;
 
+use super::anchor::AnchorMap;
 use super::chain::ChainAssignments;
 use super::field::FieldCtx;
 use super::table_flow::TableFlowAssignments;
@@ -34,6 +35,7 @@ pub(super) fn compile_frame(
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
     flows: &TableFlowAssignments,
+    anchors: &AnchorMap,
     field_ctx: &FieldCtx,
     ctx: RenderCtx,
 ) {
@@ -176,6 +178,7 @@ pub(super) fn compile_frame(
                 diagnostics,
                 chains,
                 flows,
+                anchors,
                 field_ctx,
                 child_ctx,
             );
@@ -196,6 +199,7 @@ pub(super) fn compile_frame(
                 diagnostics,
                 chains,
                 flows,
+                anchors,
                 field_ctx,
                 child_ctx,
             );
@@ -214,6 +218,7 @@ pub(super) fn compile_frame(
                     diagnostics,
                     chains,
                     flows,
+                    anchors,
                     field_ctx,
                     child_ctx,
                 );
@@ -261,6 +266,7 @@ fn compile_frame_flow(
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
     flows: &TableFlowAssignments,
+    anchors: &AnchorMap,
     field_ctx: &FieldCtx,
     child_ctx: RenderCtx,
 ) {
@@ -315,6 +321,7 @@ fn compile_frame_flow(
             diagnostics,
             chains,
             flows,
+            anchors,
             field_ctx,
             child_ctx,
         );
@@ -364,6 +371,7 @@ fn compile_frame_grid(
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
     flows: &TableFlowAssignments,
+    anchors: &AnchorMap,
     field_ctx: &FieldCtx,
     child_ctx: RenderCtx,
 ) {
@@ -425,6 +433,7 @@ fn compile_frame_grid(
             diagnostics,
             chains,
             flows,
+            anchors,
             field_ctx,
             child_ctx,
         );
@@ -630,6 +639,7 @@ pub(super) fn compile_group(
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
     flows: &TableFlowAssignments,
+    anchors: &AnchorMap,
     field_ctx: &FieldCtx,
     ctx: RenderCtx,
 ) {
@@ -746,6 +756,7 @@ pub(super) fn compile_group(
             diagnostics,
             chains,
             flows,
+            anchors,
             field_ctx,
             child_ctx,
         );
@@ -792,6 +803,7 @@ pub(super) fn compile_instance(
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
     flows: &TableFlowAssignments,
+    anchors: &AnchorMap,
     field_ctx: &FieldCtx,
     ctx: RenderCtx,
 ) {
@@ -841,6 +853,7 @@ pub(super) fn compile_instance(
         blend_mode: None,
         blur: None,
         style: None,
+        anchor: None,
         children,
         source_span: instance.source_span,
         unknown_props: BTreeMap::new(),
@@ -857,6 +870,7 @@ pub(super) fn compile_instance(
         diagnostics,
         chains,
         flows,
+        anchors,
         field_ctx,
         ctx,
     );

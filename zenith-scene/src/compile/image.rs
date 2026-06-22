@@ -7,6 +7,7 @@ use zenith_core::{Diagnostic, ImageNode, ObjectPosition, ResolvedToken, dim_to_p
 use crate::ir::{FitMode, ImageClip, SceneCommand, SrcRect};
 
 use super::RenderCtx;
+use super::anchor::AnchorMap;
 use super::paint::{
     NodeEffect, emit_node_with_effects, resolve_property_filter, resolve_property_mask,
     resolve_property_shadow,
@@ -28,6 +29,7 @@ pub(super) fn compile_image(
     resolved: &BTreeMap<String, ResolvedToken>,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
+    anchors: &AnchorMap,
     ctx: RenderCtx,
 ) {
     // Skip invisible images.
@@ -35,11 +37,9 @@ pub(super) fn compile_image(
         return;
     }
 
-    // All four geometry dimensions are required. Resolve BEFORE PushClip so
-    // any early return keeps push/pop balanced.
-    let (Some(x_dim), Some(y_dim), Some(w_dim), Some(h_dim)) =
-        (&image.x, &image.y, &image.w, &image.h)
-    else {
+    // w and h are always required. Resolve BEFORE PushClip so any early
+    // return keeps push/pop balanced.
+    let (Some(w_dim), Some(h_dim)) = (&image.w, &image.h) else {
         diagnostics.push(Diagnostic::advisory(
             "scene.missing_geometry",
             format!(
@@ -48,25 +48,6 @@ pub(super) fn compile_image(
             ),
             image.source_span,
             Some(image.id.clone()),
-        ));
-        return;
-    };
-
-    let Some(x_raw) = dim_to_px(x_dim.value, &x_dim.unit) else {
-        diagnostics.push(unsupported_unit_diag(
-            "image",
-            &image.id,
-            "x",
-            image.source_span,
-        ));
-        return;
-    };
-    let Some(y_raw) = dim_to_px(y_dim.value, &y_dim.unit) else {
-        diagnostics.push(unsupported_unit_diag(
-            "image",
-            &image.id,
-            "y",
-            image.source_span,
         ));
         return;
     };
@@ -87,6 +68,70 @@ pub(super) fn compile_image(
             image.source_span,
         ));
         return;
+    };
+
+    // Anchor-derived (x, y): look up the pre-pass map when x or y is absent.
+    let anchor_xy = anchors.get(&image.id).copied();
+
+    let x_raw = match &image.x {
+        Some(x_dim) => {
+            let Some(v) = dim_to_px(x_dim.value, &x_dim.unit) else {
+                diagnostics.push(unsupported_unit_diag(
+                    "image",
+                    &image.id,
+                    "x",
+                    image.source_span,
+                ));
+                return;
+            };
+            v
+        }
+        None => {
+            if let Some((ax, _)) = anchor_xy {
+                ax
+            } else {
+                diagnostics.push(Diagnostic::advisory(
+                    "scene.missing_geometry",
+                    format!(
+                        "image '{}' is missing one or more geometry properties (x, y, w, h); skipped",
+                        image.id
+                    ),
+                    image.source_span,
+                    Some(image.id.clone()),
+                ));
+                return;
+            }
+        }
+    };
+    let y_raw = match &image.y {
+        Some(y_dim) => {
+            let Some(v) = dim_to_px(y_dim.value, &y_dim.unit) else {
+                diagnostics.push(unsupported_unit_diag(
+                    "image",
+                    &image.id,
+                    "y",
+                    image.source_span,
+                ));
+                return;
+            };
+            v
+        }
+        None => {
+            if let Some((_, ay)) = anchor_xy {
+                ay
+            } else {
+                diagnostics.push(Diagnostic::advisory(
+                    "scene.missing_geometry",
+                    format!(
+                        "image '{}' is missing one or more geometry properties (x, y, w, h); skipped",
+                        image.id
+                    ),
+                    image.source_span,
+                    Some(image.id.clone()),
+                ));
+                return;
+            }
+        }
     };
 
     // Apply group translation offset.

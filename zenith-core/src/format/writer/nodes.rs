@@ -236,6 +236,7 @@ fn write_table(t: &TableNode, out: &mut String, depth: usize) {
     out.push('"');
     write_opt_str(out, "name", &t.name);
     write_opt_str(out, "role", &t.role);
+    write_opt_str(out, "anchor", &t.anchor);
     write_opt_dimension(out, "x", &t.x);
     write_opt_dimension(out, "y", &t.y);
     write_opt_dimension(out, "w", &t.w);
@@ -301,6 +302,7 @@ fn write_field(f: &FieldNode, out: &mut String, depth: usize) {
     out.push('"');
     write_opt_str(out, "name", &f.name);
     write_opt_str(out, "role", &f.role);
+    write_opt_str(out, "anchor", &f.anchor);
     out.push_str(" type=\"");
     out.push_str(&f.field_type);
     out.push('"');
@@ -343,6 +345,7 @@ fn write_toc(t: &TocNode, out: &mut String, depth: usize) {
     out.push('"');
     write_opt_str(out, "name", &t.name);
     write_opt_str(out, "role", &t.role);
+    write_opt_str(out, "anchor", &t.anchor);
     write_opt_str(out, "match-role", &t.match_role);
     write_opt_str(out, "match-style", &t.match_style);
     write_opt_str(out, "leader", &t.leader);
@@ -442,6 +445,7 @@ fn write_rect(r: &RectNode, out: &mut String, depth: usize) {
     out.push('"');
     write_opt_str(out, "name", &r.name);
     write_opt_str(out, "role", &r.role);
+    write_opt_str(out, "anchor", &r.anchor);
     write_opt_dimension(out, "x", &r.x);
     write_opt_dimension(out, "y", &r.y);
     write_opt_dimension(out, "w", &r.w);
@@ -500,6 +504,7 @@ fn write_image(i: &ImageNode, out: &mut String, depth: usize) {
     out.push('"');
     write_opt_str(out, "name", &i.name);
     write_opt_str(out, "role", &i.role);
+    write_opt_str(out, "anchor", &i.anchor);
     out.push_str(" asset=\"");
     out.push_str(&i.asset);
     out.push('"');
@@ -550,6 +555,7 @@ fn write_ellipse(e: &EllipseNode, out: &mut String, depth: usize) {
     out.push('"');
     write_opt_str(out, "name", &e.name);
     write_opt_str(out, "role", &e.role);
+    write_opt_str(out, "anchor", &e.anchor);
     write_opt_dimension(out, "x", &e.x);
     write_opt_dimension(out, "y", &e.y);
     write_opt_dimension(out, "w", &e.w);
@@ -669,6 +675,7 @@ fn write_frame(f: &FrameNode, out: &mut String, depth: usize) {
     out.push('"');
     write_opt_str(out, "name", &f.name);
     write_opt_str(out, "role", &f.role);
+    write_opt_str(out, "anchor", &f.anchor);
     write_opt_dimension(out, "x", &f.x);
     write_opt_dimension(out, "y", &f.y);
     write_opt_dimension(out, "w", &f.w);
@@ -713,6 +720,7 @@ fn write_group(g: &GroupNode, out: &mut String, depth: usize) {
     out.push('"');
     write_opt_str(out, "name", &g.name);
     write_opt_str(out, "role", &g.role);
+    write_opt_str(out, "anchor", &g.anchor);
     write_opt_dimension(out, "x", &g.x);
     write_opt_dimension(out, "y", &g.y);
     write_opt_dimension(out, "w", &g.w);
@@ -751,6 +759,7 @@ fn write_text(t: &TextNode, out: &mut String, depth: usize) {
     out.push('"');
     write_opt_str(out, "name", &t.name);
     write_opt_str(out, "role", &t.role);
+    write_opt_str(out, "anchor", &t.anchor);
     write_opt_dimension(out, "x", &t.x);
     write_opt_dimension(out, "y", &t.y);
     write_opt_dimension(out, "w", &t.w);
@@ -823,6 +832,7 @@ fn write_shape(s: &ShapeNode, out: &mut String, depth: usize) {
     out.push('"');
     write_opt_str(out, "name", &s.name);
     write_opt_str(out, "role", &s.role);
+    write_opt_str(out, "anchor", &s.anchor);
     write_opt_dimension(out, "x", &s.x);
     write_opt_dimension(out, "y", &s.y);
     write_opt_dimension(out, "w", &s.w);
@@ -923,6 +933,7 @@ fn write_code(c: &CodeNode, out: &mut String, depth: usize) {
     out.push('"');
     write_opt_str(out, "name", &c.name);
     write_opt_str(out, "role", &c.role);
+    write_opt_str(out, "anchor", &c.anchor);
     write_opt_dimension(out, "x", &c.x);
     write_opt_dimension(out, "y", &c.y);
     write_opt_dimension(out, "w", &c.w);

@@ -122,6 +122,7 @@ pub(super) fn resolve_toc_to_text(
         text_indent: None,
         bullet: None,
         bullet_gap: None,
+        anchor: None,
         spans: vec![TextSpan {
             text: combined,
             fill: None,
@@ -249,6 +250,7 @@ mod tests {
     fn heading_text(id: &str, role: &str, text: &str) -> Node {
         Node::Text(Box::new(TextNode {
             id: id.to_owned(),
+            anchor: None,
             name: None,
             role: Some(role.to_owned()),
             x: Some(px(0.0)),
@@ -318,6 +320,7 @@ mod tests {
     fn toc_node(match_role: Option<&str>, match_style: Option<&str>) -> TocNode {
         TocNode {
             id: "toc.main".to_owned(),
+            anchor: None,
             name: None,
             role: None,
             match_role: match_role.map(str::to_owned),

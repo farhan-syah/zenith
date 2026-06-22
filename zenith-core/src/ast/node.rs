@@ -6,6 +6,67 @@ use super::Span;
 use super::value::{Dimension, PropertyValue};
 use crate::tokens::SyntaxTheme;
 
+// ── Page-relative 9-point anchor ─────────────────────────────────────────────
+
+/// One of the nine named page-relative placement anchors.
+///
+/// An anchor supplies BOTH the x and y of a node from the page dimensions;
+/// an explicitly-authored `x` or `y` on the node overrides the corresponding
+/// anchor-derived coordinate. The node's `w` and `h` must be present and in a
+/// px-convertible unit for derivation to succeed; when they are absent or
+/// use a non-px unit the anchor is silently skipped (the node remains incomplete
+/// and the compile step emits the usual `scene.missing_geometry` advisory).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Anchor {
+    TopLeft,
+    TopCenter,
+    TopRight,
+    CenterLeft,
+    Center,
+    CenterRight,
+    BottomLeft,
+    BottomCenter,
+    BottomRight,
+}
+
+/// Parse a string into an [`Anchor`] variant.
+///
+/// Returns `Some` for the nine recognized names; `None` for any other string.
+/// This is the SINGLE source of truth for the anchor name list — both the
+/// validator (`anchor.unknown_value`) and the scene pre-pass use this function
+/// so the names cannot diverge.
+pub fn parse_anchor(s: &str) -> Option<Anchor> {
+    match s {
+        "top-left" => Some(Anchor::TopLeft),
+        "top-center" => Some(Anchor::TopCenter),
+        "top-right" => Some(Anchor::TopRight),
+        "center-left" => Some(Anchor::CenterLeft),
+        "center" => Some(Anchor::Center),
+        "center-right" => Some(Anchor::CenterRight),
+        "bottom-left" => Some(Anchor::BottomLeft),
+        "bottom-center" => Some(Anchor::BottomCenter),
+        "bottom-right" => Some(Anchor::BottomRight),
+        _ => None,
+    }
+}
+
+/// Derive the `(x, y)` for the given anchor given the page and node dimensions.
+///
+/// `page_w`/`page_h` and `node_w`/`node_h` are all in pixels.
+pub fn anchor_xy(anchor: Anchor, page_w: f64, page_h: f64, node_w: f64, node_h: f64) -> (f64, f64) {
+    match anchor {
+        Anchor::TopLeft => (0.0, 0.0),
+        Anchor::TopCenter => ((page_w - node_w) / 2.0, 0.0),
+        Anchor::TopRight => (page_w - node_w, 0.0),
+        Anchor::CenterLeft => (0.0, (page_h - node_h) / 2.0),
+        Anchor::Center => ((page_w - node_w) / 2.0, (page_h - node_h) / 2.0),
+        Anchor::CenterRight => (page_w - node_w, (page_h - node_h) / 2.0),
+        Anchor::BottomLeft => (0.0, page_h - node_h),
+        Anchor::BottomCenter => ((page_w - node_w) / 2.0, page_h - node_h),
+        Anchor::BottomRight => (page_w - node_w, page_h - node_h),
+    }
+}
+
 /// The typed value of an unrecognized KDL property, preserved for forward-compat.
 ///
 /// Mirrors the KDL v2 value space so that the original KDL type is never
@@ -140,6 +201,11 @@ pub struct ImageNode {
     pub locked: Option<bool>,
     pub rotate: Option<Dimension>,
     pub style: Option<String>,
+    /// Page-relative placement anchor (one of the nine named positions, e.g.
+    /// `"bottom-right"`). When present and recognized, the compile step derives
+    /// the node's x and/or y from the page and node dimensions. An explicitly-
+    /// authored x or y always wins.
+    pub anchor: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.
@@ -213,6 +279,11 @@ pub struct RectNode {
     pub visible: Option<bool>,
     pub locked: Option<bool>,
     pub rotate: Option<Dimension>,
+    /// Page-relative placement anchor (one of the nine named positions, e.g.
+    /// `"bottom-right"`). When present and recognized, the compile step derives
+    /// the node's x and/or y from the page and node dimensions. An explicitly-
+    /// authored x or y always wins.
+    pub anchor: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.
@@ -300,6 +371,11 @@ pub struct EllipseNode {
     pub visible: Option<bool>,
     pub locked: Option<bool>,
     pub rotate: Option<Dimension>,
+    /// Page-relative placement anchor (one of the nine named positions, e.g.
+    /// `"bottom-right"`). When present and recognized, the compile step derives
+    /// the node's x and/or y from the page and node dimensions. An explicitly-
+    /// authored x or y always wins.
+    pub anchor: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.
@@ -458,6 +534,11 @@ pub struct TextNode {
     pub bullet_gap: Option<Dimension>,
     /// Inline text spans.
     pub spans: Vec<TextSpan>,
+    /// Page-relative placement anchor (one of the nine named positions, e.g.
+    /// `"bottom-right"`). When present and recognized, the compile step derives
+    /// the node's x and/or y from the page and node dimensions. An explicitly-
+    /// authored x or y always wins.
+    pub anchor: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.
@@ -512,6 +593,11 @@ pub struct ShapeNode {
     pub visible: Option<bool>,
     pub locked: Option<bool>,
     pub rotate: Option<Dimension>,
+    /// Page-relative placement anchor (one of the nine named positions, e.g.
+    /// `"bottom-right"`). When present and recognized, the compile step derives
+    /// the node's x and/or y from the page and node dimensions. An explicitly-
+    /// authored x or y always wins.
+    pub anchor: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.
@@ -560,6 +646,11 @@ pub struct CodeNode {
     pub rotate: Option<Dimension>,
     /// Verbatim source text (decoded; newlines/tabs are literal characters).
     pub content: String,
+    /// Page-relative placement anchor (one of the nine named positions, e.g.
+    /// `"bottom-right"`). When present and recognized, the compile step derives
+    /// the node's x and/or y from the page and node dimensions. An explicitly-
+    /// authored x or y always wins.
+    pub anchor: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.
@@ -692,6 +783,11 @@ pub struct FrameNode {
     pub style: Option<String>,
     /// Child nodes in source order.
     pub children: Vec<Node>,
+    /// Page-relative placement anchor (one of the nine named positions, e.g.
+    /// `"bottom-right"`). When present and recognized, the compile step derives
+    /// the node's x and/or y from the page and node dimensions. An explicitly-
+    /// authored x or y always wins.
+    pub anchor: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.
@@ -736,6 +832,11 @@ pub struct GroupNode {
     pub style: Option<String>,
     /// Child nodes in source order.
     pub children: Vec<Node>,
+    /// Page-relative placement anchor (one of the nine named positions, e.g.
+    /// `"bottom-right"`). When present and recognized, the compile step derives
+    /// the node's x and/or y from the page and node dimensions. An explicitly-
+    /// authored x or y always wins.
+    pub anchor: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.
@@ -930,6 +1031,11 @@ pub struct FieldNode {
     pub opacity: Option<f64>,
     pub visible: Option<bool>,
     pub locked: Option<bool>,
+    /// Page-relative placement anchor (one of the nine named positions, e.g.
+    /// `"bottom-right"`). When present and recognized, the compile step derives
+    /// the node's x and/or y from the page and node dimensions. An explicitly-
+    /// authored x or y always wins.
+    pub anchor: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.
@@ -1015,6 +1121,11 @@ pub struct TocNode {
     pub opacity: Option<f64>,
     pub visible: Option<bool>,
     pub locked: Option<bool>,
+    /// Page-relative placement anchor (one of the nine named positions, e.g.
+    /// `"bottom-right"`). When present and recognized, the compile step derives
+    /// the node's x and/or y from the page and node dimensions. An explicitly-
+    /// authored x or y always wins.
+    pub anchor: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.
@@ -1134,6 +1245,11 @@ pub struct TableNode {
     /// Rotation — parsed and preserved but DEFERRED at render, consistent with
     /// the universal rotate deferral on all node types.
     pub rotate: Option<Dimension>,
+    /// Page-relative placement anchor (one of the nine named positions, e.g.
+    /// `"bottom-right"`). When present and recognized, the compile step derives
+    /// the node's x and/or y from the page and node dimensions. An explicitly-
+    /// authored x or y always wins.
+    pub anchor: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.

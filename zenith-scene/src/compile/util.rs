@@ -65,6 +65,57 @@ pub(super) fn unsupported_unit_diag(
     )
 }
 
+/// Build a `scene.missing_geometry` advisory for a node missing one or more of
+/// its `x`/`y`/`w`/`h` geometry properties.
+pub(super) fn missing_geometry_diag(kind: &str, node_id: &str, span: Option<Span>) -> Diagnostic {
+    Diagnostic::advisory(
+        "scene.missing_geometry",
+        format!(
+            "{kind} '{node_id}' is missing one or more geometry properties (x, y, w, h); \
+             skipped"
+        ),
+        span,
+        Some(node_id.to_owned()),
+    )
+}
+
+/// Resolve a single position axis (`x` or `y`) to pixels, honoring a
+/// page-relative anchor fallback.
+///
+/// - `dim = Some` (an explicitly-authored value): converts to px; on an
+///   unsupported unit, pushes `scene.unsupported_unit` and returns `None`.
+/// - `dim = None`: uses `anchor_val` when present (anchor-derived); otherwise
+///   pushes `scene.missing_geometry` and returns `None`.
+///
+/// A `None` return always means a diagnostic was pushed and the caller must
+/// skip the node. An explicit value always wins over the anchor.
+pub(super) fn resolve_anchored_axis(
+    kind: &str,
+    node_id: &str,
+    axis: &str,
+    dim: Option<&Dimension>,
+    anchor_val: Option<f64>,
+    span: Option<Span>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<f64> {
+    match dim {
+        Some(d) => match dim_to_px(d.value, &d.unit) {
+            Some(v) => Some(v),
+            None => {
+                diagnostics.push(unsupported_unit_diag(kind, node_id, axis, span));
+                None
+            }
+        },
+        None => match anchor_val {
+            Some(v) => Some(v),
+            None => {
+                diagnostics.push(missing_geometry_diag(kind, node_id, span));
+                None
+            }
+        },
+    }
+}
+
 /// Build a `(px)`-unit [`Dimension`] from a raw pixel value.
 ///
 /// Shared by `field` and `footnote` to synthesize geometry for their

@@ -16,6 +16,7 @@ use crate::color::parse_srgb_hex;
 use crate::ir::{Color, SceneCommand, SceneGlyph};
 
 use super::RenderCtx;
+use super::anchor::AnchorMap;
 use super::chain::ChainAssignments;
 use super::paint::{
     NodeEffect, emit_node_with_effects, resolve_property_color, resolve_property_filter,
@@ -2026,6 +2027,7 @@ pub(super) fn compile_text(
     chains: &ChainAssignments,
     footnote_markers: &BTreeMap<String, String>,
     node_boxes: &BTreeMap<String, (f64, f64, f64, f64)>,
+    anchors: &AnchorMap,
     ctx: RenderCtx,
 ) -> f64 {
     if text.overflow.as_deref() != Some("autofit") {
@@ -2041,6 +2043,7 @@ pub(super) fn compile_text(
             chains,
             footnote_markers,
             node_boxes,
+            anchors,
             ctx,
         );
     }
@@ -2055,6 +2058,7 @@ pub(super) fn compile_text(
         chains,
         footnote_markers,
         node_boxes,
+        anchors,
         ctx,
     )
 }
@@ -2098,6 +2102,7 @@ fn compile_text_autofit(
     chains: &ChainAssignments,
     footnote_markers: &BTreeMap<String, String>,
     node_boxes: &BTreeMap<String, (f64, f64, f64, f64)>,
+    anchors: &AnchorMap,
     ctx: RenderCtx,
 ) -> f64 {
     // Require both box dimensions to measure fit; otherwise fall back to a
@@ -2116,6 +2121,7 @@ fn compile_text_autofit(
             chains,
             footnote_markers,
             node_boxes,
+            anchors,
             ctx,
         );
     };
@@ -2157,6 +2163,7 @@ fn compile_text_autofit(
             chains,
             footnote_markers,
             node_boxes,
+            anchors,
             ctx,
         );
         !throwaway_diags.iter().any(|d| {
@@ -2193,6 +2200,7 @@ fn compile_text_autofit(
         chains,
         footnote_markers,
         node_boxes,
+        anchors,
         ctx,
     )
 }
@@ -2216,6 +2224,7 @@ pub(super) fn compile_text_sized(
     chains: &ChainAssignments,
     footnote_markers: &BTreeMap<String, String>,
     node_boxes: &BTreeMap<String, (f64, f64, f64, f64)>,
+    anchors: &AnchorMap,
     ctx: RenderCtx,
 ) -> f64 {
     // Skip invisible text nodes.
@@ -2223,37 +2232,71 @@ pub(super) fn compile_text_sized(
         return 0.0;
     }
 
-    // Resolve geometry — x and y are required; skip if absent or bad unit.
-    let (Some(x_dim), Some(y_dim)) = (&text.x, &text.y) else {
-        diagnostics.push(Diagnostic::advisory(
-            "scene.missing_geometry",
-            format!(
-                "text node '{}' is missing x or y geometry; skipped",
-                text.id
-            ),
-            text.source_span,
-            Some(text.id.clone()),
-        ));
-        return 0.0;
+    // Anchor-derived (x, y): look up the pre-pass map when x or y is absent.
+    let anchor_xy = anchors.get(&text.id).copied();
+
+    // Resolve x — use authored value when present, anchor derivation when absent.
+    let text_x_raw = match &text.x {
+        Some(x_dim) => {
+            let Some(v) = dim_to_px(x_dim.value, &x_dim.unit) else {
+                diagnostics.push(unsupported_unit_diag(
+                    "text node",
+                    &text.id,
+                    "x",
+                    text.source_span,
+                ));
+                return 0.0;
+            };
+            v
+        }
+        None => {
+            if let Some((ax, _)) = anchor_xy {
+                ax
+            } else {
+                diagnostics.push(Diagnostic::advisory(
+                    "scene.missing_geometry",
+                    format!(
+                        "text node '{}' is missing x or y geometry; skipped",
+                        text.id
+                    ),
+                    text.source_span,
+                    Some(text.id.clone()),
+                ));
+                return 0.0;
+            }
+        }
     };
 
-    let Some(text_x_raw) = dim_to_px(x_dim.value, &x_dim.unit) else {
-        diagnostics.push(unsupported_unit_diag(
-            "text node",
-            &text.id,
-            "x",
-            text.source_span,
-        ));
-        return 0.0;
-    };
-    let Some(text_y_raw) = dim_to_px(y_dim.value, &y_dim.unit) else {
-        diagnostics.push(unsupported_unit_diag(
-            "text node",
-            &text.id,
-            "y",
-            text.source_span,
-        ));
-        return 0.0;
+    // Resolve y — same pattern.
+    let text_y_raw = match &text.y {
+        Some(y_dim) => {
+            let Some(v) = dim_to_px(y_dim.value, &y_dim.unit) else {
+                diagnostics.push(unsupported_unit_diag(
+                    "text node",
+                    &text.id,
+                    "y",
+                    text.source_span,
+                ));
+                return 0.0;
+            };
+            v
+        }
+        None => {
+            if let Some((_, ay)) = anchor_xy {
+                ay
+            } else {
+                diagnostics.push(Diagnostic::advisory(
+                    "scene.missing_geometry",
+                    format!(
+                        "text node '{}' is missing x or y geometry; skipped",
+                        text.id
+                    ),
+                    text.source_span,
+                    Some(text.id.clone()),
+                ));
+                return 0.0;
+            }
+        }
     };
 
     // Apply group translation offset.
@@ -3417,6 +3460,7 @@ pub(super) fn compile_code(
     engine: &RustybuzzEngine,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
+    anchors: &AnchorMap,
     ctx: RenderCtx,
 ) -> f64 {
     // Skip invisible code nodes.
@@ -3424,43 +3468,79 @@ pub(super) fn compile_code(
         return 0.0;
     }
 
-    // Resolve geometry — x and y are required; skip if absent or bad unit.
-    let (Some(x_dim), Some(y_dim)) = (&code.x, &code.y) else {
-        diagnostics.push(Diagnostic::advisory(
-            "scene.missing_geometry",
-            format!(
-                "code node '{}' is missing x or y geometry; skipped",
-                code.id
-            ),
-            code.source_span,
-            Some(code.id.clone()),
-        ));
-        return 0.0;
-    };
-
-    let Some(code_x_raw) = dim_to_px(x_dim.value, &x_dim.unit) else {
-        diagnostics.push(unsupported_unit_diag(
-            "code node",
-            &code.id,
-            "x",
-            code.source_span,
-        ));
-        return 0.0;
-    };
-    let Some(code_y_raw) = dim_to_px(y_dim.value, &y_dim.unit) else {
-        diagnostics.push(unsupported_unit_diag(
-            "code node",
-            &code.id,
-            "y",
-            code.source_span,
-        ));
-        return 0.0;
-    };
-
     // Width/height are OPTIONAL; they bound the clip rectangle when
     // present. A bad unit yields None (no clip), not a hard skip.
     let code_w: Option<f64> = code.w.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
     let code_h: Option<f64> = code.h.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+
+    // Anchor-derived (x, y): look up the pre-pass map when x or y is absent.
+    // The pre-pass requires w/h to be px, so anchor derivation only activates
+    // when code has resolvable dimensions.
+    let anchor_xy = anchors.get(&code.id).copied();
+
+    // Resolve x — use authored value when present, anchor derivation when absent.
+    let code_x_raw = match &code.x {
+        Some(x_dim) => {
+            let Some(v) = dim_to_px(x_dim.value, &x_dim.unit) else {
+                diagnostics.push(unsupported_unit_diag(
+                    "code node",
+                    &code.id,
+                    "x",
+                    code.source_span,
+                ));
+                return 0.0;
+            };
+            v
+        }
+        None => {
+            if let Some((ax, _)) = anchor_xy {
+                ax
+            } else {
+                diagnostics.push(Diagnostic::advisory(
+                    "scene.missing_geometry",
+                    format!(
+                        "code node '{}' is missing x or y geometry; skipped",
+                        code.id
+                    ),
+                    code.source_span,
+                    Some(code.id.clone()),
+                ));
+                return 0.0;
+            }
+        }
+    };
+
+    // Resolve y — same pattern.
+    let code_y_raw = match &code.y {
+        Some(y_dim) => {
+            let Some(v) = dim_to_px(y_dim.value, &y_dim.unit) else {
+                diagnostics.push(unsupported_unit_diag(
+                    "code node",
+                    &code.id,
+                    "y",
+                    code.source_span,
+                ));
+                return 0.0;
+            };
+            v
+        }
+        None => {
+            if let Some((_, ay)) = anchor_xy {
+                ay
+            } else {
+                diagnostics.push(Diagnostic::advisory(
+                    "scene.missing_geometry",
+                    format!(
+                        "code node '{}' is missing x or y geometry; skipped",
+                        code.id
+                    ),
+                    code.source_span,
+                    Some(code.id.clone()),
+                ));
+                return 0.0;
+            }
+        }
+    };
 
     // Apply group translation offset.
     let code_x = code_x_raw + ctx.dx;

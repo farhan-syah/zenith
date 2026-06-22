@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use crate::ast::node::{
-    FieldNode, FootnoteNode, InstanceNode, Node, PolygonNode, PolylineNode, TocNode,
+    FieldNode, FootnoteNode, InstanceNode, Node, PolygonNode, PolylineNode, TocNode, parse_anchor,
 };
 use crate::ast::value::{Dimension, PropertyValue, Unit, dim_to_px};
 use crate::diagnostics::Diagnostic;
@@ -146,12 +146,18 @@ pub(super) fn walk_node(
                 diagnostics,
             );
 
+            // A recognized anchor supplies both x and y; x/y are not required
+            // even outside a flow parent when a recognized anchor is present.
+            let anchor_active =
+                check_anchor(&r.id, r.anchor.as_deref(), r.source_span, diagnostics);
+            let xy_required = geom_required && !anchor_active;
+
             // Required geometry: x, y, w, h must all be present.
             check_optional_dim(
                 &r.id,
                 "x",
                 r.x.as_ref(),
-                geom_required,
+                xy_required,
                 r.source_span,
                 diagnostics,
             );
@@ -159,7 +165,7 @@ pub(super) fn walk_node(
                 &r.id,
                 "y",
                 r.y.as_ref(),
-                geom_required,
+                xy_required,
                 r.source_span,
                 diagnostics,
             );
@@ -404,12 +410,17 @@ pub(super) fn walk_node(
                 diagnostics,
             );
 
+            // A recognized anchor supplies both x and y.
+            let anchor_active =
+                check_anchor(&e.id, e.anchor.as_deref(), e.source_span, diagnostics);
+            let xy_required = geom_required && !anchor_active;
+
             // Required geometry: x, y, w, h must all be present.
             check_optional_dim(
                 &e.id,
                 "x",
                 e.x.as_ref(),
-                geom_required,
+                xy_required,
                 e.source_span,
                 diagnostics,
             );
@@ -417,7 +428,7 @@ pub(super) fn walk_node(
                 &e.id,
                 "y",
                 e.y.as_ref(),
-                geom_required,
+                xy_required,
                 e.source_span,
                 diagnostics,
             );
@@ -732,12 +743,17 @@ pub(super) fn walk_node(
                 diagnostics,
             );
 
+            // A recognized anchor supplies both x and y.
+            let anchor_active =
+                check_anchor(&t.id, t.anchor.as_deref(), t.source_span, diagnostics);
+            let xy_required = geom_required && !anchor_active;
+
             // Required geometry.
             check_optional_dim(
                 &t.id,
                 "x",
                 t.x.as_ref(),
-                geom_required,
+                xy_required,
                 t.source_span,
                 diagnostics,
             );
@@ -745,7 +761,7 @@ pub(super) fn walk_node(
                 &t.id,
                 "y",
                 t.y.as_ref(),
-                geom_required,
+                xy_required,
                 t.source_span,
                 diagnostics,
             );
@@ -945,12 +961,17 @@ pub(super) fn walk_node(
                 diagnostics,
             );
 
+            // A recognized anchor supplies both x and y.
+            let anchor_active =
+                check_anchor(&c.id, c.anchor.as_deref(), c.source_span, diagnostics);
+            let xy_required = geom_required && !anchor_active;
+
             // Geometry (advisory box for v0; only unit-checked if present).
             check_optional_dim(
                 &c.id,
                 "x",
                 c.x.as_ref(),
-                geom_required,
+                xy_required,
                 c.source_span,
                 diagnostics,
             );
@@ -958,7 +979,7 @@ pub(super) fn walk_node(
                 &c.id,
                 "y",
                 c.y.as_ref(),
-                geom_required,
+                xy_required,
                 c.source_span,
                 diagnostics,
             );
@@ -1056,12 +1077,17 @@ pub(super) fn walk_node(
                 diagnostics,
             );
 
+            // A recognized anchor supplies both x and y.
+            let anchor_active =
+                check_anchor(&f.id, f.anchor.as_deref(), f.source_span, diagnostics);
+            let xy_required = geom_required && !anchor_active;
+
             // Frames REQUIRE all four geometry dimensions (unlike groups).
             check_optional_dim(
                 &f.id,
                 "x",
                 f.x.as_ref(),
-                geom_required,
+                xy_required,
                 f.source_span,
                 diagnostics,
             );
@@ -1069,7 +1095,7 @@ pub(super) fn walk_node(
                 &f.id,
                 "y",
                 f.y.as_ref(),
-                geom_required,
+                xy_required,
                 f.source_span,
                 diagnostics,
             );
@@ -1194,6 +1220,8 @@ pub(super) fn walk_node(
             );
 
             // Groups have NO required geometry — x/y/w/h are all advisory.
+            // Still validate the anchor value if present.
+            check_anchor(&g.id, g.anchor.as_deref(), g.source_span, diagnostics);
 
             if let Some(d) = g.blur.as_ref()
                 && d.value < 0.0
@@ -1268,12 +1296,17 @@ pub(super) fn walk_node(
                 diagnostics,
             );
 
+            // A recognized anchor supplies both x and y.
+            let anchor_active =
+                check_anchor(&img.id, img.anchor.as_deref(), img.source_span, diagnostics);
+            let xy_required = geom_required && !anchor_active;
+
             // Required geometry: x, y, w, h must all be present (mirror rect).
             check_optional_dim(
                 &img.id,
                 "x",
                 img.x.as_ref(),
-                geom_required,
+                xy_required,
                 img.source_span,
                 diagnostics,
             );
@@ -1281,7 +1314,7 @@ pub(super) fn walk_node(
                 &img.id,
                 "y",
                 img.y.as_ref(),
-                geom_required,
+                xy_required,
                 img.source_span,
                 diagnostics,
             );
@@ -1566,12 +1599,17 @@ pub(super) fn walk_node(
                 diagnostics,
             );
 
+            // A recognized anchor supplies both x and y.
+            let anchor_active =
+                check_anchor(&t.id, t.anchor.as_deref(), t.source_span, diagnostics);
+            let xy_required = geom_required && !anchor_active;
+
             // Required geometry: x, y, w, h must all be present (mirror frame).
             check_optional_dim(
                 &t.id,
                 "x",
                 t.x.as_ref(),
-                geom_required,
+                xy_required,
                 t.source_span,
                 diagnostics,
             );
@@ -1579,7 +1617,7 @@ pub(super) fn walk_node(
                 &t.id,
                 "y",
                 t.y.as_ref(),
-                geom_required,
+                xy_required,
                 t.source_span,
                 diagnostics,
             );
@@ -1893,12 +1931,17 @@ pub(super) fn walk_node(
                 diagnostics,
             );
 
+            // A recognized anchor supplies both x and y.
+            let anchor_active =
+                check_anchor(&s.id, s.anchor.as_deref(), s.source_span, diagnostics);
+            let xy_required = geom_required && !anchor_active;
+
             // Required geometry: x, y, w, h must all be present.
             check_optional_dim(
                 &s.id,
                 "x",
                 s.x.as_ref(),
-                geom_required,
+                xy_required,
                 s.source_span,
                 diagnostics,
             );
@@ -1906,7 +1949,7 @@ pub(super) fn walk_node(
                 &s.id,
                 "y",
                 s.y.as_ref(),
-                geom_required,
+                xy_required,
                 s.source_span,
                 diagnostics,
             );
@@ -2900,6 +2943,14 @@ fn check_field(
         diagnostics,
     );
 
+    // Validate the anchor value (geometry is all-optional for fields anyway).
+    check_anchor(
+        &field.id,
+        field.anchor.as_deref(),
+        field.source_span,
+        diagnostics,
+    );
+
     // Unknown field type → Warning (never a hard error; the field simply renders
     // nothing at compile time).
     if !KNOWN_FIELD_TYPES.contains(&field.field_type.as_str()) {
@@ -3005,6 +3056,9 @@ fn check_toc(
         toc.source_span,
         diagnostics,
     );
+
+    // Validate the anchor value (geometry is all-optional for toc anyway).
+    check_anchor(&toc.id, toc.anchor.as_deref(), toc.source_span, diagnostics);
 
     // Warn when neither selector is set: the toc will collect no entries.
     if toc.match_role.is_none() && toc.match_style.is_none() {
@@ -3155,8 +3209,44 @@ fn check_footnote(
 
 // ── Geometry helpers ──────────────────────────────────────────────────────────
 
-/// Check a single optional geometry dimension (`x`, `y`, `w`, `h`):
-/// - absent AND `required` → `node.missing_geometry` (Error).
+/// Validate the `anchor` property on a node.
+///
+/// - Absent (`None`) → no diagnostic; returns `false` (no anchor active).
+/// - Present with a recognized value → no diagnostic; returns `true` (anchor
+///   active: x/y geometry is NOT required even outside a flow parent).
+/// - Present with an unrecognized value → pushes `anchor.unknown_value` and
+///   returns `false` (treat as absent for geometry purposes).
+fn check_anchor(
+    node_id: &str,
+    anchor: Option<&str>,
+    span: Option<crate::ast::Span>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    match anchor {
+        None => false,
+        Some(s) => {
+            if parse_anchor(s).is_some() {
+                true
+            } else {
+                diagnostics.push(Diagnostic::error(
+                    "anchor.unknown_value",
+                    format!(
+                        "node '{}': anchor value '{}' is not recognized; \
+                         valid values are top-left, top-center, top-right, \
+                         center-left, center, center-right, \
+                         bottom-left, bottom-center, bottom-right",
+                        node_id, s
+                    ),
+                    span,
+                    Some(node_id.to_owned()),
+                ));
+                false
+            }
+        }
+    }
+}
+
+/// - absent AND `required` (e.g. a non-flow-positioned leaf) → `node.missing_geometry` (Error).
 /// - absent AND NOT `required` (e.g. a direct child of a `layout="flow"`
 ///   frame, whose position/size is supplied by the flow algorithm) → no
 ///   diagnostic.

@@ -20,10 +20,10 @@ pub use document::{
 };
 pub use library::LibraryDef;
 pub use node::{
-    CodeNode, ConnectorNode, EllipseNode, FieldNode, FootnoteNode, FrameNode, GroupNode, ImageNode,
-    InstanceNode, LineNode, Node, ObjectPosition, Override, Point, PolygonNode, PolylineNode,
-    RectNode, ShapeNode, TableCell, TableColumn, TableNode, TableRow, TextNode, TextSpan, TocNode,
-    UnknownNode, UnknownProperty, UnknownValue,
+    Anchor, CodeNode, ConnectorNode, EllipseNode, FieldNode, FootnoteNode, FrameNode, GroupNode,
+    ImageNode, InstanceNode, LineNode, Node, ObjectPosition, Override, Point, PolygonNode,
+    PolylineNode, RectNode, ShapeNode, TableCell, TableColumn, TableNode, TableRow, TextNode,
+    TextSpan, TocNode, UnknownNode, UnknownProperty, UnknownValue, anchor_xy, parse_anchor,
 };
 pub use provenance::ProvenanceDef;
 pub use span::Span;

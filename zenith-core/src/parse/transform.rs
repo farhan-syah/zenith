@@ -1489,6 +1489,7 @@ const SHAPE_KNOWN_PROPS: &[&str] = &[
     "visible",
     "locked",
     "rotate",
+    "anchor",
 ];
 
 fn transform_shape(node: &KdlNode) -> Result<ShapeNode, ParseError> {
@@ -1535,6 +1536,7 @@ fn transform_shape(node: &KdlNode) -> Result<ShapeNode, ParseError> {
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),
         rotate: optional_dimension_prop(node, "rotate"),
+        anchor: optional_string_prop(node, "anchor").map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })
@@ -1679,6 +1681,7 @@ const RECT_KNOWN_PROPS: &[&str] = &[
     "stroke_outer",
     "stroke-outer-width",
     "stroke_outer_width",
+    "anchor",
 ];
 
 fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
@@ -1753,6 +1756,7 @@ fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),
         rotate: optional_dimension_prop(node, "rotate"),
+        anchor: optional_string_prop(node, "anchor").map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })
@@ -1794,6 +1798,7 @@ const IMAGE_KNOWN_PROPS: &[&str] = &[
     "locked",
     "rotate",
     "style",
+    "anchor",
 ];
 
 fn transform_image(node: &KdlNode) -> Result<ImageNode, ParseError> {
@@ -1847,6 +1852,7 @@ fn transform_image(node: &KdlNode) -> Result<ImageNode, ParseError> {
         locked: optional_bool_prop(node, "locked"),
         rotate: optional_dimension_prop(node, "rotate"),
         style: optional_string_prop(node, "style").map(str::to_owned),
+        anchor: optional_string_prop(node, "anchor").map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })
@@ -1883,6 +1889,7 @@ const ELLIPSE_KNOWN_PROPS: &[&str] = &[
     "visible",
     "locked",
     "rotate",
+    "anchor",
 ];
 
 fn transform_ellipse(node: &KdlNode) -> Result<EllipseNode, ParseError> {
@@ -1929,6 +1936,7 @@ fn transform_ellipse(node: &KdlNode) -> Result<EllipseNode, ParseError> {
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),
         rotate: optional_dimension_prop(node, "rotate"),
+        anchor: optional_string_prop(node, "anchor").map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })
@@ -2049,6 +2057,7 @@ const TEXT_KNOWN_PROPS: &[&str] = &[
     "bullet",
     "bullet-gap",
     "bullet_gap",
+    "anchor",
 ];
 
 fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
@@ -2136,6 +2145,7 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         bullet,
         bullet_gap,
         spans,
+        anchor: optional_string_prop(node, "anchor").map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })
@@ -2169,6 +2179,7 @@ const CODE_KNOWN_PROPS: &[&str] = &[
     "visible",
     "locked",
     "rotate",
+    "anchor",
 ];
 
 fn transform_code(node: &KdlNode) -> Result<CodeNode, ParseError> {
@@ -2227,6 +2238,7 @@ fn transform_code(node: &KdlNode) -> Result<CodeNode, ParseError> {
         locked: optional_bool_prop(node, "locked"),
         rotate: optional_dimension_prop(node, "rotate"),
         content,
+        anchor: optional_string_prop(node, "anchor").map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })
@@ -2251,6 +2263,7 @@ const FRAME_KNOWN_PROPS: &[&str] = &[
     "blend_mode",
     "blur",
     "style",
+    "anchor",
 ];
 
 fn transform_frame(node: &KdlNode) -> Result<FrameNode, ParseError> {
@@ -2277,6 +2290,7 @@ fn transform_frame(node: &KdlNode) -> Result<FrameNode, ParseError> {
         blur: optional_dimension_prop(node, "blur"),
         style: optional_string_prop(node, "style").map(str::to_owned),
         children: transform_children(node)?,
+        anchor: optional_string_prop(node, "anchor").map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })
@@ -2298,6 +2312,7 @@ const GROUP_KNOWN_PROPS: &[&str] = &[
     "blend_mode",
     "blur",
     "style",
+    "anchor",
 ];
 
 fn transform_group(node: &KdlNode) -> Result<GroupNode, ParseError> {
@@ -2322,6 +2337,7 @@ fn transform_group(node: &KdlNode) -> Result<GroupNode, ParseError> {
         blur: optional_dimension_prop(node, "blur"),
         style: optional_string_prop(node, "style").map(str::to_owned),
         children: transform_children(node)?,
+        anchor: optional_string_prop(node, "anchor").map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })
@@ -2377,6 +2393,7 @@ const TABLE_KNOWN_PROPS: &[&str] = &[
     "visible",
     "locked",
     "rotate",
+    "anchor",
 ];
 
 /// Transform a `cell` child node into a [`TableCell`].
@@ -2470,6 +2487,7 @@ fn transform_table(node: &KdlNode) -> Result<TableNode, ParseError> {
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),
         rotate: optional_dimension_prop(node, "rotate"),
+        anchor: optional_string_prop(node, "anchor").map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })
@@ -2706,6 +2724,7 @@ const FIELD_KNOWN_PROPS: &[&str] = &[
     "opacity",
     "visible",
     "locked",
+    "anchor",
 ];
 
 /// Transform a `field` node into a [`FieldNode`].
@@ -2749,6 +2768,7 @@ fn transform_field(node: &KdlNode) -> Result<FieldNode, ParseError> {
         opacity: optional_f64_prop(node, "opacity"),
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),
+        anchor: optional_string_prop(node, "anchor").map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })
@@ -2778,6 +2798,7 @@ const TOC_KNOWN_PROPS: &[&str] = &[
     "opacity",
     "visible",
     "locked",
+    "anchor",
 ];
 
 /// Transform a `toc` node into a [`TocNode`].
@@ -2822,6 +2843,7 @@ fn transform_toc(node: &KdlNode) -> Result<TocNode, ParseError> {
         opacity: optional_f64_prop(node, "opacity"),
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),
+        anchor: optional_string_prop(node, "anchor").map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })

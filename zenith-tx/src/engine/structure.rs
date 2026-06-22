@@ -1279,6 +1279,7 @@ pub(super) fn apply_group(
         blend_mode: None,
         blur: None,
         style: None,
+        anchor: None,
         children: group_children,
         source_span: None,
         unknown_props: BTreeMap::new(),
