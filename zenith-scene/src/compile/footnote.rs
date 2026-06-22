@@ -149,6 +149,25 @@ fn synth_footnote_text(fnote: &FootnoteNode, marker: &str, x: f64, y: f64, w: f6
     }
 }
 
+/// The shared, read-only typesetting environment for the footnote zone.
+///
+/// Bundles the (borrowed) inputs that do not vary across the measure/emit passes
+/// — the token table, style map, font provider, shaping engine, chain/anchor
+/// maps, the page's footnote markers, and the per-page field context — so the
+/// zone entry point takes a small argument list. `Copy` because every field is a
+/// shared reference (the borrows outlive the whole compile).
+#[derive(Clone, Copy)]
+pub(in crate::compile) struct FootnoteZoneEnv<'a> {
+    pub(in crate::compile) markers: &'a BTreeMap<String, String>,
+    pub(in crate::compile) resolved: &'a BTreeMap<String, ResolvedToken>,
+    pub(in crate::compile) style_map: &'a BTreeMap<&'a str, &'a Style>,
+    pub(in crate::compile) fonts: &'a dyn FontProvider,
+    pub(in crate::compile) engine: &'a RustybuzzEngine,
+    pub(in crate::compile) chains: &'a ChainAssignments,
+    pub(in crate::compile) anchors: &'a AnchorMap,
+    pub(in crate::compile) field_ctx: &'a FieldCtx<'a>,
+}
+
 /// Render the page's footnote zone: the separator rule plus the stacked,
 /// auto-numbered footnotes, in the reserved area above the page's bottom margin.
 ///
@@ -160,29 +179,47 @@ fn synth_footnote_text(fnote: &FootnoteNode, marker: &str, x: f64, y: f64, w: f6
 /// Reuses [`compile_text`] for typesetting + height measurement (a scratch
 /// measure pass, then the real emit), so a footnote shapes byte-identically to a
 /// normal wrapped text node.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn compile_footnote_zone(
+pub(in crate::compile) fn compile_footnote_zone(
     page: &Page,
-    markers: &BTreeMap<String, String>,
     live_area: Option<(f64, f64, f64, f64)>,
-    resolved: &BTreeMap<String, ResolvedToken>,
-    style_map: &BTreeMap<&str, &Style>,
-    fonts: &dyn FontProvider,
-    engine: &RustybuzzEngine,
-    chains: &ChainAssignments,
-    anchors: &AnchorMap,
-    field_ctx: &FieldCtx,
+    env: FootnoteZoneEnv,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
     ctx: RenderCtx,
 ) {
+    let FootnoteZoneEnv {
+        markers,
+        resolved,
+        style_map,
+        fonts,
+        engine,
+        chains,
+        anchors,
+        field_ctx,
+    } = env;
     // Collect the footnote nodes in source order (direct page children only).
     let footnotes: Vec<&FootnoteNode> = page
         .children
         .iter()
         .filter_map(|n| match n {
             Node::Footnote(f) => Some(f),
-            _ => None,
+            Node::Rect(_)
+            | Node::Ellipse(_)
+            | Node::Line(_)
+            | Node::Text(_)
+            | Node::Code(_)
+            | Node::Image(_)
+            | Node::Frame(_)
+            | Node::Group(_)
+            | Node::Polygon(_)
+            | Node::Polyline(_)
+            | Node::Instance(_)
+            | Node::Field(_)
+            | Node::Toc(_)
+            | Node::Table(_)
+            | Node::Shape(_)
+            | Node::Connector(_)
+            | Node::Unknown(_) => None,
         })
         .collect();
     if footnotes.is_empty() {
