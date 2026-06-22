@@ -89,7 +89,11 @@ fn procedural_background_emits_expected_scene_commands() {
             gradient.angle_deg, 135.0,
             "background gradient angle must be 135°: {gradient:?}"
         );
-        assert_eq!(gradient.stops.len(), 2, "background gradient must have 2 stops");
+        assert_eq!(
+            gradient.stops.len(),
+            2,
+            "background gradient must have 2 stops"
+        );
     }
 
     // ── S-recipe-01: translucent ellipses must emit FillEllipseGradient ────
@@ -231,9 +235,7 @@ fn translucent_ellipse_opacity_bakes_into_fill() {
     let begin_blur_idx = cmds
         .iter()
         .position(|c| matches!(c, SceneCommand::BeginBlur { .. }));
-    let end_blur_idx = cmds
-        .iter()
-        .position(|c| matches!(c, SceneCommand::EndBlur));
+    let end_blur_idx = cmds.iter().position(|c| matches!(c, SceneCommand::EndBlur));
 
     // Find a FillEllipseGradient outside the blur bracket.
     let translucent_grad = cmds.iter().enumerate().find_map(|(i, c)| {
@@ -251,8 +253,8 @@ fn translucent_ellipse_opacity_bakes_into_fill() {
         }
     });
 
-    let gradient = translucent_grad
-        .expect("a FillEllipseGradient outside the blur bracket must be emitted");
+    let gradient =
+        translucent_grad.expect("a FillEllipseGradient outside the blur bracket must be emitted");
 
     // opacity=0.25 applied to fully-opaque stops (a=255):
     // 255 * 0.25 = 63.75 → rounds to 64.
