@@ -42,6 +42,7 @@ mod nodes;
 mod passes;
 mod report;
 mod safezone;
+mod variants;
 mod visual;
 
 // ── Public surface ────────────────────────────────────────────────────────────

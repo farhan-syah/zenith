@@ -23,6 +23,7 @@ use super::passes::{
     validate_library_decl, validate_provenance_def, validate_style_block,
 };
 use super::report::ValidationReport;
+use super::variants::check_variants;
 use super::visual::{VisualExpect, check_visual_prop};
 use super::{fold, margin, safezone};
 
@@ -317,6 +318,21 @@ pub fn validate(doc: &Document) -> ValidationReport {
     // checking). A BTreeSet gives deterministic iteration if we ever need it.
     let page_ids: BTreeSet<&str> = doc.body.pages.iter().map(|p| p.id.as_str()).collect();
 
+    // Per-page descendant node-id map, built once here and shared with the
+    // variant check. Each entry maps a page id to the BTreeSet of all node ids
+    // (at any depth) within that page. This avoids rebuilding the set once per
+    // variant (which would be O(variants × pages × nodes)).
+    let page_node_ids: BTreeMap<&str, BTreeSet<String>> = doc
+        .body
+        .pages
+        .iter()
+        .map(|p| {
+            let mut ids: BTreeSet<String> = BTreeSet::new();
+            collect_local_ids(&p.children, &mut ids);
+            (p.id.as_str(), ids)
+        })
+        .collect();
+
     // Track start_page values seen so far: duplicate start_page on a second
     // section → `section.duplicate_start_page`.
     let mut seen_section_start_pages: BTreeSet<&str> = BTreeSet::new();
@@ -372,6 +388,11 @@ pub fn validate(doc: &Document) -> ValidationReport {
             ));
         }
     }
+
+    // ── Variants ──────────────────────────────────────────────────────────
+    // Validate the top-level `variants` block: duplicate ids, unknown source
+    // pages, invalid dimensions, and override-node resolution.
+    check_variants(doc, &page_ids, &page_node_ids, &mut diagnostics);
 
     // ── Provenance records ────────────────────────────────────────────────
     // Each `origin` id participates in the GLOBAL id-uniqueness set. The record
