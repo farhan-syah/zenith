@@ -20,6 +20,7 @@ pub mod commands;
 pub mod history;
 pub mod json_types;
 pub mod library;
+pub mod mcp;
 pub mod selfupdate;
 
 use std::io::Write as _;
@@ -774,6 +775,76 @@ pub fn run() -> ExitCode {
                 }
             }
         },
+
+        Command::Plugin(args) => {
+            let project_root = std::path::Path::new(".");
+            match args.command {
+                cli::PluginSub::Install(a) => {
+                    let targets = targets_from_flags(&a.agents);
+                    let code = commands::plugin::run_install(
+                        project_root,
+                        targets,
+                        scope_from_arg(a.scope),
+                        a.force,
+                        a.dry_run,
+                    );
+                    ExitCode::from(code)
+                }
+                cli::PluginSub::Uninstall(a) => {
+                    let targets = targets_from_flags(&a.agents);
+                    let code = commands::plugin::run_uninstall(
+                        project_root,
+                        targets,
+                        scope_from_arg(a.scope),
+                        a.dry_run,
+                    );
+                    ExitCode::from(code)
+                }
+                cli::PluginSub::List => ExitCode::from(commands::plugin::run_list(project_root)),
+            }
+        }
+
+        Command::Mcp(_) => ExitCode::from(mcp::run()),
+    }
+}
+
+/// Map the CLI scope flag to the plugin module's [`Scope`](commands::plugin::Scope).
+fn scope_from_arg(scope: cli::ScopeArg) -> commands::plugin::Scope {
+    match scope {
+        cli::ScopeArg::User => commands::plugin::Scope::User,
+        cli::ScopeArg::Project => commands::plugin::Scope::Project,
+    }
+}
+
+/// Translate the per-agent boolean flags into a [`Targets`](commands::plugin::Targets)
+/// selection. `--all` wins; no flag set means auto-detect.
+fn targets_from_flags(f: &cli::AgentFlags) -> commands::plugin::Targets {
+    use commands::plugin::{Agent, Targets};
+    if f.all {
+        return Targets::All;
+    }
+    let mut agents = Vec::new();
+    let mut push = |on: bool, a: Agent| {
+        if on {
+            agents.push(a);
+        }
+    };
+    push(f.claude, Agent::ClaudeCode);
+    push(f.codex, Agent::Codex);
+    push(f.opencode, Agent::OpenCode);
+    push(f.cursor, Agent::Cursor);
+    push(f.windsurf, Agent::Windsurf);
+    push(f.aider, Agent::Aider);
+    push(f.zed, Agent::Zed);
+    push(f.gemini, Agent::Gemini);
+    push(f.copilot, Agent::Copilot);
+    push(f.continue_dev, Agent::Continue);
+    push(f.kiro, Agent::Kiro);
+    push(f.antigravity, Agent::Antigravity);
+    if agents.is_empty() {
+        Targets::Auto
+    } else {
+        Targets::Agents(agents)
     }
 }
 
