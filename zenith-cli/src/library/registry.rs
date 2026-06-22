@@ -21,19 +21,19 @@ use zenith_core::{KdlAdapter, KdlSource, TokenType};
 pub const EMBEDDED_PACKS: &[(&str, &str)] = &[
     (
         "@zenith/flowchart",
-        include_str!("../../../assets/libraries/zenith-flowchart.zen"),
+        include_str!("../../assets/libraries/zenith-flowchart.zen"),
     ),
     (
         "@zenith/filters",
-        include_str!("../../../assets/libraries/zenith-filters.zen"),
+        include_str!("../../assets/libraries/zenith-filters.zen"),
     ),
     (
         "@zenith/masks",
-        include_str!("../../../assets/libraries/zenith-masks.zen"),
+        include_str!("../../assets/libraries/zenith-masks.zen"),
     ),
     (
         "@zenith/brand-kit",
-        include_str!("../../../assets/libraries/zenith-brand-kit.zen"),
+        include_str!("../../assets/libraries/zenith-brand-kit.zen"),
     ),
 ];
 

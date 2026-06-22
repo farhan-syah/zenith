@@ -6,7 +6,7 @@ use super::*;
 use zenith_core::{Document, KdlAdapter, KdlSource, Node, validate};
 use zenith_tx::TxStatus;
 
-const FLOWCHART_SRC: &str = include_str!("../../../assets/libraries/zenith-flowchart.zen");
+const FLOWCHART_SRC: &str = include_str!("../../assets/libraries/zenith-flowchart.zen");
 
 /// A minimal target document with a single empty page `pg`.
 const TARGET_SRC: &str = r#"zenith version=1 {
@@ -375,7 +375,7 @@ fn parse_pack_with_actions_lists_action_items() {
     );
 }
 
-const FILTERS_SRC: &str = include_str!("../../../assets/libraries/zenith-filters.zen");
+const FILTERS_SRC: &str = include_str!("../../assets/libraries/zenith-filters.zen");
 
 #[test]
 fn parse_embedded_filters_lists_filter_token_items() {

@@ -233,18 +233,12 @@ impl FontProvider for BytesFontProvider {
 ///   when a code node requests `font-weight` 700.
 #[must_use]
 pub fn default_provider() -> BytesFontProvider {
-    let sans: Arc<[u8]> =
-        Arc::from(&include_bytes!("../../../assets/fonts/NotoSans-Regular.ttf")[..]);
-    let sans_bold: Arc<[u8]> =
-        Arc::from(&include_bytes!("../../../assets/fonts/NotoSans-Bold.ttf")[..]);
-    let sans_italic: Arc<[u8]> =
-        Arc::from(&include_bytes!("../../../assets/fonts/NotoSans-Italic.ttf")[..]);
-    let sans_bold_italic: Arc<[u8]> =
-        Arc::from(&include_bytes!("../../../assets/fonts/NotoSans-BoldItalic.ttf")[..]);
-    let mono: Arc<[u8]> =
-        Arc::from(&include_bytes!("../../../assets/fonts/NotoSansMono-Regular.ttf")[..]);
-    let mono_bold: Arc<[u8]> =
-        Arc::from(&include_bytes!("../../../assets/fonts/NotoSansMono-Bold.ttf")[..]);
+    let sans: Arc<[u8]> = Arc::from(super::embedded::NOTO_SANS_REGULAR);
+    let sans_bold: Arc<[u8]> = Arc::from(super::embedded::NOTO_SANS_BOLD);
+    let sans_italic: Arc<[u8]> = Arc::from(super::embedded::NOTO_SANS_ITALIC);
+    let sans_bold_italic: Arc<[u8]> = Arc::from(super::embedded::NOTO_SANS_BOLD_ITALIC);
+    let mono: Arc<[u8]> = Arc::from(super::embedded::NOTO_SANS_MONO_REGULAR);
+    let mono_bold: Arc<[u8]> = Arc::from(super::embedded::NOTO_SANS_MONO_BOLD);
     let mut provider = BytesFontProvider::new();
     provider.register("Noto Sans", 400, FontStyle::Normal, sans, 0);
     provider.register("Noto Sans", 700, FontStyle::Normal, sans_bold, 0);

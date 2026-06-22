@@ -85,13 +85,14 @@ fn best_family_name(face: &ttf_parser::Face<'_>) -> Option<String> {
 mod tests {
     use super::*;
 
-    // Paths are relative to this source file: zenith-layout/src/font_meta.rs
-    // The assets/fonts directory lives at the workspace root (two dirs up from src/).
-    const REGULAR: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
-    const BOLD: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Bold.ttf");
-    const ITALIC: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Italic.ttf");
-    const BOLD_ITALIC: &[u8] = include_bytes!("../../assets/fonts/NotoSans-BoldItalic.ttf");
-    const MONO: &[u8] = include_bytes!("../../assets/fonts/NotoSansMono-Regular.ttf");
+    // Reuse the exact font bytes bundled by zenith-core rather than embedding a
+    // second copy here (the fonts live under zenith-core/assets/fonts/).
+    use zenith_core::font::embedded;
+    const REGULAR: &[u8] = embedded::NOTO_SANS_REGULAR;
+    const BOLD: &[u8] = embedded::NOTO_SANS_BOLD;
+    const ITALIC: &[u8] = embedded::NOTO_SANS_ITALIC;
+    const BOLD_ITALIC: &[u8] = embedded::NOTO_SANS_BOLD_ITALIC;
+    const MONO: &[u8] = embedded::NOTO_SANS_MONO_REGULAR;
 
     #[test]
     fn noto_sans_regular_family_weight_style() {
