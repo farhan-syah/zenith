@@ -694,11 +694,13 @@ pub fn validate(doc: &Document) -> ValidationReport {
             margin::check_margins(
                 doc,
                 page,
-                page_w,
-                page_h,
-                is_recto,
-                mirror_margins,
-                rtl_book,
+                margin::PageMarginCtx {
+                    page_w,
+                    page_h,
+                    is_recto,
+                    mirror_margins,
+                    rtl: rtl_book,
+                },
                 &mut diagnostics,
             );
         }

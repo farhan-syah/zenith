@@ -48,6 +48,20 @@ struct LiveArea {
     h: f64,
 }
 
+/// Page pixel dimensions plus the parity/mirroring context needed to resolve a
+/// page's parity-correct live area.
+#[derive(Clone, Copy)]
+pub(super) struct PageMarginCtx {
+    pub(super) page_w: f64,
+    pub(super) page_h: f64,
+    /// Page's resolved recto/verso parity (single source of truth).
+    pub(super) is_recto: bool,
+    /// Document `mirror-margins` toggle.
+    pub(super) mirror_margins: bool,
+    /// `true` for an RTL book (`page-progression="rtl"`).
+    pub(super) rtl: bool,
+}
+
 /// Resolve the parity-correct live area for `page`, given the page pixel
 /// dimensions, the page's resolved recto/verso parity, and the document mirror
 /// toggle.
@@ -68,15 +82,14 @@ struct LiveArea {
 /// of truth for the document→page margin cascade. With no document margins set
 /// this reads exactly the page's own values, so the default-off path is
 /// byte-identical.
-fn live_area(
-    doc: &Document,
-    page: &Page,
-    page_w: f64,
-    page_h: f64,
-    is_recto: bool,
-    mirror_margins: bool,
-    rtl: bool,
-) -> Option<LiveArea> {
+fn live_area(doc: &Document, page: &Page, ctx: PageMarginCtx) -> Option<LiveArea> {
+    let PageMarginCtx {
+        page_w,
+        page_h,
+        is_recto,
+        mirror_margins,
+        rtl,
+    } = ctx;
     let (inner_opt, outer_opt, top_opt, bottom_opt) = doc.effective_margins(page);
     let inner_dim = inner_opt.as_ref()?;
     let outer_dim = outer_opt.as_ref()?;
@@ -117,18 +130,14 @@ fn live_area(
 /// [`Document::page_is_recto`](crate::ast::document::Document::page_is_recto)).
 /// Deterministic: nodes are iterated in child order. Skipped when any margin is
 /// absent/unresolvable, and skipped per-node for `role="guide"` nodes.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn check_margins(
     doc: &Document,
     page: &Page,
-    page_w: f64,
-    page_h: f64,
-    is_recto: bool,
-    mirror_margins: bool,
-    rtl: bool,
+    ctx: PageMarginCtx,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let Some(area) = live_area(doc, page, page_w, page_h, is_recto, mirror_margins, rtl) else {
+    let (page_w, page_h, is_recto) = (ctx.page_w, ctx.page_h, ctx.is_recto);
+    let Some(area) = live_area(doc, page, ctx) else {
         // Some margin is absent or unresolvable — nothing to validate against.
         return;
     };
