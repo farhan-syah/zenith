@@ -7,7 +7,9 @@ use std::collections::BTreeSet;
 use crate::ast::node::{FieldNode, FootnoteNode, InstanceNode, PolygonNode, PolylineNode, TocNode};
 use crate::diagnostics::Diagnostic;
 
-use super::shared::{check_anchor, check_optional_dim, check_spans, check_style_ref};
+use super::shared::{
+    AnchorParentCtx, AnchorProps, check_anchor, check_optional_dim, check_spans, check_style_ref,
+};
 use crate::validate::check::nodes::WalkCtx;
 use crate::validate::check::register_id;
 use crate::validate::check::visual::{VisualExpect, check_visual_prop};
@@ -400,6 +402,7 @@ pub(in crate::validate::check) fn check_field(
     ctx: WalkCtx,
     seen_ids: &mut BTreeSet<String>,
     referenced_token_ids: &mut BTreeSet<String>,
+    parent_ctx: AnchorParentCtx,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let WalkCtx {
@@ -421,8 +424,12 @@ pub(in crate::validate::check) fn check_field(
     // Validate the anchor value (geometry is all-optional for fields anyway).
     check_anchor(
         &field.id,
-        field.anchor.as_deref(),
-        field.anchor_zone.as_deref(),
+        AnchorProps {
+            anchor: field.anchor.as_deref(),
+            anchor_zone: field.anchor_zone.as_deref(),
+            anchor_parent: field.anchor_parent == Some(true),
+        },
+        parent_ctx,
         zone_ids,
         field.source_span,
         diagnostics,
@@ -522,6 +529,7 @@ pub(in crate::validate::check) fn check_toc(
     ctx: WalkCtx,
     seen_ids: &mut BTreeSet<String>,
     referenced_token_ids: &mut BTreeSet<String>,
+    parent_ctx: AnchorParentCtx,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let WalkCtx {
@@ -542,8 +550,12 @@ pub(in crate::validate::check) fn check_toc(
     // Validate the anchor value (geometry is all-optional for toc anyway).
     check_anchor(
         &toc.id,
-        toc.anchor.as_deref(),
-        toc.anchor_zone.as_deref(),
+        AnchorProps {
+            anchor: toc.anchor.as_deref(),
+            anchor_zone: toc.anchor_zone.as_deref(),
+            anchor_parent: toc.anchor_parent == Some(true),
+        },
+        parent_ctx,
         zone_ids,
         toc.source_span,
         diagnostics,

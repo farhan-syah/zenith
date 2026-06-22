@@ -342,6 +342,7 @@ fn emit_shape_label(
         bullet_gap: None,
         anchor: None,
         anchor_zone: None,
+        anchor_parent: None,
         spans: shape.spans.clone(),
         source_span: shape.source_span,
         unknown_props: BTreeMap::new(),

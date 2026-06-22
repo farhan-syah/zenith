@@ -65,6 +65,7 @@ fn table_node(
         rotate: None,
         anchor: None,
         anchor_zone: None,
+        anchor_parent: None,
         source_span: None,
         unknown_props: BTreeMap::new(),
     }))

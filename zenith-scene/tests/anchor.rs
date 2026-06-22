@@ -1,4 +1,5 @@
-//! Integration tests for G-69 units A-1 (page-relative) and A-2 (safe-zone-relative) anchors.
+//! Integration tests for G-69 units A-1 (page-relative), A-2 (safe-zone-relative),
+//! and A-3 (parent-container-relative) anchors.
 //!
 //! An `anchor` attribute on a node derives its missing `x` and/or `y` from the
 //! page dimensions. Explicitly-authored `x`/`y` always win over the anchor-
@@ -435,5 +436,356 @@ fn anchor_no_zone_regression() {
                 && (h - 30.0).abs() < 0.001
         }),
         "expected FillRect at (360, 270, 40, 30) for page-relative bottom-right; got: {rects:?}"
+    );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// G-69 unit A-3: parent-container-relative anchors
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Wrap a child node inside a clip-only `frame` on a 400×300 page.
+///
+/// `frame_attrs` is the frame's attribute string (e.g. its geometry);
+/// `child_kdl` is the single frame child.
+fn doc_with_frame_child(frame_attrs: &str, child_kdl: &str) -> String {
+    format!(
+        r#"zenith version=1 {{
+  project id="proj.ap" name="AnchorParent"
+  tokens format="zenith-token-v1" {{}}
+  styles {{}}
+  document id="doc.ap" title="AnchorParent" {{
+page id="page.ap" w=(px)400 h=(px)300 {{
+  frame id="fr.box" {frame_attrs} {{
+    {child_kdl}
+  }}
+}}
+  }}
+}}"#
+    )
+}
+
+/// Wrap a child node inside a translating `group` on a 400×300 page.
+fn doc_with_group_child(group_attrs: &str, child_kdl: &str) -> String {
+    format!(
+        r#"zenith version=1 {{
+  project id="proj.ap" name="AnchorParent"
+  tokens format="zenith-token-v1" {{}}
+  styles {{}}
+  document id="doc.ap" title="AnchorParent" {{
+page id="page.ap" w=(px)400 h=(px)300 {{
+  group id="gr.box" {group_attrs} {{
+    {child_kdl}
+  }}
+}}
+  }}
+}}"#
+    )
+}
+
+// ── A-3 Test 1: center inside a frame ────────────────────────────────────────
+
+#[test]
+fn anchor_parent_frame_center() {
+    // Frame at x=50 y=40 w=200 h=100; rect 40×30 anchor="center".
+    //   ox = (200-40)/2 = 80, oy = (100-30)/2 = 35.
+    //   x = 50+80 = 130, y = 40+35 = 75.
+    let src = doc_with_frame_child(
+        "x=(px)50 y=(px)40 w=(px)200 h=(px)100",
+        r##"rect id="r.fc" anchor="center" anchor-parent=#true w=(px)40 h=(px)30 fill="#ff0000""##,
+    );
+    let doc = parse(&src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "expected no diagnostics, got: {:?}",
+        result.diagnostics
+    );
+
+    let rects = fill_rects(&result);
+    assert!(
+        rects.iter().any(|&(x, y, w, h)| {
+            (x - 130.0).abs() < 0.001
+                && (y - 75.0).abs() < 0.001
+                && (w - 40.0).abs() < 0.001
+                && (h - 30.0).abs() < 0.001
+        }),
+        "expected FillRect at (130, 75, 40, 30) for frame center; got: {rects:?}"
+    );
+}
+
+// ── A-3 Test 2: bottom-right inside a frame ──────────────────────────────────
+
+#[test]
+fn anchor_parent_frame_bottom_right() {
+    // Frame at x=50 y=40 w=200 h=100; rect 40×30 anchor="bottom-right".
+    //   ox = 200-40 = 160, oy = 100-30 = 70.
+    //   x = 50+160 = 210, y = 40+70 = 110.
+    let src = doc_with_frame_child(
+        "x=(px)50 y=(px)40 w=(px)200 h=(px)100",
+        r##"rect id="r.fbr" anchor="bottom-right" anchor-parent=#true w=(px)40 h=(px)30 fill="#00ff00""##,
+    );
+    let doc = parse(&src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "expected no diagnostics, got: {:?}",
+        result.diagnostics
+    );
+
+    let rects = fill_rects(&result);
+    assert!(
+        rects.iter().any(|&(x, y, w, h)| {
+            (x - 210.0).abs() < 0.001
+                && (y - 110.0).abs() < 0.001
+                && (w - 40.0).abs() < 0.001
+                && (h - 30.0).abs() < 0.001
+        }),
+        "expected FillRect at (210, 110, 40, 30) for frame bottom-right; got: {rects:?}"
+    );
+}
+
+// ── A-3 Test 3: center inside a group (group translates the child) ───────────
+
+#[test]
+fn anchor_parent_group_center() {
+    // Group at x=50 y=40 w=200 h=100; rect 40×30 anchor="center".
+    //   within-group offset: ox=80, oy=35.
+    //   absolute (group translates by 50,40): x = 50+80 = 130, y = 40+35 = 75.
+    let src = doc_with_group_child(
+        "x=(px)50 y=(px)40 w=(px)200 h=(px)100",
+        r##"rect id="r.gc" anchor="center" anchor-parent=#true w=(px)40 h=(px)30 fill="#0000ff""##,
+    );
+    let doc = parse(&src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "expected no diagnostics, got: {:?}",
+        result.diagnostics
+    );
+
+    let rects = fill_rects(&result);
+    assert!(
+        rects.iter().any(|&(x, y, w, h)| {
+            (x - 130.0).abs() < 0.001
+                && (y - 75.0).abs() < 0.001
+                && (w - 40.0).abs() < 0.001
+                && (h - 30.0).abs() < 0.001
+        }),
+        "expected FillRect at (130, 75, 40, 30) for group center; got: {rects:?}"
+    );
+}
+
+// ── A-3 Test 4: all nine anchors inside a frame ──────────────────────────────
+
+#[test]
+fn anchor_parent_frame_all_nine() {
+    // Frame at x=50 y=40 w=200 h=100; rect 40×30.
+    //   dx = (200-40)/2 = 80, dy = (100-30)/2 = 35.
+    //   right = 200-40 = 160, bottom = 100-30 = 70.
+    // Absolute = frame origin (50,40) + offset.
+    let cases: &[(&str, f64, f64)] = &[
+        ("top-left", 50.0, 40.0),
+        ("top-center", 130.0, 40.0),
+        ("top-right", 210.0, 40.0),
+        ("center-left", 50.0, 75.0),
+        ("center", 130.0, 75.0),
+        ("center-right", 210.0, 75.0),
+        ("bottom-left", 50.0, 110.0),
+        ("bottom-center", 130.0, 110.0),
+        ("bottom-right", 210.0, 110.0),
+    ];
+
+    for &(anchor_name, exp_x, exp_y) in cases {
+        let child = format!(
+            r##"rect id="r.fn9" anchor="{anchor_name}" anchor-parent=#true w=(px)40 h=(px)30 fill="#ffffff""##
+        );
+        let src = doc_with_frame_child("x=(px)50 y=(px)40 w=(px)200 h=(px)100", &child);
+        let doc = parse(&src);
+        let result = compile(&doc, &default_provider());
+        assert!(
+            result.diagnostics.is_empty(),
+            "anchor-parent \"{anchor_name}\" produced diagnostics: {:?}",
+            result.diagnostics
+        );
+
+        let rects = fill_rects(&result);
+        assert!(
+            rects.iter().any(|&(x, y, w, h)| {
+                (x - exp_x).abs() < 0.001
+                    && (y - exp_y).abs() < 0.001
+                    && (w - 40.0).abs() < 0.001
+                    && (h - 30.0).abs() < 0.001
+            }),
+            "anchor-parent \"{anchor_name}\": expected ({exp_x}, {exp_y}, 40, 30); got: {rects:?}"
+        );
+    }
+}
+
+// ── A-3 Test 5: explicit x wins over anchor-parent ───────────────────────────
+
+#[test]
+fn anchor_parent_explicit_x_wins() {
+    // Frame at x=50 y=40 w=200 h=100; rect anchor="center" anchor-parent but x=0.
+    //   x explicit: 0 (device, no frame translation).
+    //   y derived: 40 + (100-30)/2 = 75.
+    let src = doc_with_frame_child(
+        "x=(px)50 y=(px)40 w=(px)200 h=(px)100",
+        r##"rect id="r.fxw" anchor="center" anchor-parent=#true x=(px)0 w=(px)40 h=(px)30 fill="#00ffff""##,
+    );
+    let doc = parse(&src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "expected no diagnostics, got: {:?}",
+        result.diagnostics
+    );
+
+    let rects = fill_rects(&result);
+    assert!(
+        rects.iter().any(|&(x, y, w, h)| {
+            (x - 0.0).abs() < 0.001
+                && (y - 75.0).abs() < 0.001
+                && (w - 40.0).abs() < 0.001
+                && (h - 30.0).abs() < 0.001
+        }),
+        "expected FillRect at (0, 75, 40, 30): x explicit, y from parent anchor; got: {rects:?}"
+    );
+}
+
+// ── A-3 Test 6: page-level anchor without anchor-parent unchanged (A-1 regression)
+
+#[test]
+fn anchor_parent_absent_page_relative_unchanged() {
+    // A top-level rect with anchor="center" and NO anchor-parent must stay
+    // page-relative (A-1): page 400×300, rect 40×30 → (180, 135).
+    let src = doc_with_node(r##"rect id="r.pr" anchor="center" w=(px)40 h=(px)30 fill="#123456""##);
+    let doc = parse(&src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "expected no diagnostics, got: {:?}",
+        result.diagnostics
+    );
+
+    let rects = fill_rects(&result);
+    assert!(
+        rects.iter().any(|&(x, y, w, h)| {
+            (x - 180.0).abs() < 0.001
+                && (y - 135.0).abs() < 0.001
+                && (w - 40.0).abs() < 0.001
+                && (h - 30.0).abs() < 0.001
+        }),
+        "expected FillRect at (180, 135, 40, 30) for page-relative center; got: {rects:?}"
+    );
+}
+
+// ── A-3 Test 7: anchor-zone takes precedence over anchor-parent ──────────────
+
+#[test]
+fn anchor_zone_precedence_over_parent() {
+    // A rect inside a frame that declares BOTH anchor-zone and anchor-parent:
+    // the zone wins. Zone "sz.panel" at (100,50,200,100); rect 40×30 center.
+    //   zone-relative center: x = 100+(200-40)/2 = 180, y = 50+(100-30)/2 = 85.
+    // (If anchor-parent had won, the frame box (10,10,100,80) would have placed
+    //  it at x = 10+30 = 40, y = 10+25 = 35 — a clearly different result.)
+    let src = r##"zenith version=1 {
+  project id="proj.ap" name="AnchorParent"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.ap" title="AnchorParent" {
+page id="page.ap" w=(px)400 h=(px)300 {
+  safe-zone id="sz.panel" type="required" x=(px)100 y=(px)50 w=(px)200 h=(px)100
+  frame id="fr.zp" x=(px)10 y=(px)10 w=(px)100 h=(px)80 {
+    rect id="r.zp" anchor="center" anchor-zone="sz.panel" anchor-parent=#true w=(px)40 h=(px)30 fill="#ff00ff"
+  }
+}
+  }
+}"##
+    .to_string();
+    let doc = parse(&src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "expected no diagnostics, got: {:?}",
+        result.diagnostics
+    );
+
+    let rects = fill_rects(&result);
+    assert!(
+        rects.iter().any(|&(x, y, w, h)| {
+            (x - 180.0).abs() < 0.001
+                && (y - 85.0).abs() < 0.001
+                && (w - 40.0).abs() < 0.001
+                && (h - 30.0).abs() < 0.001
+        }),
+        "expected FillRect at (180, 85, 40, 30) — zone wins over parent; got: {rects:?}"
+    );
+}
+
+// ── A-3 Test 8: page-level anchor-parent → anchor.unresolvable_parent error ───
+
+#[test]
+fn anchor_parent_unresolvable_at_page_root() {
+    use zenith_core::{KdlAdapter, KdlSource};
+
+    // A top-level node with anchor-parent has no enclosing container.
+    let src = doc_with_node(
+        r##"rect id="r.up" anchor="center" anchor-parent=#true w=(px)40 h=(px)30 fill="#ff0000""##,
+    );
+    let doc = KdlAdapter.parse(src.as_bytes()).expect("must parse");
+    let report = zenith_core::validate(&doc);
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "anchor.unresolvable_parent"),
+        "expected anchor.unresolvable_parent error at page root; got: {:?}",
+        report.diagnostics
+    );
+}
+
+// ── A-3 Test 9: group without w/h + anchor-parent → unresolvable_parent ──────
+
+#[test]
+fn anchor_parent_group_without_box_unresolvable() {
+    use zenith_core::{KdlAdapter, KdlSource};
+
+    // Group declares x/y but no w/h, so its reference box is unknown.
+    let src = doc_with_group_child(
+        "x=(px)50 y=(px)40",
+        r##"rect id="r.gnb" anchor="center" anchor-parent=#true w=(px)40 h=(px)30 fill="#00ff00""##,
+    );
+    let doc = KdlAdapter.parse(src.as_bytes()).expect("must parse");
+    let report = zenith_core::validate(&doc);
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "anchor.unresolvable_parent"),
+        "expected anchor.unresolvable_parent for w/h-less group; got: {:?}",
+        report.diagnostics
+    );
+}
+
+// ── A-3 Test 10: anchor-parent without anchor → parent_without_anchor warning ─
+
+#[test]
+fn anchor_parent_without_anchor_warns() {
+    use zenith_core::{KdlAdapter, KdlSource};
+
+    // anchor-parent is set but there is no anchor value to position.
+    let src = doc_with_frame_child(
+        "x=(px)50 y=(px)40 w=(px)200 h=(px)100",
+        r##"rect id="r.pna" anchor-parent=#true x=(px)0 y=(px)0 w=(px)40 h=(px)30 fill="#ff0000""##,
+    );
+    let doc = KdlAdapter.parse(src.as_bytes()).expect("must parse");
+    let report = zenith_core::validate(&doc);
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "anchor.parent_without_anchor"),
+        "expected anchor.parent_without_anchor warning; got: {:?}",
+        report.diagnostics
     );
 }

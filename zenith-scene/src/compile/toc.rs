@@ -124,6 +124,7 @@ pub(super) fn resolve_toc_to_text(
         bullet_gap: None,
         anchor: None,
         anchor_zone: None,
+        anchor_parent: None,
         spans: vec![TextSpan {
             text: combined,
             fill: None,
@@ -253,6 +254,7 @@ mod tests {
             id: id.to_owned(),
             anchor: None,
             anchor_zone: None,
+            anchor_parent: None,
             name: None,
             role: Some(role.to_owned()),
             x: Some(px(0.0)),
@@ -324,6 +326,7 @@ mod tests {
             id: "toc.main".to_owned(),
             anchor: None,
             anchor_zone: None,
+            anchor_parent: None,
             name: None,
             role: None,
             match_role: match_role.map(str::to_owned),

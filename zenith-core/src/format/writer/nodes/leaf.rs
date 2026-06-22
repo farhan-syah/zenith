@@ -27,6 +27,7 @@ pub(super) fn write_rect(r: &RectNode, out: &mut String, depth: usize) {
     write_opt_str(out, "role", &r.role);
     write_opt_str(out, "anchor", &r.anchor);
     write_opt_str(out, "anchor-zone", &r.anchor_zone);
+    write_opt_bool(out, "anchor-parent", &r.anchor_parent);
     write_opt_dimension(out, "x", &r.x);
     write_opt_dimension(out, "y", &r.y);
     write_opt_dimension(out, "w", &r.w);
@@ -87,6 +88,7 @@ pub(super) fn write_image(i: &ImageNode, out: &mut String, depth: usize) {
     write_opt_str(out, "role", &i.role);
     write_opt_str(out, "anchor", &i.anchor);
     write_opt_str(out, "anchor-zone", &i.anchor_zone);
+    write_opt_bool(out, "anchor-parent", &i.anchor_parent);
     out.push_str(" asset=\"");
     out.push_str(&i.asset);
     out.push('"');
@@ -139,6 +141,7 @@ pub(super) fn write_ellipse(e: &EllipseNode, out: &mut String, depth: usize) {
     write_opt_str(out, "role", &e.role);
     write_opt_str(out, "anchor", &e.anchor);
     write_opt_str(out, "anchor-zone", &e.anchor_zone);
+    write_opt_bool(out, "anchor-parent", &e.anchor_parent);
     write_opt_dimension(out, "x", &e.x);
     write_opt_dimension(out, "y", &e.y);
     write_opt_dimension(out, "w", &e.w);
@@ -223,6 +226,7 @@ pub(super) fn write_text(t: &TextNode, out: &mut String, depth: usize) {
     write_opt_str(out, "role", &t.role);
     write_opt_str(out, "anchor", &t.anchor);
     write_opt_str(out, "anchor-zone", &t.anchor_zone);
+    write_opt_bool(out, "anchor-parent", &t.anchor_parent);
     write_opt_dimension(out, "x", &t.x);
     write_opt_dimension(out, "y", &t.y);
     write_opt_dimension(out, "w", &t.w);
@@ -296,6 +300,7 @@ pub(super) fn write_code(c: &CodeNode, out: &mut String, depth: usize) {
     write_opt_str(out, "role", &c.role);
     write_opt_str(out, "anchor", &c.anchor);
     write_opt_str(out, "anchor-zone", &c.anchor_zone);
+    write_opt_bool(out, "anchor-parent", &c.anchor_parent);
     write_opt_dimension(out, "x", &c.x);
     write_opt_dimension(out, "y", &c.y);
     write_opt_dimension(out, "w", &c.w);

@@ -8,7 +8,10 @@ use crate::ast::node::{CodeNode, EllipseNode, LineNode, RectNode};
 use crate::ast::value::PropertyValue;
 use crate::diagnostics::Diagnostic;
 
-use super::shared::{check_anchor, check_optional_dim, check_style_ref, is_valid_blend_mode};
+use super::shared::{
+    AnchorParentCtx, AnchorProps, check_anchor, check_optional_dim, check_style_ref,
+    is_valid_blend_mode,
+};
 use crate::validate::check::nodes::WalkCtx;
 use crate::validate::check::register_id;
 use crate::validate::check::visual::{VisualExpect, check_visual_prop};
@@ -19,6 +22,7 @@ pub(in crate::validate::check) fn check_rect(
     seen_ids: &mut BTreeSet<String>,
     referenced_token_ids: &mut BTreeSet<String>,
     geom_required: bool,
+    parent_ctx: AnchorParentCtx,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let WalkCtx {
@@ -40,8 +44,12 @@ pub(in crate::validate::check) fn check_rect(
     // even outside a flow parent when a recognized anchor is present.
     let anchor_active = check_anchor(
         &r.id,
-        r.anchor.as_deref(),
-        r.anchor_zone.as_deref(),
+        AnchorProps {
+            anchor: r.anchor.as_deref(),
+            anchor_zone: r.anchor_zone.as_deref(),
+            anchor_parent: r.anchor_parent == Some(true),
+        },
+        parent_ctx,
         zone_ids,
         r.source_span,
         diagnostics,
@@ -302,6 +310,7 @@ pub(in crate::validate::check) fn check_ellipse(
     seen_ids: &mut BTreeSet<String>,
     referenced_token_ids: &mut BTreeSet<String>,
     geom_required: bool,
+    parent_ctx: AnchorParentCtx,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let WalkCtx {
@@ -322,8 +331,12 @@ pub(in crate::validate::check) fn check_ellipse(
     // A recognized anchor supplies both x and y.
     let anchor_active = check_anchor(
         &e.id,
-        e.anchor.as_deref(),
-        e.anchor_zone.as_deref(),
+        AnchorProps {
+            anchor: e.anchor.as_deref(),
+            anchor_zone: e.anchor_zone.as_deref(),
+            anchor_parent: e.anchor_parent == Some(true),
+        },
+        parent_ctx,
         zone_ids,
         e.source_span,
         diagnostics,
@@ -652,6 +665,7 @@ pub(in crate::validate::check) fn check_code(
     seen_ids: &mut BTreeSet<String>,
     referenced_token_ids: &mut BTreeSet<String>,
     geom_required: bool,
+    parent_ctx: AnchorParentCtx,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let WalkCtx {
@@ -672,8 +686,12 @@ pub(in crate::validate::check) fn check_code(
     // A recognized anchor supplies both x and y.
     let anchor_active = check_anchor(
         &c.id,
-        c.anchor.as_deref(),
-        c.anchor_zone.as_deref(),
+        AnchorProps {
+            anchor: c.anchor.as_deref(),
+            anchor_zone: c.anchor_zone.as_deref(),
+            anchor_parent: c.anchor_parent == Some(true),
+        },
+        parent_ctx,
         zone_ids,
         c.source_span,
         diagnostics,

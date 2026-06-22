@@ -44,6 +44,8 @@ const SHAPE_KNOWN_PROPS: &[&str] = &[
     "anchor",
     "anchor-zone",
     "anchor_zone",
+    "anchor-parent",
+    "anchor_parent",
 ];
 
 pub(super) fn transform_shape(node: &KdlNode) -> Result<ShapeNode, ParseError> {
@@ -94,6 +96,8 @@ pub(super) fn transform_shape(node: &KdlNode) -> Result<ShapeNode, ParseError> {
         anchor_zone: optional_string_prop(node, "anchor-zone")
             .or_else(|| optional_string_prop(node, "anchor_zone"))
             .map(str::to_owned),
+        anchor_parent: optional_bool_prop(node, "anchor-parent")
+            .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),
         unknown_props,
     })
@@ -183,6 +187,8 @@ const FIELD_KNOWN_PROPS: &[&str] = &[
     "anchor",
     "anchor-zone",
     "anchor_zone",
+    "anchor-parent",
+    "anchor_parent",
 ];
 
 /// Transform a `field` node into a [`FieldNode`].
@@ -230,6 +236,8 @@ pub(super) fn transform_field(node: &KdlNode) -> Result<FieldNode, ParseError> {
         anchor_zone: optional_string_prop(node, "anchor-zone")
             .or_else(|| optional_string_prop(node, "anchor_zone"))
             .map(str::to_owned),
+        anchor_parent: optional_bool_prop(node, "anchor-parent")
+            .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),
         unknown_props,
     })
@@ -262,6 +270,8 @@ const TOC_KNOWN_PROPS: &[&str] = &[
     "anchor",
     "anchor-zone",
     "anchor_zone",
+    "anchor-parent",
+    "anchor_parent",
 ];
 
 /// Transform a `toc` node into a [`TocNode`].
@@ -310,6 +320,8 @@ pub(super) fn transform_toc(node: &KdlNode) -> Result<TocNode, ParseError> {
         anchor_zone: optional_string_prop(node, "anchor-zone")
             .or_else(|| optional_string_prop(node, "anchor_zone"))
             .map(str::to_owned),
+        anchor_parent: optional_bool_prop(node, "anchor-parent")
+            .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),
         unknown_props,
     })

@@ -10,7 +10,10 @@ use std::collections::BTreeSet;
 use crate::ast::node::{FrameNode, GroupNode, TableNode};
 use crate::diagnostics::Diagnostic;
 
-use super::shared::{check_anchor, check_optional_dim, check_style_ref, is_valid_blend_mode};
+use super::shared::{
+    AnchorParentCtx, AnchorProps, check_anchor, check_optional_dim, check_style_ref,
+    is_valid_blend_mode,
+};
 use crate::validate::check::nodes::WalkCtx;
 use crate::validate::check::register_id;
 use crate::validate::check::visual::{VisualExpect, check_visual_prop};
@@ -20,6 +23,7 @@ pub(in crate::validate::check) fn check_frame(
     ctx: WalkCtx,
     seen_ids: &mut BTreeSet<String>,
     geom_required: bool,
+    parent_ctx: AnchorParentCtx,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let WalkCtx {
@@ -52,8 +56,12 @@ pub(in crate::validate::check) fn check_frame(
     // A recognized anchor supplies both x and y.
     let anchor_active = check_anchor(
         &f.id,
-        f.anchor.as_deref(),
-        f.anchor_zone.as_deref(),
+        AnchorProps {
+            anchor: f.anchor.as_deref(),
+            anchor_zone: f.anchor_zone.as_deref(),
+            anchor_parent: f.anchor_parent == Some(true),
+        },
+        parent_ctx,
         zone_ids,
         f.source_span,
         diagnostics,
@@ -139,6 +147,7 @@ pub(in crate::validate::check) fn check_group(
     g: &GroupNode,
     ctx: WalkCtx,
     seen_ids: &mut BTreeSet<String>,
+    parent_ctx: AnchorParentCtx,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let WalkCtx {
@@ -172,8 +181,12 @@ pub(in crate::validate::check) fn check_group(
     // Still validate the anchor value if present.
     check_anchor(
         &g.id,
-        g.anchor.as_deref(),
-        g.anchor_zone.as_deref(),
+        AnchorProps {
+            anchor: g.anchor.as_deref(),
+            anchor_zone: g.anchor_zone.as_deref(),
+            anchor_parent: g.anchor_parent == Some(true),
+        },
+        parent_ctx,
         zone_ids,
         g.source_span,
         diagnostics,
@@ -211,6 +224,7 @@ pub(in crate::validate::check) fn check_table(
     seen_ids: &mut BTreeSet<String>,
     referenced_token_ids: &mut BTreeSet<String>,
     geom_required: bool,
+    parent_ctx: AnchorParentCtx,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let WalkCtx {
@@ -240,8 +254,12 @@ pub(in crate::validate::check) fn check_table(
     // A recognized anchor supplies both x and y.
     let anchor_active = check_anchor(
         &t.id,
-        t.anchor.as_deref(),
-        t.anchor_zone.as_deref(),
+        AnchorProps {
+            anchor: t.anchor.as_deref(),
+            anchor_zone: t.anchor_zone.as_deref(),
+            anchor_parent: t.anchor_parent == Some(true),
+        },
+        parent_ctx,
         zone_ids,
         t.source_span,
         diagnostics,

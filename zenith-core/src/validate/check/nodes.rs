@@ -17,7 +17,7 @@ use node::shared::{node_rotate_deg, resolve_axis};
 
 mod node;
 
-pub(super) use node::shared::{node_bbox, node_id_and_span, node_role};
+pub(super) use node::shared::{AnchorParentCtx, node_bbox, node_id_and_span, node_role};
 
 /// Walk-wide immutable validation context (never changes during a page walk).
 #[derive(Clone, Copy)]
@@ -37,6 +37,12 @@ pub(super) struct WalkPos {
     pub(super) page_px_bounds: Option<(f64, f64)>,
     pub(super) in_flow_parent: bool,
     pub(super) enclosing_frame: Option<(f64, f64, f64, f64)>,
+    /// `true` when this node is a direct (or group-nested) child of a
+    /// `frame`/`group` — the A-3 anchor-parent container context.
+    pub(super) in_container: bool,
+    /// `true` when the enclosing container's reference box is usable (frame:
+    /// always; group: only when it declares both `w` and `h`).
+    pub(super) parent_box_known: bool,
 }
 
 /// Recursively walk a [`Node`], collecting all diagnostics.
@@ -92,6 +98,12 @@ pub(super) fn walk_node(
     // Direct children of a `layout="flow"` frame have their x/y (and, when
     // omitted, w/h) supplied by the flow algorithm, so geometry is optional.
     let geom_required = !pos.in_flow_parent;
+    // A-3 parent-relative anchor context for this node: whether it sits inside a
+    // frame/group container and whether that container's reference box is usable.
+    let parent_ctx = AnchorParentCtx {
+        in_container: pos.in_container,
+        parent_box_known: pos.parent_box_known,
+    };
     // ── off_canvas advisory ───────────────────────────────────────────────
     // Check whether the node's authored bounding box exceeds the page rect
     // [0, 0, page_w, page_h]. This uses authored coordinates only — group
@@ -160,6 +172,7 @@ pub(super) fn walk_node(
                 seen_ids,
                 referenced_token_ids,
                 geom_required,
+                parent_ctx,
                 diagnostics,
             );
         }
@@ -170,6 +183,7 @@ pub(super) fn walk_node(
                 seen_ids,
                 referenced_token_ids,
                 geom_required,
+                parent_ctx,
                 diagnostics,
             );
         }
@@ -183,6 +197,7 @@ pub(super) fn walk_node(
                 seen_ids,
                 referenced_token_ids,
                 geom_required,
+                parent_ctx,
                 diagnostics,
             );
         }
@@ -193,6 +208,7 @@ pub(super) fn walk_node(
                 seen_ids,
                 referenced_token_ids,
                 geom_required,
+                parent_ctx,
                 diagnostics,
             );
         }
@@ -203,6 +219,7 @@ pub(super) fn walk_node(
                 seen_ids,
                 referenced_token_ids,
                 geom_required,
+                parent_ctx,
                 diagnostics,
             );
         }
@@ -213,6 +230,7 @@ pub(super) fn walk_node(
                 seen_ids,
                 referenced_token_ids,
                 geom_required,
+                parent_ctx,
                 diagnostics,
             );
         }
@@ -226,10 +244,24 @@ pub(super) fn walk_node(
             node::check_instance(inst, ctx, seen_ids, referenced_token_ids, diagnostics);
         }
         Node::Field(field) => {
-            node::check_field(field, ctx, seen_ids, referenced_token_ids, diagnostics);
+            node::check_field(
+                field,
+                ctx,
+                seen_ids,
+                referenced_token_ids,
+                parent_ctx,
+                diagnostics,
+            );
         }
         Node::Toc(toc) => {
-            node::check_toc(toc, ctx, seen_ids, referenced_token_ids, diagnostics);
+            node::check_toc(
+                toc,
+                ctx,
+                seen_ids,
+                referenced_token_ids,
+                parent_ctx,
+                diagnostics,
+            );
         }
         Node::Footnote(footnote) => {
             node::check_footnote(footnote, ctx, seen_ids, referenced_token_ids, diagnostics);
@@ -239,7 +271,7 @@ pub(super) fn walk_node(
         }
 
         Node::Frame(f) => {
-            node::check_frame(f, ctx, seen_ids, geom_required, diagnostics);
+            node::check_frame(f, ctx, seen_ids, geom_required, parent_ctx, diagnostics);
 
             // Recurse into children, passing the SAME seen_ids so that
             // nested ids participate in the global uniqueness check. Direct
@@ -272,6 +304,10 @@ pub(super) fn walk_node(
                         page_px_bounds: pos.page_px_bounds,
                         in_flow_parent: children_in_flow,
                         enclosing_frame: frame_box,
+                        // A frame is always an A-3 anchor-parent container with a
+                        // usable box (its geometry is required + validated).
+                        in_container: true,
+                        parent_box_known: true,
                     },
                     diagnostics,
                 );
@@ -279,7 +315,11 @@ pub(super) fn walk_node(
         }
 
         Node::Group(g) => {
-            node::check_group(g, ctx, seen_ids, diagnostics);
+            node::check_group(g, ctx, seen_ids, parent_ctx, diagnostics);
+
+            // A group is an A-3 anchor-parent container; its reference box is
+            // usable only when it declares both `w` and `h`.
+            let group_box_known = g.w.is_some() && g.h.is_some();
 
             // Recurse into children, passing the SAME seen_ids so that
             // nested ids participate in the global uniqueness check. Groups do
@@ -297,6 +337,8 @@ pub(super) fn walk_node(
                         page_px_bounds: pos.page_px_bounds,
                         in_flow_parent: false,
                         enclosing_frame: pos.enclosing_frame,
+                        in_container: true,
+                        parent_box_known: group_box_known,
                     },
                     diagnostics,
                 );
@@ -310,6 +352,7 @@ pub(super) fn walk_node(
                 seen_ids,
                 referenced_token_ids,
                 geom_required,
+                parent_ctx,
                 diagnostics,
             );
 
@@ -330,6 +373,11 @@ pub(super) fn walk_node(
                                 page_px_bounds: pos.page_px_bounds,
                                 in_flow_parent: true,
                                 enclosing_frame: pos.enclosing_frame,
+                                // A table cell is NOT an A-3 anchor-parent
+                                // container; its children's direct parent is the
+                                // cell, so anchor-parent there is unresolvable.
+                                in_container: false,
+                                parent_box_known: false,
                             },
                             diagnostics,
                         );
@@ -356,6 +404,9 @@ pub(super) fn walk_node(
                         page_px_bounds: pos.page_px_bounds,
                         in_flow_parent: true,
                         enclosing_frame: pos.enclosing_frame,
+                        // An unknown parent is not a known A-3 container.
+                        in_container: false,
+                        parent_box_known: false,
                     },
                     diagnostics,
                 );

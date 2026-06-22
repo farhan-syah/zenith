@@ -74,6 +74,8 @@ const RECT_KNOWN_PROPS: &[&str] = &[
     "anchor",
     "anchor-zone",
     "anchor_zone",
+    "anchor-parent",
+    "anchor_parent",
 ];
 
 pub(super) fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
@@ -152,6 +154,8 @@ pub(super) fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
         anchor_zone: optional_string_prop(node, "anchor-zone")
             .or_else(|| optional_string_prop(node, "anchor_zone"))
             .map(str::to_owned),
+        anchor_parent: optional_bool_prop(node, "anchor-parent")
+            .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),
         unknown_props,
     })
@@ -196,6 +200,8 @@ const IMAGE_KNOWN_PROPS: &[&str] = &[
     "anchor",
     "anchor-zone",
     "anchor_zone",
+    "anchor-parent",
+    "anchor_parent",
 ];
 
 pub(super) fn transform_image(node: &KdlNode) -> Result<ImageNode, ParseError> {
@@ -253,6 +259,8 @@ pub(super) fn transform_image(node: &KdlNode) -> Result<ImageNode, ParseError> {
         anchor_zone: optional_string_prop(node, "anchor-zone")
             .or_else(|| optional_string_prop(node, "anchor_zone"))
             .map(str::to_owned),
+        anchor_parent: optional_bool_prop(node, "anchor-parent")
+            .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),
         unknown_props,
     })
@@ -292,6 +300,8 @@ const ELLIPSE_KNOWN_PROPS: &[&str] = &[
     "anchor",
     "anchor-zone",
     "anchor_zone",
+    "anchor-parent",
+    "anchor_parent",
 ];
 
 pub(super) fn transform_ellipse(node: &KdlNode) -> Result<EllipseNode, ParseError> {
@@ -342,6 +352,8 @@ pub(super) fn transform_ellipse(node: &KdlNode) -> Result<EllipseNode, ParseErro
         anchor_zone: optional_string_prop(node, "anchor-zone")
             .or_else(|| optional_string_prop(node, "anchor_zone"))
             .map(str::to_owned),
+        anchor_parent: optional_bool_prop(node, "anchor-parent")
+            .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),
         unknown_props,
     })
@@ -465,6 +477,8 @@ const TEXT_KNOWN_PROPS: &[&str] = &[
     "anchor",
     "anchor-zone",
     "anchor_zone",
+    "anchor-parent",
+    "anchor_parent",
 ];
 
 pub(super) fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
@@ -556,6 +570,8 @@ pub(super) fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         anchor_zone: optional_string_prop(node, "anchor-zone")
             .or_else(|| optional_string_prop(node, "anchor_zone"))
             .map(str::to_owned),
+        anchor_parent: optional_bool_prop(node, "anchor-parent")
+            .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),
         unknown_props,
     })
@@ -592,6 +608,8 @@ const CODE_KNOWN_PROPS: &[&str] = &[
     "anchor",
     "anchor-zone",
     "anchor_zone",
+    "anchor-parent",
+    "anchor_parent",
 ];
 
 pub(super) fn transform_code(node: &KdlNode) -> Result<CodeNode, ParseError> {
@@ -654,6 +672,8 @@ pub(super) fn transform_code(node: &KdlNode) -> Result<CodeNode, ParseError> {
         anchor_zone: optional_string_prop(node, "anchor-zone")
             .or_else(|| optional_string_prop(node, "anchor_zone"))
             .map(str::to_owned),
+        anchor_parent: optional_bool_prop(node, "anchor-parent")
+            .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),
         unknown_props,
     })

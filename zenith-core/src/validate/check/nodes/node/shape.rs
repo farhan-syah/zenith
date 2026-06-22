@@ -9,7 +9,9 @@ use std::collections::BTreeSet;
 use crate::ast::node::{ConnectorNode, ShapeNode, UnknownNode};
 use crate::diagnostics::Diagnostic;
 
-use super::shared::{check_anchor, check_optional_dim, check_spans, check_style_ref};
+use super::shared::{
+    AnchorParentCtx, AnchorProps, check_anchor, check_optional_dim, check_spans, check_style_ref,
+};
 use crate::validate::check::nodes::WalkCtx;
 use crate::validate::check::register_id;
 use crate::validate::check::visual::{VisualExpect, check_visual_prop};
@@ -20,6 +22,7 @@ pub(in crate::validate::check) fn check_shape(
     seen_ids: &mut BTreeSet<String>,
     referenced_token_ids: &mut BTreeSet<String>,
     geom_required: bool,
+    parent_ctx: AnchorParentCtx,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let WalkCtx {
@@ -47,8 +50,12 @@ pub(in crate::validate::check) fn check_shape(
     // A recognized anchor supplies both x and y.
     let anchor_active = check_anchor(
         &s.id,
-        s.anchor.as_deref(),
-        s.anchor_zone.as_deref(),
+        AnchorProps {
+            anchor: s.anchor.as_deref(),
+            anchor_zone: s.anchor_zone.as_deref(),
+            anchor_parent: s.anchor_parent == Some(true),
+        },
+        parent_ctx,
         zone_ids,
         s.source_span,
         diagnostics,

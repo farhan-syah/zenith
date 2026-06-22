@@ -274,23 +274,54 @@ pub(in crate::validate::check) fn node_id_and_span(
 
 // ── Geometry helpers ──────────────────────────────────────────────────────────
 
-/// Validate the `anchor` and `anchor_zone` properties on a node.
+/// Container context for the parent-relative (A-3) anchor checks.
+///
+/// `in_container` is `true` when the node is a direct (or group-nested) child of
+/// a `frame`/`group`. `parent_box_known` is `true` when that enclosing container
+/// has a usable reference box (frame: always; group: only when it declares both
+/// `w` and `h`). At the page root both are `false`.
+#[derive(Clone, Copy)]
+pub(in crate::validate::check) struct AnchorParentCtx {
+    pub(in crate::validate::check) in_container: bool,
+    pub(in crate::validate::check) parent_box_known: bool,
+}
+
+/// The three per-node anchor property reads, bundled so [`check_anchor`] stays
+/// within the argument-count lint without suppression.
+#[derive(Clone, Copy)]
+pub(in crate::validate::check) struct AnchorProps<'a> {
+    pub(in crate::validate::check) anchor: Option<&'a str>,
+    pub(in crate::validate::check) anchor_zone: Option<&'a str>,
+    pub(in crate::validate::check) anchor_parent: bool,
+}
+
+/// Validate the `anchor`, `anchor_zone`, and `anchor_parent` properties on a node.
 ///
 /// Returns `true` when `anchor` is present and recognized (anchor active:
-/// x/y geometry is NOT required even outside a flow parent), `false` otherwise.
+/// x/y geometry is NOT required even outside a flow parent, in any of the
+/// page/zone/parent reference modes), `false` otherwise.
 ///
 /// Diagnostics pushed:
 /// - `anchor.unknown_value` (Error) — `anchor` present with an unrecognized value.
 /// - `anchor.zone_without_anchor` (Warning) — `anchor_zone` set but `anchor` absent.
 /// - `anchor.unresolved_zone` (Error) — `anchor_zone` names a zone not on this page.
+/// - `anchor.parent_without_anchor` (Warning) — `anchor_parent` set but `anchor` absent.
+/// - `anchor.unresolvable_parent` (Error) — `anchor_parent` set but the node is
+///   not inside a frame/group container, or the parent container's box is unknown
+///   (a group without `w`/`h`).
 pub(super) fn check_anchor(
     node_id: &str,
-    anchor: Option<&str>,
-    anchor_zone: Option<&str>,
+    props: AnchorProps,
+    parent_ctx: AnchorParentCtx,
     zone_ids: &BTreeSet<&str>,
     span: Option<crate::ast::Span>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
+    let AnchorProps {
+        anchor,
+        anchor_zone,
+        anchor_parent,
+    } = props;
     // When anchor-zone is present without anchor, emit a warning and treat zone as
     // irrelevant (anchor-zone has no effect without an anchor value).
     if anchor_zone.is_some() && anchor.is_none() {
@@ -299,6 +330,41 @@ pub(super) fn check_anchor(
             format!(
                 "node '{}': anchor-zone is set but anchor is absent; \
                  anchor-zone has no effect without an anchor value",
+                node_id
+            ),
+            span,
+            Some(node_id.to_owned()),
+        ));
+    }
+
+    // When anchor-parent is set without anchor, emit a warning (anchor-parent has
+    // no effect without an anchor value to position).
+    if anchor_parent && anchor.is_none() {
+        diagnostics.push(Diagnostic::warning(
+            "anchor.parent_without_anchor",
+            format!(
+                "node '{}': anchor-parent is set but anchor is absent; \
+                 anchor-parent has no effect without an anchor value",
+                node_id
+            ),
+            span,
+            Some(node_id.to_owned()),
+        ));
+    }
+
+    // When anchor-parent is set, the node must live inside a frame/group whose
+    // reference box is resolvable; otherwise the parent-relative anchor cannot be
+    // derived. `anchor_zone` takes precedence and disables parent mode, so only
+    // flag when no zone is set.
+    if anchor_parent
+        && anchor_zone.is_none()
+        && (!parent_ctx.in_container || !parent_ctx.parent_box_known)
+    {
+        diagnostics.push(Diagnostic::error(
+            "anchor.unresolvable_parent",
+            format!(
+                "node '{}': anchor-parent is set but the node is not inside a \
+                 frame/group container with a usable box",
                 node_id
             ),
             span,

@@ -29,6 +29,7 @@ pub(super) fn write_shape(s: &ShapeNode, out: &mut String, depth: usize) {
     write_opt_str(out, "role", &s.role);
     write_opt_str(out, "anchor", &s.anchor);
     write_opt_str(out, "anchor-zone", &s.anchor_zone);
+    write_opt_bool(out, "anchor-parent", &s.anchor_parent);
     write_opt_dimension(out, "x", &s.x);
     write_opt_dimension(out, "y", &s.y);
     write_opt_dimension(out, "w", &s.w);
@@ -117,6 +118,7 @@ pub(super) fn write_field(f: &FieldNode, out: &mut String, depth: usize) {
     write_opt_str(out, "role", &f.role);
     write_opt_str(out, "anchor", &f.anchor);
     write_opt_str(out, "anchor-zone", &f.anchor_zone);
+    write_opt_bool(out, "anchor-parent", &f.anchor_parent);
     out.push_str(" type=\"");
     out.push_str(&f.field_type);
     out.push('"');
@@ -161,6 +163,7 @@ pub(super) fn write_toc(t: &TocNode, out: &mut String, depth: usize) {
     write_opt_str(out, "role", &t.role);
     write_opt_str(out, "anchor", &t.anchor);
     write_opt_str(out, "anchor-zone", &t.anchor_zone);
+    write_opt_bool(out, "anchor-parent", &t.anchor_parent);
     write_opt_str(out, "match-role", &t.match_role);
     write_opt_str(out, "match-style", &t.match_style);
     write_opt_str(out, "leader", &t.leader);

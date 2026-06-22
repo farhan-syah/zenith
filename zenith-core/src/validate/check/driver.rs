@@ -264,6 +264,8 @@ pub fn validate(doc: &Document) -> ValidationReport {
                     page_px_bounds: None,
                     in_flow_parent: false,
                     enclosing_frame: None,
+                    in_container: false,
+                    parent_box_known: false,
                 },
                 &mut diagnostics,
             );
@@ -302,6 +304,8 @@ pub fn validate(doc: &Document) -> ValidationReport {
                     page_px_bounds: None,
                     in_flow_parent: false,
                     enclosing_frame: None,
+                    in_container: false,
+                    parent_box_known: false,
                 },
                 &mut diagnostics,
             );
@@ -611,6 +615,8 @@ pub fn validate(doc: &Document) -> ValidationReport {
                     page_px_bounds,
                     in_flow_parent: false,
                     enclosing_frame: None,
+                    in_container: false,
+                    parent_box_known: false,
                 },
                 &mut diagnostics,
             );

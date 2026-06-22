@@ -109,6 +109,7 @@ pub fn minimal_rect(id: &str, fill: Option<PropertyValue>) -> Node {
         blur: None,
         anchor: None,
         anchor_zone: None,
+        anchor_parent: None,
         source_span: None,
         unknown_props: BTreeMap::new(),
     }))
@@ -157,6 +158,7 @@ pub fn minimal_text(id: &str, fill: Option<PropertyValue>) -> Node {
         bullet_gap: None,
         anchor: None,
         anchor_zone: None,
+        anchor_parent: None,
         spans: vec![],
         source_span: None,
         unknown_props: BTreeMap::new(),
@@ -303,6 +305,7 @@ pub fn rect_at(id: &str, x: f64, y: f64, w: f64, h: f64) -> Node {
         blur: None,
         anchor: None,
         anchor_zone: None,
+        anchor_parent: None,
         source_span: None,
         unknown_props: BTreeMap::new(),
     }))

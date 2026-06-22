@@ -39,6 +39,8 @@ const FRAME_KNOWN_PROPS: &[&str] = &[
     "anchor",
     "anchor-zone",
     "anchor_zone",
+    "anchor-parent",
+    "anchor_parent",
 ];
 
 pub(super) fn transform_frame(node: &KdlNode) -> Result<FrameNode, ParseError> {
@@ -69,6 +71,8 @@ pub(super) fn transform_frame(node: &KdlNode) -> Result<FrameNode, ParseError> {
         anchor_zone: optional_string_prop(node, "anchor-zone")
             .or_else(|| optional_string_prop(node, "anchor_zone"))
             .map(str::to_owned),
+        anchor_parent: optional_bool_prop(node, "anchor-parent")
+            .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),
         unknown_props,
     })
@@ -93,6 +97,8 @@ const GROUP_KNOWN_PROPS: &[&str] = &[
     "anchor",
     "anchor-zone",
     "anchor_zone",
+    "anchor-parent",
+    "anchor_parent",
 ];
 
 pub(super) fn transform_group(node: &KdlNode) -> Result<GroupNode, ParseError> {
@@ -121,6 +127,8 @@ pub(super) fn transform_group(node: &KdlNode) -> Result<GroupNode, ParseError> {
         anchor_zone: optional_string_prop(node, "anchor-zone")
             .or_else(|| optional_string_prop(node, "anchor_zone"))
             .map(str::to_owned),
+        anchor_parent: optional_bool_prop(node, "anchor-parent")
+            .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),
         unknown_props,
     })
@@ -179,6 +187,8 @@ const TABLE_KNOWN_PROPS: &[&str] = &[
     "anchor",
     "anchor-zone",
     "anchor_zone",
+    "anchor-parent",
+    "anchor_parent",
 ];
 
 /// Transform a `cell` child node into a [`TableCell`].
@@ -276,6 +286,8 @@ pub(super) fn transform_table(node: &KdlNode) -> Result<TableNode, ParseError> {
         anchor_zone: optional_string_prop(node, "anchor-zone")
             .or_else(|| optional_string_prop(node, "anchor_zone"))
             .map(str::to_owned),
+        anchor_parent: optional_bool_prop(node, "anchor-parent")
+            .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),
         unknown_props,
     })

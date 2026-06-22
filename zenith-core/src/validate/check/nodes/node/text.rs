@@ -7,7 +7,8 @@ use crate::ast::value::dim_to_px;
 use crate::diagnostics::Diagnostic;
 
 use super::shared::{
-    check_anchor, check_optional_dim, check_spans, check_style_ref, is_valid_blend_mode,
+    AnchorParentCtx, AnchorProps, check_anchor, check_optional_dim, check_spans, check_style_ref,
+    is_valid_blend_mode,
 };
 use crate::validate::check::nodes::WalkCtx;
 use crate::validate::check::register_id;
@@ -19,6 +20,7 @@ pub(in crate::validate::check) fn check_text(
     seen_ids: &mut BTreeSet<String>,
     referenced_token_ids: &mut BTreeSet<String>,
     geom_required: bool,
+    parent_ctx: AnchorParentCtx,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let WalkCtx {
@@ -53,8 +55,12 @@ pub(in crate::validate::check) fn check_text(
     // A recognized anchor supplies both x and y.
     let anchor_active = check_anchor(
         &t.id,
-        t.anchor.as_deref(),
-        t.anchor_zone.as_deref(),
+        AnchorProps {
+            anchor: t.anchor.as_deref(),
+            anchor_zone: t.anchor_zone.as_deref(),
+            anchor_parent: t.anchor_parent == Some(true),
+        },
+        parent_ctx,
         zone_ids,
         t.source_span,
         diagnostics,
@@ -257,6 +263,7 @@ pub(in crate::validate::check) fn check_image(
     seen_ids: &mut BTreeSet<String>,
     referenced_token_ids: &mut BTreeSet<String>,
     geom_required: bool,
+    parent_ctx: AnchorParentCtx,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let WalkCtx {
@@ -291,8 +298,12 @@ pub(in crate::validate::check) fn check_image(
     // A recognized anchor supplies both x and y.
     let anchor_active = check_anchor(
         &img.id,
-        img.anchor.as_deref(),
-        img.anchor_zone.as_deref(),
+        AnchorProps {
+            anchor: img.anchor.as_deref(),
+            anchor_zone: img.anchor_zone.as_deref(),
+            anchor_parent: img.anchor_parent == Some(true),
+        },
+        parent_ctx,
         zone_ids,
         img.source_span,
         diagnostics,
