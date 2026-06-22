@@ -1,4 +1,4 @@
-//! Pure logic for `zenith inspect`.
+//! Document-level inspect logic for `zenith inspect`.
 //!
 //! The public entry point [`run`] operates entirely on in-memory source text;
 //! the caller is responsible for all filesystem I/O.
@@ -11,6 +11,9 @@
 use zenith_core::{Dimension, FrameNode, GroupNode, KdlAdapter, KdlSource, Node, Page, Unit};
 
 use crate::commands::serialize_pretty;
+use crate::json_types::RecipeInspectJson;
+
+use super::recipes;
 
 // ── Error type ────────────────────────────────────────────────────────────────
 
@@ -93,6 +96,8 @@ pub struct PageEntry {
 pub struct InspectOutput {
     pub schema: &'static str,
     pub pages: Vec<PageEntry>,
+    /// Empty when the document has no `recipes` block.
+    pub recipes: Vec<RecipeInspectJson>,
 }
 
 /// The subtree rooted at a single found node (used for `--node <ID>`).
@@ -138,13 +143,22 @@ pub fn run(src: &str, node_id: Option<&str>, json: bool) -> Result<String, Inspe
         let pages = build_doc_tree(&doc.body.pages);
 
         let out = if json {
+            let recipe_entries = recipes::build_recipe_entries(&doc.recipes);
             let output = InspectOutput {
                 schema: "zenith-inspect-v1",
                 pages,
+                recipes: recipe_entries,
             };
             serialize_pretty(&output)
         } else {
-            render_pages_human(&pages)
+            let mut text = render_pages_human(&pages);
+            let recipe_section = recipes::render_recipes_human(&doc.recipes);
+            if !recipe_section.is_empty() {
+                text.push('\n');
+                text.push('\n');
+                text.push_str(&recipe_section);
+            }
+            text
         };
         Ok(out)
     }

@@ -167,8 +167,38 @@ pub struct VariantManifestTarget {
 pub struct VariantManifest {
     pub schema: &'static str,
     /// Manifest format version. Bumped only when the manifest structure changes
-    /// (never on a routine crate release), so identical inputs stay byte-identical.
+    /// (never on a routine crate release), so identical inputs stays byte-identical.
     pub generator: &'static str,
     pub source_sha256: String,
     pub targets: Vec<VariantManifestTarget>,
+}
+
+// ── Recipe inspect JSON types ─────────────────────────────────────────────────
+
+/// A single `param` entry within a [`RecipeInspectJson`].
+#[derive(Debug, Serialize)]
+pub struct RecipeParamInspectJson {
+    pub name: String,
+    /// Canonical string representation of the parameter value: a token ref is
+    /// rendered as `"<id>"`, a literal as its raw string, a dimension as
+    /// `"(<unit>)<value>"`.
+    pub value: String,
+}
+
+/// A single recipe entry in the `recipes` array of [`crate::commands::inspect::InspectOutput`].
+#[derive(Debug, Serialize)]
+pub struct RecipeInspectJson {
+    pub id: String,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generator: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detached: Option<bool>,
+    pub params: Vec<RecipeParamInspectJson>,
+    pub palette: Vec<String>,
+    pub expanded: Vec<String>,
 }
