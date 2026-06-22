@@ -3,12 +3,33 @@
 //! This is the ONLY module in the crate that imports `rustybuzz` or
 //! `rustybuzz::ttf_parser`. No third-party type escapes to a public signature.
 
+use std::collections::BTreeSet;
+
 use zenith_core::FontProvider;
 
 use crate::engine::{
-    PositionedGlyph, ShapeRequest, TextDirection, TextLayoutEngine, ZenithGlyphRun,
+    FallbackResult, PositionedGlyph, ShapeRequest, TextDirection, TextLayoutEngine, ZenithGlyphRun,
 };
 use crate::error::LayoutError;
+
+/// Code points that legitimately have no standalone glyph (consumed during
+/// shaping) and must NOT be reported as missing: control/whitespace and the
+/// Unicode default-ignorable ranges (joiners, bidi marks, variation selectors,
+/// BOM, soft hyphen, word joiner, etc.).
+fn is_ignorable_for_coverage(ch: char) -> bool {
+    ch.is_control()
+        || ch.is_whitespace()
+        || matches!(
+            ch as u32,
+            0x00AD            // soft hyphen
+            | 0x200B..=0x200F // ZWSP, ZWNJ, ZWJ, LRM, RLM
+            | 0x202A..=0x202E // bidi embeddings/overrides
+            | 0x2060..=0x206F // word joiner, invisible operators, deprecated format
+            | 0xFEFF          // BOM / ZWNBSP
+            | 0xFE00..=0xFE0F // variation selectors
+            | 0xE0100..=0xE01EF // variation selectors supplement
+        )
+}
 
 /// HarfBuzz-port shaping engine backed by `rustybuzz` and `rustybuzz::ttf_parser`.
 ///
@@ -152,7 +173,7 @@ impl TextLayoutEngine for RustybuzzEngine {
         &self,
         req: &ShapeRequest<'_>,
         provider: &dyn FontProvider,
-    ) -> Result<Vec<ZenithGlyphRun>, LayoutError> {
+    ) -> Result<FallbackResult, LayoutError> {
         // ── 1. Resolve + parse the PRIMARY face ───────────────────────────────
         let primary_data = provider
             .resolve(req.families, req.weight, req.style)
@@ -204,22 +225,29 @@ impl TextLayoutEngine for RustybuzzEngine {
         // current behavior). Consecutive chars with the same chosen face merge.
         // Sub-run boundaries are recorded as byte ranges into `req.text` so the
         // exact substring is shaped (and reported as the run's source text).
-        let choose = |ch: char| -> usize {
-            if covers(0, ch) {
-                return 0;
-            }
-            for idx in 1..faces.len() {
-                if covers(idx, ch) {
-                    return idx;
-                }
-            }
-            0
-        };
+        // Chars that fall back to the primary (index 0) because NO face covers
+        // them are recorded in `missing` (unless ignorable).
+        let mut missing: BTreeSet<char> = BTreeSet::new();
 
         // (face_idx, byte_start, byte_end) per sub-run, in text order.
         let mut segments: Vec<(usize, usize, usize)> = Vec::new();
         for (byte_off, ch) in req.text.char_indices() {
-            let idx = choose(ch);
+            let idx = if covers(0, ch) {
+                0
+            } else {
+                let mut chosen = 0_usize;
+                for idx in 1..faces.len() {
+                    if covers(idx, ch) {
+                        chosen = idx;
+                        break;
+                    }
+                }
+                // chosen == 0 means no face covered it; record as missing.
+                if chosen == 0 && !is_ignorable_for_coverage(ch) {
+                    missing.insert(ch);
+                }
+                chosen
+            };
             let ch_end = byte_off + ch.len_utf8();
             match segments.last_mut() {
                 Some((last_idx, _, last_end)) if *last_idx == idx => {
@@ -236,13 +264,16 @@ impl TextLayoutEngine for RustybuzzEngine {
             let (font_id, face) = faces.first().ok_or_else(|| {
                 LayoutError::new("internal: primary face missing from cache".to_owned())
             })?;
-            return Ok(vec![Self::shape_run_with_face(
-                face,
-                req.text,
-                font_id.clone(),
-                req.font_size,
-                req.direction,
-            )?]);
+            return Ok(FallbackResult {
+                runs: vec![Self::shape_run_with_face(
+                    face,
+                    req.text,
+                    font_id.clone(),
+                    req.font_size,
+                    req.direction,
+                )?],
+                missing_chars: missing.into_iter().collect(),
+            });
         }
 
         // ── 4. Shape each sub-run with its chosen face ────────────────────────
@@ -276,7 +307,10 @@ impl TextLayoutEngine for RustybuzzEngine {
             )?);
         }
 
-        Ok(runs)
+        Ok(FallbackResult {
+            runs,
+            missing_chars: missing.into_iter().collect(),
+        })
     }
 }
 
@@ -388,19 +422,23 @@ mod tests {
         let engine = RustybuzzEngine::new();
 
         let single = engine.shape(&req, &provider).expect("single-run shape");
-        let runs = engine
+        let result = engine
             .shape_with_fallback(&req, &provider)
             .expect("fallback shape");
 
         assert_eq!(
-            runs.len(),
+            result.runs.len(),
             1,
             "all-primary text must produce exactly one run"
         );
         assert_eq!(
-            runs.first().expect("one run"),
+            result.runs.first().expect("one run"),
             &single,
             "all-primary fallback run must be byte-identical to shape()"
+        );
+        assert!(
+            result.missing_chars.is_empty(),
+            "fully-covered ASCII must have no missing chars"
         );
     }
 
@@ -420,15 +458,15 @@ mod tests {
         let engine = RustybuzzEngine::new();
 
         let single = engine.shape(&req, &provider).expect("single empty shape");
-        let runs = engine
+        let result = engine
             .shape_with_fallback(&req, &provider)
             .expect("fallback empty shape");
         assert_eq!(
-            runs.len(),
+            result.runs.len(),
             1,
             "empty text still yields one (degenerate) run"
         );
-        assert_eq!(runs.first().expect("one run"), &single);
+        assert_eq!(result.runs.first().expect("one run"), &single);
     }
 
     #[test]
@@ -463,7 +501,11 @@ mod tests {
         let engine = RustybuzzEngine::new();
         let a = engine.shape_with_fallback(&req, &provider).expect("a");
         let b = engine.shape_with_fallback(&req, &provider).expect("b");
-        assert_eq!(a, b, "fallback shaping must be deterministic");
+        assert_eq!(a.runs, b.runs, "fallback shaping must be deterministic");
+        assert_eq!(
+            a.missing_chars, b.missing_chars,
+            "missing_chars must be deterministic"
+        );
     }
 
     #[test]

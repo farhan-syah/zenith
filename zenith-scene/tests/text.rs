@@ -1642,3 +1642,120 @@ page id="page.stroke" w=(px)400 h=(px)200 {
         cmds
     );
 }
+
+// ── font.glyph_missing diagnostic ─────────────────────────────────────────────
+
+/// A text node containing a character that no registered face can cover
+/// (emoji U+1F600, absent from all bundled Noto Sans faces) must produce
+/// exactly one `font.glyph_missing` Warning naming that codepoint.
+#[test]
+fn glyph_missing_diagnostic_for_uncovered_char() {
+    // U+1F600 GRINNING FACE: not present in Noto Sans Regular/Bold/Italic or
+    // Noto Sans Mono (the full set registered by default_provider()).
+    let src = r##"zenith version=1 {
+  project id="proj.gm" name="GM"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.gm" title="GM" {
+    page id="page.gm" w=(px)400 h=(px)200 {
+      text id="text.gm" x=(px)10 y=(px)20 w=(px)380 h=(px)60 {
+        span "Hello \u{1F600} World"
+      }
+    }
+  }
+}"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+
+    let missing: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "font.glyph_missing")
+        .collect();
+    assert_eq!(
+        missing.len(),
+        1,
+        "expected exactly one font.glyph_missing diagnostic; got: {:?}",
+        result.diagnostics
+    );
+    let diag = missing[0];
+    assert_eq!(
+        diag.severity,
+        zenith_core::Severity::Warning,
+        "font.glyph_missing must be Warning severity"
+    );
+    assert_eq!(
+        diag.subject_id.as_deref(),
+        Some("text.gm"),
+        "subject_id must be the text node id"
+    );
+    assert!(
+        diag.message.contains("U+1F600"),
+        "message must contain the missing codepoint U+1F600; got: {}",
+        diag.message
+    );
+}
+
+/// A text node containing only ASCII (fully covered by Noto Sans) must produce
+/// no `font.glyph_missing` diagnostic.
+#[test]
+fn no_glyph_missing_for_ascii() {
+    let src = r##"zenith version=1 {
+  project id="proj.gm2" name="GM2"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.gm2" title="GM2" {
+    page id="page.gm2" w=(px)400 h=(px)200 {
+      text id="text.gm2" x=(px)10 y=(px)20 w=(px)380 h=(px)60 {
+        span "Hello World"
+      }
+    }
+  }
+}"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+
+    let missing: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "font.glyph_missing")
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "ASCII text must produce no font.glyph_missing; got: {:?}",
+        missing
+    );
+}
+
+/// A text node containing a ZWJ (U+200D, a default-ignorable joiner) between
+/// ASCII characters must NOT produce a `font.glyph_missing` for the ZWJ.
+/// The joiner is consumed by the shaper and has no standalone glyph by design.
+#[test]
+fn default_ignorable_not_reported_as_missing() {
+    // U+200D ZERO WIDTH JOINER between ASCII: ignorable, not reportable.
+    let src = r##"zenith version=1 {
+  project id="proj.gm3" name="GM3"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.gm3" title="GM3" {
+    page id="page.gm3" w=(px)400 h=(px)200 {
+      text id="text.gm3" x=(px)10 y=(px)20 w=(px)380 h=(px)60 {
+        span "a\u{200D}b"
+      }
+    }
+  }
+}"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+
+    let missing: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "font.glyph_missing")
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "ZWJ (U+200D) must not be reported as glyph_missing; got: {:?}",
+        missing
+    );
+}

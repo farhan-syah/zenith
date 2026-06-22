@@ -1,7 +1,7 @@
 //! Text and code leaf-node compilation, plus the shaping/glyph and
 //! syntax-highlight helpers they depend on.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use zenith_core::{
     CodeNode, Diagnostic, Dimension, FontProvider, FontStyle, PropertyValue, ResolvedToken,
@@ -135,6 +135,34 @@ fn baseline_grid_snap_failed_diag(
     )
 }
 
+/// Emit a `font.glyph_missing` warning for `node_id` when `missing` is
+/// non-empty. Shared by the NOWRAP pass-1 loop and [`shape_words`] so the
+/// format string and `Diagnostic` construction live in exactly one place.
+fn emit_glyph_missing(
+    diagnostics: &mut Vec<Diagnostic>,
+    node_id: &str,
+    span: Option<zenith_core::Span>,
+    missing: &BTreeSet<char>,
+) {
+    if missing.is_empty() {
+        return;
+    }
+    let chars_desc = missing
+        .iter()
+        .map(|&c| format!("'{}' (U+{:04X})", c, c as u32))
+        .collect::<Vec<_>>()
+        .join(", ");
+    diagnostics.push(Diagnostic::warning(
+        "font.glyph_missing",
+        format!(
+            "text node '{node_id}' contains character(s) with no glyph in any registered font: \
+             {chars_desc}"
+        ),
+        span,
+        Some(node_id.to_owned()),
+    ));
+}
+
 /// A span already resolved to color/decoration/weight/style, ready for the
 /// per-word re-shaping the wrap + chain paths perform. Mirrors the private
 /// `ShapedSpan` fields the wrap path consumes.
@@ -179,6 +207,9 @@ pub(super) fn shape_words(
     // a multi-span paragraph stays one paragraph. Widow/orphan control reads this
     // per-line; the default-off path never inspects it.
     let mut paragraph: usize = 0;
+    // Accumulate chars with no glyph in any registered face across ALL words of
+    // this node. Emitted as a single diagnostic after the word loop.
+    let mut node_missing: BTreeSet<char> = BTreeSet::new();
 
     for shaped in spans {
         // A super/subscript span carries its own reduced size; a baseline span
@@ -211,23 +242,24 @@ pub(super) fn shape_words(
                             Some(node_id.to_owned()),
                         ));
                     }
-                    Ok(runs) => {
+                    Ok(result) => {
+                        node_missing.extend(result.missing_chars);
                         if !have_metrics
                             && !is_vertical_align
-                            && let Some(first) = runs.first()
+                            && let Some(first) = result.runs.first()
                         {
                             metrics.ascent = first.ascent as f64;
                             metrics.line_height = first.line_height as f64;
                             have_metrics = true;
                         }
-                        let advance: f64 = runs.iter().map(|r| r.advance_width as f64).sum();
+                        let advance: f64 = result.runs.iter().map(|r| r.advance_width as f64).sum();
                         tokens.push(WordToken {
                             advance,
                             color: shaped.color,
                             underline: shaped.underline,
                             strikethrough: shaped.strikethrough,
                             baseline_dy: shaped.baseline_dy,
-                            runs,
+                            runs: result.runs,
                             src: WordSource {
                                 text: word.to_owned(),
                                 weight: shaped.weight,
@@ -242,6 +274,10 @@ pub(super) fn shape_words(
             }
         }
     }
+
+    // Emit one warning per node listing every character that had no glyph in
+    // any registered face (would silently render as .notdef / tofu).
+    emit_glyph_missing(diagnostics, node_id, span, &node_missing);
 
     // Shape a single space once (node base weight/style) for inter-word gaps
     // and packing measurement.
@@ -339,10 +375,10 @@ fn reshape_fragment(
         font_size: donor.src.font_size,
         direction: ctx.direction,
     };
-    let runs = ctx.engine.shape_with_fallback(&req, ctx.fonts).ok()?;
-    let advance: f64 = runs.iter().map(|r| r.advance_width as f64).sum();
+    let result = ctx.engine.shape_with_fallback(&req, ctx.fonts).ok()?;
+    let advance: f64 = result.runs.iter().map(|r| r.advance_width as f64).sum();
     Some(WordToken {
-        runs,
+        runs: result.runs,
         advance,
         color: donor.color,
         underline: donor.underline,
@@ -1651,6 +1687,7 @@ fn shape_drop_cap(
     let run = engine
         .shape_with_fallback(&req, fonts)
         .ok()?
+        .runs
         .into_iter()
         .next()?;
     let advance = run.advance_width as f64;
@@ -1713,9 +1750,9 @@ fn shape_tab_leader_row(
             direction: TextDirection::Ltr,
         };
         match engine.shape_with_fallback(&req, fonts) {
-            Ok(runs) => {
-                let adv: f64 = runs.iter().map(|r| r.advance_width as f64).sum();
-                (runs, adv)
+            Ok(result) => {
+                let adv: f64 = result.runs.iter().map(|r| r.advance_width as f64).sum();
+                (result.runs, adv)
             }
             Err(_) => (Vec::new(), 0.0),
         }
@@ -1841,7 +1878,7 @@ fn compile_tab_leader(
         direction: TextDirection::Ltr,
     };
     let leader_run = match engine.shape_with_fallback(&leader_req, fonts) {
-        Ok(runs) => runs.into_iter().next(),
+        Ok(result) => result.runs.into_iter().next(),
         Err(_) => None,
     };
     let leader_advance = leader_run
@@ -2462,6 +2499,9 @@ pub(super) fn compile_text_sized(
     // baseline + their `baseline_dy` so their reduced ascent does not move them
     // off the run's baseline. `None` until a full-size span is shaped.
     let mut node_ascent: Option<f64> = None;
+    // Accumulate chars with no glyph in any registered face across ALL spans of
+    // this node. Emitted as a single diagnostic after the span loop.
+    let mut node_missing: BTreeSet<char> = BTreeSet::new();
 
     for span in &effective_spans {
         if span.text.is_empty() {
@@ -2517,8 +2557,9 @@ pub(super) fn compile_text_sized(
                 ));
                 // Skip this span; cursor does not advance.
             }
-            Ok(runs) => {
-                for (i, run) in runs.into_iter().enumerate() {
+            Ok(result) => {
+                node_missing.extend(result.missing_chars);
+                for (i, run) in result.runs.into_iter().enumerate() {
                     total_advance += run.advance_width as f64;
                     // Capture the first FULL-size run's ascent as the shared
                     // baseline reference for super/subscript spans.
@@ -2552,6 +2593,10 @@ pub(super) fn compile_text_sized(
             }
         }
     }
+
+    // Emit one warning per node listing every character that had no glyph in
+    // any registered face (would silently render as .notdef / tofu).
+    emit_glyph_missing(diagnostics, &text.id, text.source_span, &node_missing);
 
     // ── Alignment offset ─────────────────────────────────────────────
     // Resolve the node's box width to pixels (same dim_to_px path as x/y).
@@ -3068,7 +3113,7 @@ pub(super) fn compile_text_sized(
                             direction: TextDirection::Ltr,
                         };
                         match engine.shape_with_fallback(&req, fonts) {
-                            Ok(runs) => runs.into_iter().next().map(|r| (r, marker_color)),
+                            Ok(result) => result.runs.into_iter().next().map(|r| (r, marker_color)),
                             Err(_) => None,
                         }
                     }

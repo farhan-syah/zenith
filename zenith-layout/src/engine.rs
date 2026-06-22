@@ -77,6 +77,18 @@ pub struct ZenithGlyphRun {
     pub glyphs: Vec<PositionedGlyph>,
 }
 
+/// Result of fallback shaping: the shaped runs plus any characters that NO
+/// registered face (primary or fallback) could supply a glyph for.
+pub struct FallbackResult {
+    /// Shaped glyph runs, one per contiguous sub-run that resolved to a single
+    /// face, in visual order.
+    pub runs: Vec<ZenithGlyphRun>,
+    /// Characters (deduped, sorted by codepoint) for which no registered face
+    /// had a glyph. Excludes default-ignorable code points (joiners, variation
+    /// selectors, control characters, whitespace, etc.).
+    pub missing_chars: Vec<char>,
+}
+
 /// Trait implemented by every shaping engine.
 ///
 /// Engines are free to resolve fonts, call native shapers, and accumulate any
@@ -94,8 +106,10 @@ pub trait TextLayoutEngine {
         provider: &dyn FontProvider,
     ) -> Result<ZenithGlyphRun, LayoutError>;
 
-    /// Shape `req.text` with per-glyph font fallback, returning one
-    /// [`ZenithGlyphRun`] per contiguous sub-run that resolved to a single face.
+    /// Shape `req.text` with per-glyph font fallback, returning a
+    /// [`FallbackResult`] with one [`ZenithGlyphRun`] per contiguous sub-run
+    /// that resolved to a single face, plus any characters that no registered
+    /// face could cover.
     ///
     /// The primary face (resolved from `req.families`/`weight`/`style`) shapes
     /// every character it covers; characters the primary lacks are itemized to
@@ -106,7 +120,7 @@ pub trait TextLayoutEngine {
     /// fragment on shared characters.
     ///
     /// When every character is covered by the primary face this returns exactly
-    /// one run, identical to [`Self::shape`].
+    /// one run, identical to [`Self::shape`], with an empty `missing_chars`.
     ///
     /// # Errors
     ///
@@ -116,5 +130,5 @@ pub trait TextLayoutEngine {
         &self,
         req: &ShapeRequest<'_>,
         provider: &dyn FontProvider,
-    ) -> Result<Vec<ZenithGlyphRun>, LayoutError>;
+    ) -> Result<FallbackResult, LayoutError>;
 }
