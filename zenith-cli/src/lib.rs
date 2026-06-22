@@ -723,6 +723,57 @@ pub fn run() -> ExitCode {
                 ExitCode::from(2)
             }
         },
+
+        Command::Theme(args) => match args.command {
+            cli::ThemeSub::New(a) => {
+                let scheme = match a.scheme.as_str() {
+                    "light" => zenith_core::theme::Scheme::Light,
+                    "dark" => zenith_core::theme::Scheme::Dark,
+                    other => {
+                        eprintln!("error: --scheme must be 'light' or 'dark', got '{other}'");
+                        return ExitCode::from(2);
+                    }
+                };
+                let input = commands::theme::ThemeInput {
+                    name: &a.name,
+                    scheme,
+                    primary: &a.primary,
+                    secondary: a.secondary.as_deref(),
+                    accent: a.accent.as_deref(),
+                    neutral: a.neutral.as_deref(),
+                    info: a.info.as_deref(),
+                    success: a.success.as_deref(),
+                    warning: a.warning.as_deref(),
+                    error: a.error.as_deref(),
+                    shape: commands::theme::Shape {
+                        radius_box: a.radius_box,
+                        radius_field: a.radius_field,
+                        radius_selector: a.radius_selector,
+                        border: a.border,
+                        depth: a.depth,
+                        noise: a.noise,
+                    },
+                };
+                match commands::theme::new(&input) {
+                    Ok(source) => {
+                        if let Some(path) = &a.out {
+                            if let Err(e) = std::fs::write(path, &source) {
+                                eprintln!("error writing '{}': {}", path.display(), e);
+                                return ExitCode::from(2);
+                            }
+                            println!("wrote {}", path.display());
+                        } else {
+                            print!("{source}");
+                        }
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: {}", e.message);
+                        ExitCode::from(e.exit_code)
+                    }
+                }
+            }
+        },
     }
 }
 

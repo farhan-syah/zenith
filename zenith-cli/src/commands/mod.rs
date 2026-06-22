@@ -10,6 +10,7 @@ pub mod inspect;
 pub mod library;
 pub mod merge;
 pub mod render;
+pub mod theme;
 pub mod tokens;
 pub mod tx;
 pub mod validate;

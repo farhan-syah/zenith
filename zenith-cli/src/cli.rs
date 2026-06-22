@@ -62,6 +62,94 @@ pub enum Command {
 
     /// Update the installed `zenith` binary to a published release.
     Update(UpdateArgs),
+
+    /// Generate design themes (token packs) from brand colours.
+    Theme(ThemeArgs),
+}
+
+/// Arguments for `zenith theme`.
+#[derive(Debug, Args)]
+pub struct ThemeArgs {
+    #[command(subcommand)]
+    pub command: ThemeSub,
+}
+
+/// Subcommands of `zenith theme`.
+#[derive(Debug, Subcommand)]
+pub enum ThemeSub {
+    /// Synthesize a complete theme pack from a primary colour (+ optional roles).
+    New(ThemeNewArgs),
+}
+
+/// Arguments for `zenith theme new`.
+#[derive(Debug, Args)]
+pub struct ThemeNewArgs {
+    /// Theme name (used in ids and the preview title), e.g. `acme`.
+    pub name: String,
+
+    /// Base scheme: `light` or `dark`.
+    #[arg(long, value_name = "light|dark")]
+    pub scheme: String,
+
+    /// Primary brand colour as `#rrggbb`.
+    #[arg(long, value_name = "HEX")]
+    pub primary: String,
+
+    /// Secondary colour (default: same as primary).
+    #[arg(long, value_name = "HEX")]
+    pub secondary: Option<String>,
+
+    /// Accent colour (default: same as secondary).
+    #[arg(long, value_name = "HEX")]
+    pub accent: Option<String>,
+
+    /// Neutral colour (default: a tinted grey).
+    #[arg(long, value_name = "HEX")]
+    pub neutral: Option<String>,
+
+    /// Override the info status colour.
+    #[arg(long, value_name = "HEX")]
+    pub info: Option<String>,
+
+    /// Override the success status colour.
+    #[arg(long, value_name = "HEX")]
+    pub success: Option<String>,
+
+    /// Override the warning status colour.
+    #[arg(long, value_name = "HEX")]
+    pub warning: Option<String>,
+
+    /// Override the error status colour.
+    #[arg(long, value_name = "HEX")]
+    pub error: Option<String>,
+
+    /// Box/card corner radius in px (default 16).
+    #[arg(long, value_name = "PX", default_value_t = 16.0)]
+    pub radius_box: f64,
+
+    /// Field/button corner radius in px (default 8).
+    #[arg(long, value_name = "PX", default_value_t = 8.0)]
+    pub radius_field: f64,
+
+    /// Selector/badge corner radius in px (default 8).
+    #[arg(long, value_name = "PX", default_value_t = 8.0)]
+    pub radius_selector: f64,
+
+    /// Default border width in px (default 1).
+    #[arg(long, value_name = "PX", default_value_t = 1.0)]
+    pub border: f64,
+
+    /// Emit a `shadow.depth` elevation token (raised look).
+    #[arg(long)]
+    pub depth: bool,
+
+    /// Mark the theme as wanting a grain overlay (recorded in the header).
+    #[arg(long)]
+    pub noise: bool,
+
+    /// Write to this path instead of stdout.
+    #[arg(long, value_name = "FILE")]
+    pub out: Option<PathBuf>,
 }
 
 /// Arguments for `zenith update`.
