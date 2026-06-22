@@ -81,6 +81,7 @@ pub(in crate::compile) fn compile_instance(
         style: None,
         anchor: None,
         anchor_zone: None,
+        anchor_sibling: None,
         anchor_parent: None,
         children,
         source_span: instance.source_span,

@@ -105,6 +105,7 @@ fn rect_missing_w_produces_node_missing_geometry() {
                 blur: None,
                 anchor: None,
                 anchor_zone: None,
+                anchor_sibling: None,
                 anchor_parent: None,
                 source_span: None,
                 unknown_props: BTreeMap::new(),
@@ -189,6 +190,7 @@ fn font_weight_with_missing_token_ref_produces_unknown_reference() {
         bullet_gap: None,
         anchor: None,
         anchor_zone: None,
+        anchor_sibling: None,
         anchor_parent: None,
         spans: vec![],
         source_span: None,
@@ -546,6 +548,7 @@ fn unknown_property_on_rect_produces_warning() {
                 blur: None,
                 anchor: None,
                 anchor_zone: None,
+                anchor_sibling: None,
                 anchor_parent: None,
                 source_span: None,
                 unknown_props,
@@ -563,6 +566,75 @@ fn unknown_property_on_rect_produces_warning() {
         .iter()
         .find(|d| d.code == "node.unknown_property")
         .expect("should exist");
+    assert_eq!(diag.severity, Severity::Warning);
+    assert!(!report.has_errors());
+}
+
+// ── anchor-sibling without anchor → anchor.sibling_without_anchor ─────
+
+#[test]
+fn anchor_sibling_without_anchor_produces_sibling_without_anchor() {
+    let doc = doc_with(
+        vec![],
+        vec![minimal_page(
+            "page.one",
+            vec![Node::Rect(Box::new(RectNode {
+                shadow: None,
+                filter: None,
+                mask: None,
+                id: "rect.sib".to_owned(),
+                name: None,
+                role: None,
+                x: Some(px(0.0)),
+                y: Some(px(0.0)),
+                w: Some(px(50.0)),
+                h: Some(px(50.0)),
+                radius: None,
+                radius_tl: None,
+                radius_tr: None,
+                radius_br: None,
+                radius_bl: None,
+                style: None,
+                fill: None,
+                stroke: None,
+                stroke_width: None,
+                stroke_alignment: None,
+                stroke_dash: None,
+                stroke_gap: None,
+                stroke_linecap: None,
+                border_top: None,
+                border_bottom: None,
+                border_left: None,
+                border_right: None,
+                border_width: None,
+                stroke_outer: None,
+                stroke_outer_width: None,
+                opacity: None,
+                visible: None,
+                locked: None,
+                rotate: None,
+                blend_mode: None,
+                blur: None,
+                anchor: None, // absent — triggers the warning
+                anchor_zone: None,
+                anchor_sibling: Some("x".to_owned()),
+                anchor_parent: None,
+                source_span: None,
+                unknown_props: BTreeMap::new(),
+            }))],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "anchor.sibling_without_anchor"),
+        "expected anchor.sibling_without_anchor diagnostic; codes: {:?}",
+        codes(&report)
+    );
+    let diag = report
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "anchor.sibling_without_anchor")
+        .expect("diagnostic must exist");
     assert_eq!(diag.severity, Severity::Warning);
     assert!(!report.has_errors());
 }

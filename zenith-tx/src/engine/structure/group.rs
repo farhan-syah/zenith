@@ -212,6 +212,7 @@ pub(in crate::engine) fn apply_group(
         style: None,
         anchor: None,
         anchor_zone: None,
+        anchor_sibling: None,
         anchor_parent: None,
         children: group_children,
         source_span: None,

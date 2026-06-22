@@ -74,6 +74,8 @@ const RECT_KNOWN_PROPS: &[&str] = &[
     "anchor",
     "anchor-zone",
     "anchor_zone",
+    "anchor-sibling",
+    "anchor_sibling",
     "anchor-parent",
     "anchor_parent",
 ];
@@ -154,6 +156,9 @@ pub(super) fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
         anchor_zone: optional_string_prop(node, "anchor-zone")
             .or_else(|| optional_string_prop(node, "anchor_zone"))
             .map(str::to_owned),
+        anchor_sibling: optional_string_prop(node, "anchor-sibling")
+            .or_else(|| optional_string_prop(node, "anchor_sibling"))
+            .map(str::to_owned),
         anchor_parent: optional_bool_prop(node, "anchor-parent")
             .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),
@@ -200,6 +205,8 @@ const IMAGE_KNOWN_PROPS: &[&str] = &[
     "anchor",
     "anchor-zone",
     "anchor_zone",
+    "anchor-sibling",
+    "anchor_sibling",
     "anchor-parent",
     "anchor_parent",
 ];
@@ -259,6 +266,9 @@ pub(super) fn transform_image(node: &KdlNode) -> Result<ImageNode, ParseError> {
         anchor_zone: optional_string_prop(node, "anchor-zone")
             .or_else(|| optional_string_prop(node, "anchor_zone"))
             .map(str::to_owned),
+        anchor_sibling: optional_string_prop(node, "anchor-sibling")
+            .or_else(|| optional_string_prop(node, "anchor_sibling"))
+            .map(str::to_owned),
         anchor_parent: optional_bool_prop(node, "anchor-parent")
             .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),
@@ -300,6 +310,8 @@ const ELLIPSE_KNOWN_PROPS: &[&str] = &[
     "anchor",
     "anchor-zone",
     "anchor_zone",
+    "anchor-sibling",
+    "anchor_sibling",
     "anchor-parent",
     "anchor_parent",
 ];
@@ -351,6 +363,9 @@ pub(super) fn transform_ellipse(node: &KdlNode) -> Result<EllipseNode, ParseErro
         anchor: optional_string_prop(node, "anchor").map(str::to_owned),
         anchor_zone: optional_string_prop(node, "anchor-zone")
             .or_else(|| optional_string_prop(node, "anchor_zone"))
+            .map(str::to_owned),
+        anchor_sibling: optional_string_prop(node, "anchor-sibling")
+            .or_else(|| optional_string_prop(node, "anchor_sibling"))
             .map(str::to_owned),
         anchor_parent: optional_bool_prop(node, "anchor-parent")
             .or_else(|| optional_bool_prop(node, "anchor_parent")),
@@ -477,6 +492,8 @@ const TEXT_KNOWN_PROPS: &[&str] = &[
     "anchor",
     "anchor-zone",
     "anchor_zone",
+    "anchor-sibling",
+    "anchor_sibling",
     "anchor-parent",
     "anchor_parent",
 ];
@@ -570,6 +587,9 @@ pub(super) fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         anchor_zone: optional_string_prop(node, "anchor-zone")
             .or_else(|| optional_string_prop(node, "anchor_zone"))
             .map(str::to_owned),
+        anchor_sibling: optional_string_prop(node, "anchor-sibling")
+            .or_else(|| optional_string_prop(node, "anchor_sibling"))
+            .map(str::to_owned),
         anchor_parent: optional_bool_prop(node, "anchor-parent")
             .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),
@@ -608,6 +628,8 @@ const CODE_KNOWN_PROPS: &[&str] = &[
     "anchor",
     "anchor-zone",
     "anchor_zone",
+    "anchor-sibling",
+    "anchor_sibling",
     "anchor-parent",
     "anchor_parent",
 ];
@@ -671,6 +693,9 @@ pub(super) fn transform_code(node: &KdlNode) -> Result<CodeNode, ParseError> {
         anchor: optional_string_prop(node, "anchor").map(str::to_owned),
         anchor_zone: optional_string_prop(node, "anchor-zone")
             .or_else(|| optional_string_prop(node, "anchor_zone"))
+            .map(str::to_owned),
+        anchor_sibling: optional_string_prop(node, "anchor-sibling")
+            .or_else(|| optional_string_prop(node, "anchor_sibling"))
             .map(str::to_owned),
         anchor_parent: optional_bool_prop(node, "anchor-parent")
             .or_else(|| optional_bool_prop(node, "anchor_parent")),

@@ -427,6 +427,7 @@ pub(in crate::validate::check) fn check_field(
         AnchorProps {
             anchor: field.anchor.as_deref(),
             anchor_zone: field.anchor_zone.as_deref(),
+            anchor_sibling: field.anchor_sibling.as_deref(),
             anchor_parent: field.anchor_parent == Some(true),
         },
         parent_ctx,
@@ -553,6 +554,7 @@ pub(in crate::validate::check) fn check_toc(
         AnchorProps {
             anchor: toc.anchor.as_deref(),
             anchor_zone: toc.anchor_zone.as_deref(),
+            anchor_sibling: toc.anchor_sibling.as_deref(),
             anchor_parent: toc.anchor_parent == Some(true),
         },
         parent_ctx,

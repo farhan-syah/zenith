@@ -44,6 +44,8 @@ const SHAPE_KNOWN_PROPS: &[&str] = &[
     "anchor",
     "anchor-zone",
     "anchor_zone",
+    "anchor-sibling",
+    "anchor_sibling",
     "anchor-parent",
     "anchor_parent",
 ];
@@ -95,6 +97,9 @@ pub(super) fn transform_shape(node: &KdlNode) -> Result<ShapeNode, ParseError> {
         anchor: optional_string_prop(node, "anchor").map(str::to_owned),
         anchor_zone: optional_string_prop(node, "anchor-zone")
             .or_else(|| optional_string_prop(node, "anchor_zone"))
+            .map(str::to_owned),
+        anchor_sibling: optional_string_prop(node, "anchor-sibling")
+            .or_else(|| optional_string_prop(node, "anchor_sibling"))
             .map(str::to_owned),
         anchor_parent: optional_bool_prop(node, "anchor-parent")
             .or_else(|| optional_bool_prop(node, "anchor_parent")),
@@ -187,6 +192,8 @@ const FIELD_KNOWN_PROPS: &[&str] = &[
     "anchor",
     "anchor-zone",
     "anchor_zone",
+    "anchor-sibling",
+    "anchor_sibling",
     "anchor-parent",
     "anchor_parent",
 ];
@@ -236,6 +243,9 @@ pub(super) fn transform_field(node: &KdlNode) -> Result<FieldNode, ParseError> {
         anchor_zone: optional_string_prop(node, "anchor-zone")
             .or_else(|| optional_string_prop(node, "anchor_zone"))
             .map(str::to_owned),
+        anchor_sibling: optional_string_prop(node, "anchor-sibling")
+            .or_else(|| optional_string_prop(node, "anchor_sibling"))
+            .map(str::to_owned),
         anchor_parent: optional_bool_prop(node, "anchor-parent")
             .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),
@@ -270,6 +280,8 @@ const TOC_KNOWN_PROPS: &[&str] = &[
     "anchor",
     "anchor-zone",
     "anchor_zone",
+    "anchor-sibling",
+    "anchor_sibling",
     "anchor-parent",
     "anchor_parent",
 ];
@@ -319,6 +331,9 @@ pub(super) fn transform_toc(node: &KdlNode) -> Result<TocNode, ParseError> {
         anchor: optional_string_prop(node, "anchor").map(str::to_owned),
         anchor_zone: optional_string_prop(node, "anchor-zone")
             .or_else(|| optional_string_prop(node, "anchor_zone"))
+            .map(str::to_owned),
+        anchor_sibling: optional_string_prop(node, "anchor-sibling")
+            .or_else(|| optional_string_prop(node, "anchor_sibling"))
             .map(str::to_owned),
         anchor_parent: optional_bool_prop(node, "anchor-parent")
             .or_else(|| optional_bool_prop(node, "anchor_parent")),

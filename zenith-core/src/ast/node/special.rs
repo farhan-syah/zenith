@@ -64,6 +64,9 @@ pub struct ShapeNode {
     pub anchor: Option<String>,
     /// Optional safe-zone reference for the anchor. See [`RectNode::anchor_zone`](super::RectNode::anchor_zone).
     pub anchor_zone: Option<String>,
+    /// Optional sibling node id for sibling-relative anchor positioning.
+    /// See [`RectNode::anchor_sibling`](super::RectNode::anchor_sibling).
+    pub anchor_sibling: Option<String>,
     /// Parent-relative anchor toggle. See [`RectNode::anchor_parent`](super::RectNode::anchor_parent).
     pub anchor_parent: Option<bool>,
     /// Source declaration span, when available.
@@ -266,6 +269,9 @@ pub struct FieldNode {
     pub anchor: Option<String>,
     /// Optional safe-zone reference for the anchor. See [`RectNode::anchor_zone`](super::RectNode::anchor_zone).
     pub anchor_zone: Option<String>,
+    /// Optional sibling node id for sibling-relative anchor positioning.
+    /// See [`RectNode::anchor_sibling`](super::RectNode::anchor_sibling).
+    pub anchor_sibling: Option<String>,
     /// Parent-relative anchor toggle. See [`RectNode::anchor_parent`](super::RectNode::anchor_parent).
     pub anchor_parent: Option<bool>,
     /// Source declaration span, when available.
@@ -360,6 +366,9 @@ pub struct TocNode {
     pub anchor: Option<String>,
     /// Optional safe-zone reference for the anchor. See [`RectNode::anchor_zone`](super::RectNode::anchor_zone).
     pub anchor_zone: Option<String>,
+    /// Optional sibling node id for sibling-relative anchor positioning.
+    /// See [`RectNode::anchor_sibling`](super::RectNode::anchor_sibling).
+    pub anchor_sibling: Option<String>,
     /// Parent-relative anchor toggle. See [`RectNode::anchor_parent`](super::RectNode::anchor_parent).
     pub anchor_parent: Option<bool>,
     /// Source declaration span, when available.

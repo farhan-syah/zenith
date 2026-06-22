@@ -53,6 +53,7 @@ pub(in crate::validate::check) fn check_shape(
         AnchorProps {
             anchor: s.anchor.as_deref(),
             anchor_zone: s.anchor_zone.as_deref(),
+            anchor_sibling: s.anchor_sibling.as_deref(),
             anchor_parent: s.anchor_parent == Some(true),
         },
         parent_ctx,

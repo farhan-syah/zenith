@@ -317,6 +317,7 @@ fn minimal_code(id: &str, fill: Option<PropertyValue>) -> Node {
         rotate: None,
         anchor: None,
         anchor_zone: None,
+        anchor_sibling: None,
         anchor_parent: None,
         content: String::new(),
         source_span: None,

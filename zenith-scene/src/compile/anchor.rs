@@ -105,10 +105,11 @@ pub(crate) fn build_anchor_map(page: &Page, page_w: f64, page_h: f64) -> AnchorM
     map
 }
 
-/// The `(id, anchor, anchor_zone, anchor_parent, w, h)` fields pulled from a
-/// node that may carry an anchor.
+/// The `(id, anchor, anchor_zone, anchor_sibling, anchor_parent, w, h)` fields
+/// pulled from a node that may carry an anchor.
 type AnchorFields<'a> = (
     &'a str,
+    Option<&'a str>,
     Option<&'a str>,
     Option<&'a str>,
     Option<bool>,
@@ -124,6 +125,7 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             n.id.as_str(),
             n.anchor.as_deref(),
             n.anchor_zone.as_deref(),
+            n.anchor_sibling.as_deref(),
             n.anchor_parent,
             n.w.as_ref(),
             n.h.as_ref(),
@@ -132,6 +134,7 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             n.id.as_str(),
             n.anchor.as_deref(),
             n.anchor_zone.as_deref(),
+            n.anchor_sibling.as_deref(),
             n.anchor_parent,
             n.w.as_ref(),
             n.h.as_ref(),
@@ -140,6 +143,7 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             n.id.as_str(),
             n.anchor.as_deref(),
             n.anchor_zone.as_deref(),
+            n.anchor_sibling.as_deref(),
             n.anchor_parent,
             n.w.as_ref(),
             n.h.as_ref(),
@@ -148,6 +152,7 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             n.id.as_str(),
             n.anchor.as_deref(),
             n.anchor_zone.as_deref(),
+            n.anchor_sibling.as_deref(),
             n.anchor_parent,
             n.w.as_ref(),
             n.h.as_ref(),
@@ -156,6 +161,7 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             n.id.as_str(),
             n.anchor.as_deref(),
             n.anchor_zone.as_deref(),
+            n.anchor_sibling.as_deref(),
             n.anchor_parent,
             n.w.as_ref(),
             n.h.as_ref(),
@@ -164,6 +170,7 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             n.id.as_str(),
             n.anchor.as_deref(),
             n.anchor_zone.as_deref(),
+            n.anchor_sibling.as_deref(),
             n.anchor_parent,
             n.w.as_ref(),
             n.h.as_ref(),
@@ -172,6 +179,7 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             n.id.as_str(),
             n.anchor.as_deref(),
             n.anchor_zone.as_deref(),
+            n.anchor_sibling.as_deref(),
             n.anchor_parent,
             n.w.as_ref(),
             n.h.as_ref(),
@@ -180,6 +188,7 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             n.id.as_str(),
             n.anchor.as_deref(),
             n.anchor_zone.as_deref(),
+            n.anchor_sibling.as_deref(),
             n.anchor_parent,
             n.w.as_ref(),
             n.h.as_ref(),
@@ -188,6 +197,7 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             n.id.as_str(),
             n.anchor.as_deref(),
             n.anchor_zone.as_deref(),
+            n.anchor_sibling.as_deref(),
             n.anchor_parent,
             n.w.as_ref(),
             n.h.as_ref(),
@@ -196,6 +206,7 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             n.id.as_str(),
             n.anchor.as_deref(),
             n.anchor_zone.as_deref(),
+            n.anchor_sibling.as_deref(),
             n.anchor_parent,
             n.w.as_ref(),
             n.h.as_ref(),
@@ -204,6 +215,7 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             n.id.as_str(),
             n.anchor.as_deref(),
             n.anchor_zone.as_deref(),
+            n.anchor_sibling.as_deref(),
             n.anchor_parent,
             n.w.as_ref(),
             n.h.as_ref(),
@@ -324,7 +336,9 @@ fn collect_anchor(node: &Node, env: PrePassEnv, ctx: ParentCtx, map: &mut Anchor
 
 /// Derive and insert the anchor map entry for one node from its fields.
 fn derive_entry(fields: AnchorFields<'_>, env: PrePassEnv, ctx: ParentCtx, map: &mut AnchorMap) {
-    let (id, anchor_str, anchor_zone_str, anchor_parent, w_dim, h_dim) = fields;
+    // anchor_sibling is threaded through for A-4b (sibling-relative positioning);
+    // it is inert in this unit and not used for derivation yet.
+    let (id, anchor_str, anchor_zone_str, _anchor_sibling, anchor_parent, w_dim, h_dim) = fields;
 
     // No anchor string → no entry.
     let anchor_name = match anchor_str {

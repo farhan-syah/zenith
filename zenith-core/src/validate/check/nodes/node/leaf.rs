@@ -47,6 +47,7 @@ pub(in crate::validate::check) fn check_rect(
         AnchorProps {
             anchor: r.anchor.as_deref(),
             anchor_zone: r.anchor_zone.as_deref(),
+            anchor_sibling: r.anchor_sibling.as_deref(),
             anchor_parent: r.anchor_parent == Some(true),
         },
         parent_ctx,
@@ -334,6 +335,7 @@ pub(in crate::validate::check) fn check_ellipse(
         AnchorProps {
             anchor: e.anchor.as_deref(),
             anchor_zone: e.anchor_zone.as_deref(),
+            anchor_sibling: e.anchor_sibling.as_deref(),
             anchor_parent: e.anchor_parent == Some(true),
         },
         parent_ctx,
@@ -689,6 +691,7 @@ pub(in crate::validate::check) fn check_code(
         AnchorProps {
             anchor: c.anchor.as_deref(),
             anchor_zone: c.anchor_zone.as_deref(),
+            anchor_sibling: c.anchor_sibling.as_deref(),
             anchor_parent: c.anchor_parent == Some(true),
         },
         parent_ctx,

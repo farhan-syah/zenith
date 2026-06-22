@@ -58,6 +58,7 @@ pub(in crate::validate::check) fn check_text(
         AnchorProps {
             anchor: t.anchor.as_deref(),
             anchor_zone: t.anchor_zone.as_deref(),
+            anchor_sibling: t.anchor_sibling.as_deref(),
             anchor_parent: t.anchor_parent == Some(true),
         },
         parent_ctx,
@@ -301,6 +302,7 @@ pub(in crate::validate::check) fn check_image(
         AnchorProps {
             anchor: img.anchor.as_deref(),
             anchor_zone: img.anchor_zone.as_deref(),
+            anchor_sibling: img.anchor_sibling.as_deref(),
             anchor_parent: img.anchor_parent == Some(true),
         },
         parent_ctx,

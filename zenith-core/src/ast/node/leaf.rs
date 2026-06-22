@@ -77,6 +77,9 @@ pub struct ImageNode {
     /// Optional safe-zone id selecting the reference rectangle for `anchor`
     /// (page-relative when absent). See [`Anchor`](super::Anchor).
     pub anchor_zone: Option<String>,
+    /// Optional sibling node id for sibling-relative anchor positioning.
+    /// See [`RectNode::anchor_sibling`].
+    pub anchor_sibling: Option<String>,
     /// Parent-relative anchor toggle. See [`RectNode::anchor_parent`].
     pub anchor_parent: Option<bool>,
     /// Source declaration span, when available.
@@ -163,6 +166,10 @@ pub struct RectNode {
     /// `anchor` to be set; `anchor_zone` without `anchor` has no effect and
     /// triggers an `anchor.zone_without_anchor` warning.
     pub anchor_zone: Option<String>,
+    /// Optional sibling node id for sibling-relative anchor positioning.
+    /// Requires `anchor` to be set; `anchor_sibling` without `anchor` has no
+    /// effect and triggers an `anchor.sibling_without_anchor` warning.
+    pub anchor_sibling: Option<String>,
     /// Parent-relative anchor toggle. When `Some(true)` AND a recognized
     /// `anchor` is present (and `anchor_zone` is absent), the `anchor` is
     /// resolved relative to this node's DIRECT PARENT CONTAINER's box (a frame
@@ -267,6 +274,9 @@ pub struct EllipseNode {
     pub anchor: Option<String>,
     /// Optional safe-zone reference for the anchor. See [`RectNode::anchor_zone`].
     pub anchor_zone: Option<String>,
+    /// Optional sibling node id for sibling-relative anchor positioning.
+    /// See [`RectNode::anchor_sibling`].
+    pub anchor_sibling: Option<String>,
     /// Parent-relative anchor toggle. See [`RectNode::anchor_parent`].
     pub anchor_parent: Option<bool>,
     /// Source declaration span, when available.
@@ -434,6 +444,9 @@ pub struct TextNode {
     pub anchor: Option<String>,
     /// Optional safe-zone reference for the anchor. See [`RectNode::anchor_zone`].
     pub anchor_zone: Option<String>,
+    /// Optional sibling node id for sibling-relative anchor positioning.
+    /// See [`RectNode::anchor_sibling`].
+    pub anchor_sibling: Option<String>,
     /// Parent-relative anchor toggle. See [`RectNode::anchor_parent`].
     pub anchor_parent: Option<bool>,
     /// Source declaration span, when available.
@@ -491,6 +504,9 @@ pub struct CodeNode {
     pub anchor: Option<String>,
     /// Optional safe-zone reference for the anchor. See [`RectNode::anchor_zone`].
     pub anchor_zone: Option<String>,
+    /// Optional sibling node id for sibling-relative anchor positioning.
+    /// See [`RectNode::anchor_sibling`].
+    pub anchor_sibling: Option<String>,
     /// Parent-relative anchor toggle. See [`RectNode::anchor_parent`].
     pub anchor_parent: Option<bool>,
     /// Source declaration span, when available.

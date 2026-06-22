@@ -59,6 +59,7 @@ pub(in crate::validate::check) fn check_frame(
         AnchorProps {
             anchor: f.anchor.as_deref(),
             anchor_zone: f.anchor_zone.as_deref(),
+            anchor_sibling: f.anchor_sibling.as_deref(),
             anchor_parent: f.anchor_parent == Some(true),
         },
         parent_ctx,
@@ -184,6 +185,7 @@ pub(in crate::validate::check) fn check_group(
         AnchorProps {
             anchor: g.anchor.as_deref(),
             anchor_zone: g.anchor_zone.as_deref(),
+            anchor_sibling: g.anchor_sibling.as_deref(),
             anchor_parent: g.anchor_parent == Some(true),
         },
         parent_ctx,
@@ -257,6 +259,7 @@ pub(in crate::validate::check) fn check_table(
         AnchorProps {
             anchor: t.anchor.as_deref(),
             anchor_zone: t.anchor_zone.as_deref(),
+            anchor_sibling: t.anchor_sibling.as_deref(),
             anchor_parent: t.anchor_parent == Some(true),
         },
         parent_ctx,

@@ -286,16 +286,17 @@ pub(in crate::validate::check) struct AnchorParentCtx {
     pub(in crate::validate::check) parent_box_known: bool,
 }
 
-/// The three per-node anchor property reads, bundled so [`check_anchor`] stays
+/// The anchor property reads, bundled so [`check_anchor`] stays
 /// within the argument-count lint without suppression.
 #[derive(Clone, Copy)]
 pub(in crate::validate::check) struct AnchorProps<'a> {
     pub(in crate::validate::check) anchor: Option<&'a str>,
     pub(in crate::validate::check) anchor_zone: Option<&'a str>,
+    pub(in crate::validate::check) anchor_sibling: Option<&'a str>,
     pub(in crate::validate::check) anchor_parent: bool,
 }
 
-/// Validate the `anchor`, `anchor_zone`, and `anchor_parent` properties on a node.
+/// Validate the `anchor`, `anchor_zone`, `anchor_sibling`, and `anchor_parent` properties on a node.
 ///
 /// Returns `true` when `anchor` is present and recognized (anchor active:
 /// x/y geometry is NOT required even outside a flow parent, in any of the
@@ -305,6 +306,7 @@ pub(in crate::validate::check) struct AnchorProps<'a> {
 /// - `anchor.unknown_value` (Error) — `anchor` present with an unrecognized value.
 /// - `anchor.zone_without_anchor` (Warning) — `anchor_zone` set but `anchor` absent.
 /// - `anchor.unresolved_zone` (Error) — `anchor_zone` names a zone not on this page.
+/// - `anchor.sibling_without_anchor` (Warning) — `anchor_sibling` set but `anchor` absent.
 /// - `anchor.parent_without_anchor` (Warning) — `anchor_parent` set but `anchor` absent.
 /// - `anchor.unresolvable_parent` (Error) — `anchor_parent` set but the node is
 ///   not inside a frame/group container, or the parent container's box is unknown
@@ -320,6 +322,7 @@ pub(super) fn check_anchor(
     let AnchorProps {
         anchor,
         anchor_zone,
+        anchor_sibling,
         anchor_parent,
     } = props;
     // When anchor-zone is present without anchor, emit a warning and treat zone as
@@ -330,6 +333,21 @@ pub(super) fn check_anchor(
             format!(
                 "node '{}': anchor-zone is set but anchor is absent; \
                  anchor-zone has no effect without an anchor value",
+                node_id
+            ),
+            span,
+            Some(node_id.to_owned()),
+        ));
+    }
+
+    // When anchor-sibling is present without anchor, emit a warning
+    // (anchor-sibling has no effect without an anchor value to position).
+    if anchor_sibling.is_some() && anchor.is_none() {
+        diagnostics.push(Diagnostic::warning(
+            "anchor.sibling_without_anchor",
+            format!(
+                "node '{}': anchor-sibling is set but anchor is absent; \
+                 anchor-sibling has no effect without an anchor value",
                 node_id
             ),
             span,
