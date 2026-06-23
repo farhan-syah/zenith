@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 
-use zenith_core::{Document, KdlAdapter, KdlSource, PropertyValue, Unit};
+use zenith_core::{Document, KdlAdapter, KdlSource, PropertyValue};
 use zenith_tx::{Op, OpSpan, Permissions, Transaction, TxStatus, run_transaction};
 
 // ── Result / outcome types ────────────────────────────────────────────────────
@@ -101,8 +101,8 @@ pub fn expand_variants(doc: &Document) -> VariantExpansion {
         // 1. Resize the source page to the variant's target dimensions.
         ops.push(Op::SetPageSize {
             page: variant.source.clone(),
-            w: dim_to_op_string(&variant.w),
-            h: dim_to_op_string(&variant.h),
+            w: variant.w.to_kdl_string(),
+            h: variant.h.to_kdl_string(),
         });
 
         // 2. Per-override ops, in stored order, sub-ordered: visible → fill → text.
@@ -183,28 +183,6 @@ pub fn expand_variants(doc: &Document) -> VariantExpansion {
 
 // ── Private helpers ───────────────────────────────────────────────────────────
 
-/// Format a [`zenith_core::Dimension`] as the canonical op string expected by
-/// [`Op::SetPageSize`], e.g. `"(px)1800"` or `"(pt)210"`.
-///
-/// Mirrors `zenith_core::format::writer::fmt_dimension` (which is `pub(super)`
-/// and not accessible from here) without taking a crate dependency on internal
-/// formatting machinery.
-fn dim_to_op_string(d: &zenith_core::Dimension) -> String {
-    let unit_str = match &d.unit {
-        Unit::Px => "px",
-        Unit::Pt => "pt",
-        Unit::Pct => "pct",
-        Unit::Deg => "deg",
-        Unit::Unknown(s) => s.as_str(),
-    };
-    let value_str = if d.value.fract() == 0.0 && d.value.is_finite() {
-        format!("{}", d.value as i64)
-    } else {
-        format!("{}", d.value)
-    };
-    format!("({unit_str}){value_str}")
-}
-
 /// Extract a string to pass to [`Op::SetFill`] from a [`PropertyValue`].
 ///
 /// [`Op::SetFill`] accepts a token id and stores it as
@@ -217,7 +195,7 @@ fn property_value_to_fill_str(pv: &PropertyValue) -> String {
     match pv {
         PropertyValue::TokenRef(id) => id.clone(),
         PropertyValue::Literal(s) => s.clone(),
-        PropertyValue::Dimension(d) => dim_to_op_string(d),
+        PropertyValue::Dimension(d) => d.to_kdl_string(),
     }
 }
 

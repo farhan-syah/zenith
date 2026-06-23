@@ -32,7 +32,7 @@ use std::fmt::Write as _;
 use crate::ast::{
     ActionDef, AssetBlock, AssetDecl, ComponentDef, Dimension, Document, LibraryDef, MasterDef,
     ObjectPosition, Project, PropertyValue, ProvenanceDef, RecipeDef, RecipeParam, SectionDef,
-    Unit, UnknownProperty, UnknownValue, VariantDef,
+    UnknownProperty, UnknownValue, VariantDef,
 };
 use crate::error::FormatError;
 
@@ -125,14 +125,7 @@ pub(super) fn fmt_f64(v: f64) -> String {
 
 /// Format a dimension annotation + value, e.g. `(px)640` or `(pt)10.5`.
 pub(super) fn fmt_dimension(d: &Dimension) -> String {
-    let ann = match &d.unit {
-        Unit::Px => "px",
-        Unit::Pt => "pt",
-        Unit::Pct => "pct",
-        Unit::Deg => "deg",
-        Unit::Unknown(s) => s.as_str(),
-    };
-    format!("({ann}){}", fmt_f64(d.value))
+    d.to_kdl_string()
 }
 
 /// Format a `PropertyValue` as a KDL value.

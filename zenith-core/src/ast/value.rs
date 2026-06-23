@@ -26,6 +26,18 @@ impl Unit {
             other => Self::Unknown(other.to_owned()),
         }
     }
+
+    /// The canonical annotation string (without parentheses) — the inverse of
+    /// [`Unit::from_annotation`].
+    pub fn as_annotation(&self) -> &str {
+        match self {
+            Self::Px => "px",
+            Self::Pt => "pt",
+            Self::Pct => "pct",
+            Self::Deg => "deg",
+            Self::Unknown(s) => s.as_str(),
+        }
+    }
 }
 
 /// A value that carries a numeric magnitude and a measurement unit.
@@ -35,6 +47,22 @@ pub struct Dimension {
     pub value: f64,
     /// The unit of the magnitude.
     pub unit: Unit,
+}
+
+impl Dimension {
+    /// Format as canonical KDL value syntax, e.g. `(px)640` or `(pt)10.5`.
+    ///
+    /// An integral, finite magnitude renders without a fractional part. This is
+    /// the single source of the dimension string used by the formatter and by
+    /// the CLI's transaction/inspect output, so all three agree byte-for-byte.
+    pub fn to_kdl_string(&self) -> String {
+        let value = if self.value.fract() == 0.0 && self.value.is_finite() {
+            format!("{}", self.value as i64)
+        } else {
+            format!("{}", self.value)
+        };
+        format!("({}){value}", self.unit.as_annotation())
+    }
 }
 
 /// Convert a dimension value + unit to pixels.

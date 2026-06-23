@@ -6,7 +6,7 @@
 //! - [`render_recipes_human`] — formats the same data as a human-readable
 //!   section string, mirroring the style used for `pages` output.
 
-use zenith_core::{Dimension, PropertyValue, RecipeDef, Unit};
+use zenith_core::{PropertyValue, RecipeDef};
 
 use crate::json_types::{RecipeInspectJson, RecipeParamInspectJson};
 
@@ -110,24 +110,8 @@ pub fn property_value_str(pv: &PropertyValue) -> String {
     match pv {
         PropertyValue::TokenRef(id) => id.clone(),
         PropertyValue::Literal(s) => s.clone(),
-        PropertyValue::Dimension(d) => dim_str(d),
+        PropertyValue::Dimension(d) => d.to_kdl_string(),
     }
-}
-
-fn dim_str(d: &Dimension) -> String {
-    let unit = match &d.unit {
-        Unit::Px => "px",
-        Unit::Pt => "pt",
-        Unit::Pct => "pct",
-        Unit::Deg => "deg",
-        Unit::Unknown(s) => s.as_str(),
-    };
-    let value = if d.value.fract() == 0.0 && d.value.is_finite() {
-        format!("{}", d.value as i64)
-    } else {
-        format!("{}", d.value)
-    };
-    format!("({unit}){value}")
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
@@ -315,7 +299,7 @@ mod tests {
 
     #[test]
     fn property_value_str_dimension_px() {
-        use zenith_core::Dimension;
+        use zenith_core::{Dimension, Unit};
         let pv = PropertyValue::Dimension(Dimension {
             value: 16.0,
             unit: Unit::Px,
@@ -325,7 +309,7 @@ mod tests {
 
     #[test]
     fn property_value_str_dimension_pt_fractional() {
-        use zenith_core::Dimension;
+        use zenith_core::{Dimension, Unit};
         let pv = PropertyValue::Dimension(Dimension {
             value: 13.5,
             unit: Unit::Pt,
