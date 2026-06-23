@@ -45,4 +45,5 @@ pub use tokens::{
     TokenResolution, builtin_color, is_supported, resolve_tokens, scan, token_id_for_kind,
 };
 pub use util::hash_unit;
+pub use util::pattern::{PatternLayout, pattern_positions};
 pub use validate::{ValidationReport, validate};

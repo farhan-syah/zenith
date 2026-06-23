@@ -10,11 +10,11 @@
 //!
 //! Only the motif instances render: the pattern's own visual properties
 //! (fill/stroke/shadow/…) are inert here; the bounds box is used solely to clip
-//! the instances. Placement is fully deterministic (fixed loop order, integer
-//! bit-mixing for jitter/scatter) so the same document yields byte-identical
-//! commands on every machine.
+//! the instances. Placement is fully deterministic — instance offsets are
+//! computed by `zenith_core::pattern_positions`, which is the single source of
+//! truth shared with any other backend (e.g. the detach transaction op).
 
-use zenith_core::{Diagnostic, PatternNode, Severity, dim_to_px, hash_unit};
+use zenith_core::{Diagnostic, PatternLayout, PatternNode, Severity, dim_to_px, pattern_positions};
 
 use crate::ir::SceneCommand;
 
@@ -23,10 +23,6 @@ use super::RenderCtx;
 use super::anchor::AnchorMap;
 use super::compile_node;
 use super::util::resolve_anchored_axis;
-
-/// Different seed mix for the vertical jitter axis so x and y jitter are
-/// uncorrelated for the same cell.
-const JITTER_Y_SEED_MIX: i64 = 0x5555;
 
 /// Compile a `pattern` node by expanding its motif across the resolved bounds.
 ///
@@ -88,12 +84,23 @@ pub(in crate::compile) fn compile_pattern(
     });
 
     let seed = pattern.seed.unwrap_or(0);
+    let spacing = pattern
+        .spacing
+        .as_ref()
+        .and_then(|d| dim_to_px(d.value, &d.unit));
 
-    match pattern.kind.as_str() {
-        "grid" => emit_grid(pattern, cx, commands, ctx, (bx, by, bw, bh), seed),
-        "scatter" => emit_scatter(pattern, cx, commands, ctx, (bx, by, bw, bh), seed),
-        // Any other kind was flagged by validation; render nothing.
-        _ => {}
+    let layout = PatternLayout {
+        kind: pattern.kind.as_str(),
+        bounds_w: bw,
+        bounds_h: bh,
+        spacing,
+        count: pattern.count,
+        seed,
+        jitter: pattern.jitter.unwrap_or(0.0),
+    };
+
+    for (ox, oy) in pattern_positions(layout) {
+        emit_instance(pattern, cx, commands, ctx, bx + ox, by + oy);
     }
 
     commands.push(SceneCommand::PopClip);
@@ -169,83 +176,4 @@ fn emit_instance(
     };
     let mut throwaway: Vec<Diagnostic> = Vec::new();
     compile_node(&pattern.motif, cx, commands, &mut throwaway, inst_ctx);
-}
-
-/// Emit grid instances in row-major order across the bounds.
-fn emit_grid(
-    pattern: &PatternNode,
-    cx: NodeCtx,
-    commands: &mut Vec<SceneCommand>,
-    ctx: RenderCtx,
-    bounds: (f64, f64, f64, f64),
-    seed: i64,
-) {
-    let (bx, by, bw, bh) = bounds;
-
-    // Spacing is validated > 0; if it does not resolve to a positive value,
-    // render nothing rather than loop forever.
-    let Some(s) = pattern
-        .spacing
-        .as_ref()
-        .and_then(|d| dim_to_px(d.value, &d.unit))
-        .filter(|&s| s > 0.0)
-    else {
-        return;
-    };
-
-    let jitter = pattern.jitter.unwrap_or(0.0);
-
-    // Row-major: `row` advances down, `col` advances across; a cell is emitted
-    // while its base origin is still inside the bounds.
-    let mut row: i64 = 0;
-    while (row as f64) * s < bh {
-        let mut col: i64 = 0;
-        while (col as f64) * s < bw {
-            let base_x = (col as f64) * s;
-            let base_y = (row as f64) * s;
-            let (jx, jy) = if jitter > 0.0 {
-                let jx = (hash_unit(col, row, seed) * 2.0 - 1.0) * jitter * s;
-                let jy = (hash_unit(col, row, seed ^ JITTER_Y_SEED_MIX) * 2.0 - 1.0) * jitter * s;
-                (jx, jy)
-            } else {
-                (0.0, 0.0)
-            };
-            emit_instance(
-                pattern,
-                cx,
-                commands,
-                ctx,
-                bx + base_x + jx,
-                by + base_y + jy,
-            );
-            col += 1;
-        }
-        row += 1;
-    }
-}
-
-/// Emit scatter instances at seed-derived positions inside the bounds.
-fn emit_scatter(
-    pattern: &PatternNode,
-    cx: NodeCtx,
-    commands: &mut Vec<SceneCommand>,
-    ctx: RenderCtx,
-    bounds: (f64, f64, f64, f64),
-    seed: i64,
-) {
-    let (bx, by, bw, bh) = bounds;
-
-    // Count is validated > 0; clamp defensively so a non-positive value renders
-    // nothing instead of misbehaving.
-    let count = pattern.count.unwrap_or(0);
-    if count <= 0 {
-        return;
-    }
-
-    // Positions are already seed-randomized, so jitter is not applied to scatter.
-    for i in 0..count {
-        let ix = hash_unit(i, 0, seed) * bw;
-        let iy = hash_unit(i, 1, seed) * bh;
-        emit_instance(pattern, cx, commands, ctx, bx + ix, by + iy);
-    }
 }

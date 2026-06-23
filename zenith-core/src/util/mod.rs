@@ -6,5 +6,7 @@
 //! inputs always yield the same bytes on every machine.
 
 mod hash;
+pub mod pattern;
 
 pub use hash::hash_unit;
+pub use pattern::{PatternLayout, pattern_positions};
