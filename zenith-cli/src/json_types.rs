@@ -267,6 +267,31 @@ pub struct SchemaSurfaceOutput {
     pub attributes: Vec<SchemaAttr>,
 }
 
+/// A single governable diagnostic-code entry in the `schema diagnostics` JSON.
+#[derive(Debug, Serialize)]
+pub struct SchemaDiagnosticCode {
+    pub code: String,
+    /// `"error"`, `"warning"`, or `"advisory"`.
+    pub severity: String,
+    pub summary: String,
+    /// True when an `allow`/`deny`/`warn` entry can adjust this code (Warning /
+    /// Advisory). Error-severity codes are immutable and report `false`.
+    pub governable: bool,
+}
+
+/// Top-level JSON envelope for `schema diagnostics`.
+#[derive(Debug, Serialize)]
+pub struct SchemaDiagnosticsOutput {
+    pub schema: &'static str,
+    pub summary: String,
+    /// The policy verbs: `allow`, `deny`, `warn`.
+    pub verbs: Vec<String>,
+    /// Precedence note: in-file `diagnostics { … }` now; CLI flags/config later.
+    pub precedence: &'static str,
+    /// Every diagnostic code in the catalog (governable and always-Error).
+    pub codes: Vec<SchemaDiagnosticCode>,
+}
+
 // ── Recipe inspect JSON types ─────────────────────────────────────────────────
 
 /// A single `param` entry within a [`RecipeInspectJson`].

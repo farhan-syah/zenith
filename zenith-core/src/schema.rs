@@ -10,6 +10,7 @@
 //! from the same parser-side `PAGE_KNOWN_PROPS`, `ASSET_KNOWN_PROPS`, and
 //! `DOCUMENT_KNOWN_PROPS` constants.
 
+use crate::diag_catalog::{DIAGNOSTIC_CODES, DIAGNOSTIC_VERBS, DiagnosticCodeInfo};
 use crate::parse::transform::PAGE_KNOWN_PROPS;
 use crate::parse::transform::{ASSET_KNOWN_PROPS, DOCUMENT_KNOWN_PROPS, known_props_for_kind};
 
@@ -317,6 +318,33 @@ fn attribute_type_inner(name: &str, fallback: &'static str) -> &'static str {
 
         _ => fallback,
     }
+}
+
+// ── Diagnostics surface ────────────────────────────────────────────────────────
+
+/// One-line description of the `diagnostics` surface (the root `diagnostics { … }`
+/// lint-policy block).
+pub fn diagnostics_summary() -> &'static str {
+    "In-file diagnostic policy — allow/deny/warn specific diagnostic codes \
+     (integrity Errors cannot be suppressed)."
+}
+
+/// The policy verbs accepted inside a `diagnostics { … }` block, in canonical
+/// order (`allow`, `deny`, `warn`).
+///
+/// Single source of truth: re-exposed from [`crate::diag_catalog`].
+pub fn diagnostics_verbs() -> &'static [&'static str] {
+    DIAGNOSTIC_VERBS
+}
+
+/// The full catalog of diagnostic codes the engine can emit, each with its
+/// severity and a one-line summary.
+///
+/// Single source of truth: re-exposed from [`crate::diag_catalog`]. The same
+/// table drives the diagnostic-policy validator in [`crate::validate`], so the
+/// `zenith schema diagnostics` surface and the policy checker can never diverge.
+pub fn diagnostic_codes() -> &'static [DiagnosticCodeInfo] {
+    DIAGNOSTIC_CODES
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@ pub mod asset;
 pub mod document;
 pub mod library;
 pub mod node;
+pub mod policy;
 pub mod provenance;
 pub mod recipe;
 pub mod span;
@@ -28,6 +29,7 @@ pub use node::{
     TableNode, TableRow, TextNode, TextSpan, TocNode, UnknownNode, UnknownProperty, UnknownValue,
     anchor_xy, parse_anchor, parse_anchor_edge,
 };
+pub use policy::{DiagnosticPolicy, PolicyEntry, PolicyVerb};
 pub use provenance::ProvenanceDef;
 pub use recipe::{RecipeDef, RecipeParam};
 pub use span::Span;

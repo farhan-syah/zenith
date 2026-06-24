@@ -5,6 +5,7 @@ use super::action::ActionDef;
 use super::asset::AssetBlock;
 use super::library::LibraryDef;
 use super::node::Node;
+use super::policy::DiagnosticPolicy;
 use super::provenance::ProvenanceDef;
 use super::recipe::RecipeDef;
 use super::style::StyleBlock;
@@ -333,6 +334,15 @@ pub struct Document {
     /// `expanded` children). The engine round-trips and validates these records
     /// but does NOT act on them; expansion is a later unit.
     pub recipes: Vec<RecipeDef>,
+    /// Document-level diagnostic policy parsed from the root `diagnostics { … }`
+    /// block; empty (the default) when the block is absent. The policy adjusts
+    /// how specific diagnostic codes are *reported* during validation (allow /
+    /// deny / warn, with Error severity immutable). It is consulted ONLY in
+    /// [`crate::validate`] — the scene compiler and render path never read it, so
+    /// it can never change rendered output. An empty policy is an identity pass,
+    /// so a document with no `diagnostics` block validates and round-trips
+    /// byte-identically to before this field existed.
+    pub diagnostic_policy: DiagnosticPolicy,
     pub body: DocumentBody,
 }
 
@@ -463,6 +473,7 @@ mod parity_tests {
             provenance: Vec::new(),
             variants: Vec::new(),
             recipes: Vec::new(),
+            diagnostic_policy: DiagnosticPolicy::default(),
             body: DocumentBody {
                 id: "body".to_owned(),
                 title: None,

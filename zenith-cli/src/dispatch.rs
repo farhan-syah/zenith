@@ -561,6 +561,7 @@ pub fn run() -> ExitCode {
                 Some(cli::SchemaSub::Page) => commands::schema::page(json),
                 Some(cli::SchemaSub::Asset) => commands::schema::asset(json),
                 Some(cli::SchemaSub::Document) => commands::schema::document(json),
+                Some(cli::SchemaSub::Diagnostics) => commands::schema::diagnostics(json),
             };
             println!("{}", output);
             ExitCode::from(code)

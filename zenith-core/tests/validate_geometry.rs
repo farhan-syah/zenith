@@ -459,14 +459,14 @@ fn rect_negative_x_is_off_canvas() {
     );
     let report = validate(&doc);
     assert!(
-        has_code(&report, "off_canvas"),
+        has_code(&report, "layout.off_canvas"),
         "expected off_canvas advisory; codes: {:?}",
         codes(&report)
     );
     let diag = report
         .diagnostics
         .iter()
-        .find(|d| d.code == "off_canvas")
+        .find(|d| d.code == "layout.off_canvas")
         .expect("must exist");
     assert_eq!(diag.severity, Severity::Advisory);
     assert_eq!(diag.subject_id.as_deref(), Some("rect.out"));
@@ -488,7 +488,7 @@ fn rect_fully_inside_no_off_canvas() {
     );
     let report = validate(&doc);
     assert!(
-        !has_code(&report, "off_canvas"),
+        !has_code(&report, "layout.off_canvas"),
         "rect fully inside should NOT get off_canvas; codes: {:?}",
         codes(&report)
     );
@@ -508,14 +508,14 @@ fn rect_overflowing_right_edge_is_off_canvas() {
     );
     let report = validate(&doc);
     assert!(
-        has_code(&report, "off_canvas"),
+        has_code(&report, "layout.off_canvas"),
         "rect extending past right edge should be off_canvas; codes: {:?}",
         codes(&report)
     );
     let diag = report
         .diagnostics
         .iter()
-        .find(|d| d.code == "off_canvas")
+        .find(|d| d.code == "layout.off_canvas")
         .expect("must exist");
     assert_eq!(diag.severity, Severity::Advisory);
     assert!(!report.has_errors());
@@ -535,7 +535,7 @@ fn rect_exactly_on_page_edge_no_off_canvas() {
     );
     let report = validate(&doc);
     assert!(
-        !has_code(&report, "off_canvas"),
+        !has_code(&report, "layout.off_canvas"),
         "rect exactly on page boundary should NOT be off_canvas; codes: {:?}",
         codes(&report)
     );
@@ -639,14 +639,14 @@ fn rotated_aabb_off_canvas_fires() {
     );
     let report = validate(&doc);
     assert!(
-        has_code(&report, "off_canvas"),
+        has_code(&report, "layout.off_canvas"),
         "rotated rect whose AABB exits page should fire off_canvas; codes: {:?}",
         codes(&report)
     );
     let diag = report
         .diagnostics
         .iter()
-        .find(|d| d.code == "off_canvas")
+        .find(|d| d.code == "layout.off_canvas")
         .expect("must exist");
     assert_eq!(diag.severity, Severity::Advisory);
     assert_eq!(diag.subject_id.as_deref(), Some("rect.rot"));
@@ -667,7 +667,7 @@ fn unrotated_inside_page_no_off_canvas() {
     );
     let report = validate(&doc);
     assert!(
-        !has_code(&report, "off_canvas"),
+        !has_code(&report, "layout.off_canvas"),
         "unrotated rect inside page should NOT fire off_canvas; codes: {:?}",
         codes(&report)
     );

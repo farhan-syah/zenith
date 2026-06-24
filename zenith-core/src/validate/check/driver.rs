@@ -22,6 +22,7 @@ use super::passes::{
     check_footnote_refs, collect_local_ids, register_id, validate_asset_decl,
     validate_library_decl, validate_provenance_def, validate_style_block,
 };
+use super::policy::{apply_policy, check_policy_entries};
 use super::recipes::check_recipes;
 use super::report::ValidationReport;
 use super::variants::check_variants;
@@ -757,6 +758,17 @@ pub fn validate(doc: &Document) -> ValidationReport {
             ));
         }
     }
+
+    // ── Step 4: diagnostic policy ─────────────────────────────────────────
+    // Apply the document's `diagnostics { … }` policy to the assembled list
+    // FIRST (allow/deny/warn, with Error severity immutable), THEN append
+    // self-validation diagnostics ABOUT the policy. The ordering matters: the
+    // self-validation is appended after `apply_policy` so a policy can never
+    // suppress the warnings that describe its own entries. With no policy block,
+    // `apply_policy` is an exact identity pass and `check_policy_entries` adds
+    // nothing — the default-off path is byte-identical.
+    let mut diagnostics = apply_policy(diagnostics, &doc.diagnostic_policy);
+    check_policy_entries(&doc.diagnostic_policy, &mut diagnostics);
 
     ValidationReport { diagnostics }
 }

@@ -7,7 +7,7 @@
 use crate::ast::Span;
 
 /// The severity level of a [`Diagnostic`].
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
     /// A definite problem that prevents correct output.
     Error,

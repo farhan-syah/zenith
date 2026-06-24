@@ -13,6 +13,7 @@ zenith schema op set_fill           # summary for one op\n  \
 zenith schema page                  # attributes for a page declaration\n  \
 zenith schema asset                 # attributes for an asset declaration\n  \
 zenith schema document              # attributes for the document root\n  \
+zenith schema diagnostics           # diagnostic-policy verbs + governable codes\n  \
 zenith schema nodes --json          # machine-readable JSON")]
 pub struct SchemaArgs {
     #[command(subcommand)]
@@ -64,4 +65,13 @@ pub enum SchemaSub {
     /// node and the `document { … }` child block: version, colorspace, doc-id,
     /// mirror-margins, page-progression, spread-gutter, margin-*, and more.
     Document,
+
+    /// Show the in-file diagnostic-policy verbs and the governable diagnostic codes.
+    ///
+    /// Lists the three policy verbs (`allow`, `deny`, `warn`) usable inside a
+    /// root `diagnostics { … }` block, what each does, the precedence note
+    /// (in-file policy now; CLI flags/config resolve in a later unit), and the
+    /// full list of governable diagnostic codes (code · severity · summary).
+    /// Integrity Errors are listed as non-suppressible.
+    Diagnostics,
 }

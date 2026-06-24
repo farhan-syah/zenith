@@ -155,7 +155,7 @@ pub(super) fn walk_node(
         if ax < 0.0 || ay < 0.0 || ax + aw > page_w || ay + ah > page_h {
             let (node_id, node_span) = node_id_and_span(node);
             diagnostics.push(Diagnostic::advisory(
-                "off_canvas",
+                "layout.off_canvas",
                 format!(
                     "node '{}' extends outside the page bounds (0, 0, {page_w}, {page_h})",
                     node_id

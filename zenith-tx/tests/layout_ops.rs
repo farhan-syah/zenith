@@ -226,7 +226,10 @@ fn set_page_size_shrink_child_falls_off_canvas() {
 
     // At least one off_canvas advisory must be present.
     assert!(
-        result.diagnostics.iter().any(|d| d.code == "off_canvas"),
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "layout.off_canvas"),
         "expected an off_canvas advisory; got: {:?}",
         result.diagnostics
     );

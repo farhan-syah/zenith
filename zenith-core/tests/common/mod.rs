@@ -223,6 +223,7 @@ pub fn doc_with(tokens: Vec<Token>, pages: Vec<Page>) -> Document {
         provenance: Vec::new(),
         variants: Vec::new(),
         recipes: Vec::new(),
+        diagnostic_policy: zenith_core::DiagnosticPolicy::default(),
         body: DocumentBody {
             id: "doc.main".to_owned(),
             title: None,

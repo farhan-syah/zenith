@@ -31,9 +31,9 @@
 use std::fmt::Write as _;
 
 use crate::ast::{
-    ActionDef, AssetBlock, AssetDecl, ComponentDef, Dimension, Document, LibraryDef, MasterDef,
-    ObjectPosition, Project, PropertyValue, ProvenanceDef, RecipeDef, RecipeParam, SectionDef,
-    UnknownProperty, UnknownValue, VariantDef,
+    ActionDef, AssetBlock, AssetDecl, ComponentDef, DiagnosticPolicy, Dimension, Document,
+    LibraryDef, MasterDef, ObjectPosition, PolicyVerb, Project, PropertyValue, ProvenanceDef,
+    RecipeDef, RecipeParam, SectionDef, UnknownProperty, UnknownValue, VariantDef,
 };
 use crate::error::FormatError;
 
@@ -282,7 +282,12 @@ fn write_document(doc: &Document, out: &mut String) {
     write_opt_str(out, "page-parity-start", &doc.page_parity_start);
     out.push_str(" {\n");
 
-    // Child order: project, assets, libraries, tokens, styles, components, masters, sections, provenance, variants, recipes, actions, document.
+    // Child order: diagnostics, project, assets, libraries, tokens, styles, components, masters, sections, provenance, variants, recipes, actions, document.
+    // `diagnostics` is emitted first — right after the document-level attributes
+    // and before `tokens` — so the lint policy reads at the top of the file. It
+    // is omitted entirely when the policy is empty, so a document with no
+    // `diagnostics` block round-trips byte-identically.
+    write_diagnostics_block(&doc.diagnostic_policy, out, 1);
     if let Some(proj) = &doc.project {
         write_project(proj, out, 1);
     }
@@ -300,6 +305,39 @@ fn write_document(doc: &Document, out: &mut String) {
     write_document_body(&doc.body, out, 1);
 
     out.push('}');
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostics policy
+// ---------------------------------------------------------------------------
+
+/// Emit the `diagnostics { … }` block.
+///
+/// Stable position: first child of `zenith`, before `tokens`. Emitted ONLY when
+/// the policy has at least one entry, so documents without a policy keep their
+/// existing canonical form (and round-trip) byte-identically. Entry order is
+/// preserved (last-wins resolution is applied at consult time, not here). Each
+/// entry emits a single leaf line: `<verb> "<code>"`.
+fn write_diagnostics_block(policy: &DiagnosticPolicy, out: &mut String, depth: usize) {
+    if policy.entries.is_empty() {
+        return;
+    }
+    indent(out, depth);
+    out.push_str("diagnostics {\n");
+    for entry in &policy.entries {
+        indent(out, depth + 1);
+        let verb = match entry.verb {
+            PolicyVerb::Allow => "allow",
+            PolicyVerb::Deny => "deny",
+            PolicyVerb::Warn => "warn",
+        };
+        out.push_str(verb);
+        out.push_str(" \"");
+        out.push_str(&escape_kdl_string(&entry.code));
+        out.push_str("\"\n");
+    }
+    indent(out, depth);
+    out.push_str("}\n");
 }
 
 // ---------------------------------------------------------------------------

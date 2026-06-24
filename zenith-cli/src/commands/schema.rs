@@ -9,10 +9,14 @@ use zenith_tx::schema as tx_schema;
 
 use crate::commands::serialize_pretty;
 use crate::json_types::{
-    SchemaAttr, SchemaNodeDetail, SchemaNodeEntry, SchemaNodeOutput, SchemaNodesOutput,
-    SchemaOpDetail, SchemaOpEntry, SchemaOpFieldEntry, SchemaOpOutput, SchemaOpsOutput,
-    SchemaOverviewOutput, SchemaSurfaceOutput,
+    SchemaAttr, SchemaDiagnosticCode, SchemaDiagnosticsOutput, SchemaNodeDetail, SchemaNodeEntry,
+    SchemaNodeOutput, SchemaNodesOutput, SchemaOpDetail, SchemaOpEntry, SchemaOpFieldEntry,
+    SchemaOpOutput, SchemaOpsOutput, SchemaOverviewOutput, SchemaSurfaceOutput,
 };
+
+/// Precedence note shown on the `schema diagnostics` surface.
+const DIAGNOSTICS_PRECEDENCE: &str = "Resolution today is the in-file `diagnostics { … }` \
+block (last-wins per code); CLI flags and config-file overrides resolve in a later unit.";
 
 // ── Public entry points ───────────────────────────────────────────────────────
 
@@ -31,8 +35,10 @@ pub fn overview(json: bool) -> (String, u8) {
         };
         (serialize_pretty(&out), 0)
     } else {
+        let diag_count = core_schema::diagnostic_codes().len();
         let text = format!(
-            "Zenith schema — {node_count} node kinds, {op_count} tx ops, 3 non-node surfaces\n\n\
+            "Zenith schema — {node_count} node kinds, {op_count} tx ops, 3 non-node surfaces, \
+             {diag_count} diagnostic codes\n\n\
              Drill in:\n  \
              zenith schema nodes              # list all node kinds\n  \
              zenith schema node <kind>        # attributes for one kind\n  \
@@ -40,7 +46,8 @@ pub fn overview(json: bool) -> (String, u8) {
              zenith schema op <name>          # fields + example for one op\n  \
              zenith schema page               # page declaration attributes\n  \
              zenith schema asset              # asset declaration attributes\n  \
-             zenith schema document           # document root attributes\n\n\
+             zenith schema document           # document root attributes\n  \
+             zenith schema diagnostics        # diagnostic-policy verbs + codes\n\n\
              Attribute types, required-ness, and valid values are enforced by \
              `zenith validate`."
         );
@@ -283,6 +290,76 @@ fn surface_detail(
              `zenith validate` (the authoritative diagnostic loop).",
         );
         (text.trim_end().to_owned(), 0)
+    }
+}
+
+/// `zenith schema diagnostics`: the in-file diagnostic-policy verbs and the
+/// governable diagnostic codes.
+///
+/// Returns `(stdout, exit_code)`.
+pub fn diagnostics(json: bool) -> (String, u8) {
+    let summary = core_schema::diagnostics_summary();
+    let verbs = core_schema::diagnostics_verbs();
+    let catalog = core_schema::diagnostic_codes();
+
+    if json {
+        let codes: Vec<SchemaDiagnosticCode> = catalog
+            .iter()
+            .map(|info| SchemaDiagnosticCode {
+                code: info.code.to_owned(),
+                severity: severity_word(info.severity).to_owned(),
+                summary: info.summary.to_owned(),
+                governable: info.is_governable(),
+            })
+            .collect();
+        let out = SchemaDiagnosticsOutput {
+            schema: "zenith-schema-v1",
+            summary: summary.to_owned(),
+            verbs: verbs.iter().map(|&v| v.to_owned()).collect(),
+            precedence: DIAGNOSTICS_PRECEDENCE,
+            codes,
+        };
+        (serialize_pretty(&out), 0)
+    } else {
+        let mut text = format!("diagnostics: {summary}\n\n");
+
+        text.push_str("Policy verbs (in a root `diagnostics { … }` block):\n");
+        text.push_str("  allow \"<code>\"  —  suppress this advisory/warning\n");
+        text.push_str("  deny  \"<code>\"  —  elevate to a blocking Error (CI gate)\n");
+        text.push_str("  warn  \"<code>\"  —  force to a Warning\n\n");
+
+        text.push_str("Precedence: ");
+        text.push_str(DIAGNOSTICS_PRECEDENCE);
+        text.push_str("\n\n");
+
+        // Governable codes (Warning/Advisory) — what a policy can actually adjust.
+        text.push_str("Governable codes (code · severity · summary):\n");
+        let governable: Vec<&_> = catalog.iter().filter(|i| i.is_governable()).collect();
+        let col_width = governable.iter().map(|i| i.code.len()).max().unwrap_or(0);
+        for info in &governable {
+            text.push_str(&format!(
+                "  {:<col_width$}  {:<9}  {}\n",
+                info.code,
+                severity_word(info.severity),
+                info.summary,
+                col_width = col_width,
+            ));
+        }
+
+        text.push_str(
+            "\nNote: integrity Errors cannot be suppressed or weakened — `allow`/`warn` on an \
+             Error code is reported as `policy.ineffective_on_error`.",
+        );
+        (text.trim_end().to_owned(), 0)
+    }
+}
+
+/// Lowercase word form of a [`zenith_core::Severity`] for schema output.
+fn severity_word(severity: zenith_core::Severity) -> &'static str {
+    match severity {
+        zenith_core::Severity::Error => "error",
+        zenith_core::Severity::Warning => "warning",
+        zenith_core::Severity::Advisory => "advisory",
     }
 }
 
