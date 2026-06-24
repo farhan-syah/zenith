@@ -37,6 +37,16 @@ serde_json = "1"
 sha2 = "0.10"
 csv = "1"
 imagesize = "0.12"
+# Optional native Streamable-HTTP transport for `zenith mcp --http`. `tiny_http`
+# is pure-Rust and synchronous (default features only — the `ssl-*` features
+# pull C; they stay off), so the C-free, dependency-light invariant holds and
+# the default build is unaffected.
+tiny_http = { version = "0.12", optional = true }
+
+[features]
+default = []
+# Enable the in-binary HTTP transport (otherwise `--http` reports it was built out).
+http = ["dep:tiny_http"]
 
 [dev-dependencies]
 tempfile = "3"

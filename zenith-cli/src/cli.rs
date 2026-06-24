@@ -183,9 +183,14 @@ pub enum Command {
     /// command surface (validate, inspect, tokens, fmt, render, tx, merge, theme) as MCP tools for any
     /// MCP-aware client.
     ///
-    /// This is for remote, CI, or server contexts. For a LOCAL agent, prefer
-    /// installing the CLI and the skill (`zenith plugin install`) and running commands directly — it is
-    /// faster and cheaper on tokens than going through MCP.
+    /// For a LOCAL agent, prefer installing the CLI and the skill
+    /// (`zenith plugin install`) and running commands directly. This MCP server is for
+    /// environments where a local binary is not suitable (remote, CI, sandboxed, hosted agents) —
+    /// and it is a first-class surface there: tools return trimmed structured results, fetch schema
+    /// detail on demand (`zenith_schema`), hand back large/binary artifacts as resource links, and
+    /// drive the full scratch/candidate/promote/finalize workspace loop by doc-id.
+    /// Defaults to the stdio transport; pass `--http <ADDR>` for native Streamable-HTTP
+    /// (requires the `http` build feature).
     Mcp(McpArgs),
 
     /// Describe the Zenith document schema (node kinds, attributes, tx ops, and non-node surfaces).
@@ -221,7 +226,12 @@ pub enum Command {
     after_help = "Configure your MCP client to launch `zenith mcp` (command: \"zenith\", args: \
 [\"mcp\"]). Logs go to stderr; stdout carries the JSON-RPC protocol."
 )]
-pub struct McpArgs {}
+pub struct McpArgs {
+    /// Serve over native Streamable-HTTP at this address (e.g. 127.0.0.1:8080)
+    /// instead of stdio. Requires a build with the `http` feature.
+    #[arg(long, value_name = "ADDR")]
+    pub http: Option<String>,
+}
 
 /// Arguments for `zenith update`.
 #[derive(Debug, Args)]

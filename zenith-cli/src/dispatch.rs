@@ -553,7 +553,10 @@ pub fn run() -> ExitCode {
             }
         }
 
-        Command::Mcp(_) => ExitCode::from(mcp::run()),
+        Command::Mcp(args) => match &args.http {
+            Some(addr) => ExitCode::from(mcp::run_http(addr)),
+            None => ExitCode::from(mcp::run()),
+        },
 
         Command::Schema(args) => {
             let json = args.json;
