@@ -11,8 +11,9 @@
 use zenith_core::{Dimension, FrameNode, GroupNode, KdlAdapter, KdlSource, Node, Page, Unit};
 
 use crate::commands::serialize_pretty;
-use crate::json_types::RecipeInspectJson;
+use crate::json_types::{AgentRunInspectJson, RecipeInspectJson};
 
+use super::agent_runs;
 use super::recipes;
 
 // ── Error type ────────────────────────────────────────────────────────────────
@@ -98,6 +99,8 @@ pub struct InspectOutput {
     pub pages: Vec<PageEntry>,
     /// Empty when the document has no `recipes` block.
     pub recipes: Vec<RecipeInspectJson>,
+    /// Empty when the document has no `agent-runs` block.
+    pub agent_runs: Vec<AgentRunInspectJson>,
 }
 
 /// The subtree rooted at a single found node (used for `--node <ID>`).
@@ -144,10 +147,12 @@ pub fn run(src: &str, node_id: Option<&str>, json: bool) -> Result<String, Inspe
 
         let out = if json {
             let recipe_entries = recipes::build_recipe_entries(&doc.recipes);
+            let agent_run_entries = agent_runs::build_agent_run_entries(&doc.agent_runs);
             let output = InspectOutput {
                 schema: "zenith-inspect-v1",
                 pages,
                 recipes: recipe_entries,
+                agent_runs: agent_run_entries,
             };
             serialize_pretty(&output)
         } else {
@@ -157,6 +162,12 @@ pub fn run(src: &str, node_id: Option<&str>, json: bool) -> Result<String, Inspe
                 text.push('\n');
                 text.push('\n');
                 text.push_str(&recipe_section);
+            }
+            let agent_run_section = agent_runs::render_agent_runs_human(&doc.agent_runs);
+            if !agent_run_section.is_empty() {
+                text.push('\n');
+                text.push('\n');
+                text.push_str(&agent_run_section);
             }
             text
         };

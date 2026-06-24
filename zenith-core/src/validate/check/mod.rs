@@ -29,11 +29,14 @@
 //! - [`safezone`] — safe-zone exclusion/required overlap advisories.
 //! - [`fold`] — fold-line content-crossing advisories.
 //! - [`margin`] — book live-area (mirrored-margin) violation advisories.
+//! - [`agent_runs`] — `agent-runs` block checks (duplicate run/step ids, empty
+//!   actions, unresolved parent-step references, unknown affected-node ids).
 //! - [`driver`] — the `validate` entry point and its document walk.
 //! - [`passes`] — the orchestration helpers the driver calls (id collection,
 //!   footnote-ref resolution, per-declaration and styles-block checks).
 //! - [`report`] — the [`ValidationReport`] outcome type.
 
+mod agent_runs;
 mod contrast;
 mod driver;
 mod fold;
