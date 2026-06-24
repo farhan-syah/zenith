@@ -140,6 +140,190 @@ pub fn document_attributes() -> Vec<&'static str> {
     dedupe_to_kebab(DOCUMENT_KNOWN_PROPS)
 }
 
+// ── Attribute type hints ──────────────────────────────────────────────────────
+
+/// Return a concise, agent-readable type hint for the named attribute.
+///
+/// The hint describes *what value to write*, not the Rust representation.
+/// Categories used:
+/// - `"px literal"` — bare number suffixed `px` (e.g. `x=100px`).
+/// - `"token ref: <kind>"` — a token identifier from the token block (must
+///   reference a declared token, never a raw literal; e.g. `fill="color.brand"`).
+/// - `"f64 (0.0–1.0)"` — bare floating-point ratio.
+/// - `"i64"` — integer.
+/// - `"bool"` — `true` or `false`.
+/// - `"string"` — arbitrary string.
+/// - `"node id"` — the `id` of another node in the document.
+/// - `"string (enum)"` — one of a fixed set of values (exact set confirmed in
+///   the validator; use `zenith validate` for the authoritative list).
+/// - `"enum: a|b|…"` — one of the explicitly-listed values.
+///
+/// Returns `"string"` as a safe fallback for anything not in the dictionary.
+/// The completeness drift test (`attribute_type_covers_all_known_attrs`) asserts
+/// that every attribute returned by the `node_*` / `page_*` / `asset_*` /
+/// `document_*` functions has an explicit entry here (the fallback sentinel
+/// `"<unmapped>"` is used in the test; the public API returns `"string"`).
+pub fn attribute_type(name: &str) -> &'static str {
+    attribute_type_inner(name, "string")
+}
+
+/// Internal helper shared by `attribute_type` and the completeness test.
+///
+/// `fallback` is `"string"` for the public API and `"<unmapped>"` in the test
+/// so the drift guard can detect newly added attributes that lack an entry.
+fn attribute_type_inner(name: &str, fallback: &'static str) -> &'static str {
+    match name {
+        // ── Identity / labelling ──────────────────────────────────────────
+        "id" => "string",
+        "name" => "string",
+        "role" => "string",
+        "style" => "string",
+
+        // ── Geometry (px literals) ────────────────────────────────────────
+        "x" | "y" | "w" | "h" => "px literal",
+        "x1" | "y1" | "x2" | "y2" => "px literal",
+        "rx" | "ry" => "px literal",
+        "rotate" => "px literal",
+        "spacing" => "px literal",
+        "padding-left" | "text-indent" => "px literal",
+        "bullet-gap" => "px literal",
+        "anchor-gap" => "px literal",
+        "blur" => "px literal",
+        "bleed" => "px literal",
+        "spread-gutter" => "px literal",
+        "margin-inner" | "margin-outer" | "margin-top" | "margin-bottom" => "px literal",
+
+        // ── Visual — token refs: color/gradient ───────────────────────────
+        "fill" | "stroke" | "background" | "shadow" | "filter" | "mask" => {
+            "token ref: color/gradient"
+        }
+        "border-top" | "border-bottom" | "border-left" | "border-right" | "border" => {
+            "token ref: color/gradient"
+        }
+        "stroke-outer" => "token ref: color/gradient",
+        "contrast-bg" | "header-fill" => "token ref: color/gradient",
+
+        // ── Visual — token refs: dimension ────────────────────────────────
+        "radius" | "radius-tl" | "radius-tr" | "radius-br" | "radius-bl" => "token ref: dimension",
+        "stroke-width" | "stroke-dash" | "stroke-gap" | "stroke-outer-width" => {
+            "token ref: dimension"
+        }
+        "border-width" => "token ref: dimension",
+        "font-size" | "font-size-min" => "token ref: dimension",
+        "baseline-grid" => "token ref: dimension",
+        "gap" | "cell-padding" | "padding" => "token ref: dimension",
+        // src-* image crop coords are px literals (geometry), not token refs.
+        "src-x" | "src-y" | "src-w" | "src-h" => "px literal",
+        // object-position values are f64 ratios, not token refs.
+        "object-position-x" | "object-position-y" => "f64 (0.0–1.0)",
+        // clip-radius is a token ref (same discipline as radius).
+        "clip-radius" => "token ref: dimension",
+
+        // ── Visual — token refs: font ─────────────────────────────────────
+        "font-family" => "token ref: fontFamily",
+        "font-weight" => "token ref: fontWeight",
+
+        // ── Floating-point ratios ─────────────────────────────────────────
+        "opacity" | "jitter" | "intensity" => "f64 (0.0–1.0)",
+
+        // ── Integers ─────────────────────────────────────────────────────
+        "seed" | "count" => "i64",
+        "drop-cap-lines" | "widow-orphan" | "tab-width" | "line-numbers" => "i64",
+        "colspan" | "rowspan" | "header-rows" | "columns" | "rows" => "i64",
+        "layer-priority" => "i64",
+
+        // ── Booleans ─────────────────────────────────────────────────────
+        "visible" | "locked" | "anchor-parent" => "bool",
+        "hyphenate" | "suppress-first" | "border-collapse" => "bool",
+        "mirror-margins" | "facing-pages" => "bool",
+        "line-jumps" => "bool",
+
+        // ── Named enums (values confirmed in the validator) ───────────────
+        "anchor" => {
+            "enum: top-left|top-center|top-right|center-left|center|center-right|bottom-left|bottom-center|bottom-right"
+        }
+        "anchor-edge" => "enum: above|below|before|after",
+        "kind" => "enum: grid|scatter",
+        "align" => "enum: left|center|right|justify",
+        "overflow" => "enum: clip|visible|scroll",
+        "blend-mode" => "string (enum)",
+        "stroke-alignment" => "enum: inside|center|outside",
+        "stroke-linecap" => "enum: butt|round|square",
+        "fill-rule" => "enum: nonzero|evenodd",
+        "fit" => "enum: fill|contain|cover|none",
+        "clip" => "bool",
+        "parity" => "enum: left|right",
+        "page-parity-start" => "enum: left|right",
+        "page-progression" => "enum: ltr|rtl",
+        "candidate-status" => "string (enum)",
+        "cleanup-policy" => "string (enum)",
+        "colorspace" => "enum: srgb|display-p3|rec2020",
+        "direction" => "enum: ltr|rtl",
+        "overflow-wrap" => "enum: normal|break-word",
+        "h-align" => "enum: left|center|right",
+        "v-align" => "enum: top|middle|bottom",
+        "layout" => "string (enum)",
+        "route" => "string (enum)",
+
+        // ── Connector-specific ────────────────────────────────────────────
+        "from" | "to" => "node id",
+        "from-anchor" | "to-anchor" => "string",
+        "marker-start" | "marker-end" => "string",
+
+        // ── Text-specific strings ─────────────────────────────────────────
+        "chain" => "node id",
+        "tab-leader" | "text-exclusion" | "bullet" => "string",
+        "language" => "string",
+        "syntax-theme" => "string",
+
+        // ── Field / TOC / Footnote ────────────────────────────────────────
+        "type" => "string",
+        "recto" | "verso" | "target" => "string",
+        "folio-style" | "header-style" | "text-style" => "string",
+        "marker" => "string",
+        "match-role" | "match-style" | "leader" => "string",
+        "flows" => "string",
+
+        // ── Image ─────────────────────────────────────────────────────────
+        "asset" => "asset id",
+
+        // ── Instance / component ──────────────────────────────────────────
+        "component" => "string",
+
+        // ── Group semantic extras ─────────────────────────────────────────
+        "semantic-role" => "string",
+
+        // ── Page workflow metadata ────────────────────────────────────────
+        "master" => "string",
+        "workspace-role" => "string",
+        "notes" => "string",
+        "promotion-target" => "node id",
+
+        // ── Document root ─────────────────────────────────────────────────
+        "version" => "string",
+        "doc-id" => "string",
+        "title" => "string",
+
+        // ── Asset provenance ──────────────────────────────────────────────
+        "src" => "string",
+        "sha256" => "string",
+        "ai-prompt" => "string",
+        "ai-model" => "string",
+        "ai-provider" => "string",
+        "ai-seed" => "i64",
+        "ai-generation-date" => "string",
+        "ai-license" => "string",
+        "ai-source-rights" => "string",
+        "ai-safety-status" => "string",
+        "ai-reuse-policy" => "string",
+
+        // ── Anchor zone ───────────────────────────────────────────────────
+        "anchor-zone" | "anchor-sibling" => "string",
+
+        _ => fallback,
+    }
+}
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 /// Collapse a raw known-props slice (which may contain both `foo-bar` and
@@ -368,6 +552,56 @@ mod tests {
         assert!(
             !attrs.contains(&"doc_id"),
             "underscore alias \"doc_id\" must be collapsed; got: {attrs:?}",
+        );
+    }
+
+    // ── Attribute type completeness drift guard ───────────────────────────
+
+    /// Every attribute returned by any of the four public attribute-list
+    /// functions must have an explicit entry in `attribute_type_inner` — not
+    /// just the silent `"string"` fallback.
+    ///
+    /// When a new attribute is added to a KNOWN_PROPS constant, this test
+    /// fails with a list of unmapped names, forcing the developer to add a
+    /// corresponding arm to `attribute_type_inner`.
+    ///
+    /// The sentinel `"<unmapped>"` is used here instead of `"string"` so the
+    /// test can distinguish "no entry at all" from a deliberate `"string"`
+    /// annotation on reference/metadata fields.
+    #[test]
+    fn attribute_type_covers_all_known_attrs() {
+        use std::collections::BTreeSet;
+
+        // Build the union of every canonical attribute across all surfaces.
+        let mut all_attrs: BTreeSet<&'static str> = BTreeSet::new();
+
+        for kind in node_kinds() {
+            for attr in node_attributes(kind) {
+                all_attrs.insert(attr);
+            }
+        }
+        for attr in page_attributes() {
+            all_attrs.insert(attr);
+        }
+        for attr in asset_attributes() {
+            all_attrs.insert(attr);
+        }
+        for attr in document_attributes() {
+            all_attrs.insert(attr);
+        }
+
+        // Collect any attribute whose type resolves to the unmapped sentinel.
+        let unmapped: Vec<&'static str> = all_attrs
+            .into_iter()
+            .filter(|name| attribute_type_inner(name, "<unmapped>") == "<unmapped>")
+            .collect();
+
+        assert!(
+            unmapped.is_empty(),
+            "attribute_type_inner() has no entry for {} attribute(s): {:?}\n\
+             Add an arm to `attribute_type_inner` in zenith-core/src/schema.rs.",
+            unmapped.len(),
+            unmapped,
         );
     }
 }

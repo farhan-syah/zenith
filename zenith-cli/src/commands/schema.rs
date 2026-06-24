@@ -9,9 +9,9 @@ use zenith_tx::schema as tx_schema;
 
 use crate::commands::serialize_pretty;
 use crate::json_types::{
-    SchemaNodeDetail, SchemaNodeEntry, SchemaNodeOutput, SchemaNodesOutput, SchemaOpDetail,
-    SchemaOpEntry, SchemaOpFieldEntry, SchemaOpOutput, SchemaOpsOutput, SchemaOverviewOutput,
-    SchemaSurfaceOutput,
+    SchemaAttr, SchemaNodeDetail, SchemaNodeEntry, SchemaNodeOutput, SchemaNodesOutput,
+    SchemaOpDetail, SchemaOpEntry, SchemaOpFieldEntry, SchemaOpOutput, SchemaOpsOutput,
+    SchemaOverviewOutput, SchemaSurfaceOutput,
 };
 
 // ── Public entry points ───────────────────────────────────────────────────────
@@ -93,9 +93,12 @@ pub fn node_detail(kind: &str, json: bool) -> (String, u8) {
         }
     };
 
-    let attrs: Vec<String> = core_schema::node_attributes(kind)
+    let attrs: Vec<SchemaAttr> = core_schema::node_attributes(kind)
         .iter()
-        .map(|&a| a.to_owned())
+        .map(|&a| SchemaAttr {
+            name: a.to_owned(),
+            ty: core_schema::attribute_type(a).to_owned(),
+        })
         .collect();
 
     if json {
@@ -114,15 +117,11 @@ pub fn node_detail(kind: &str, json: bool) -> (String, u8) {
             text.push_str("  (no fixed attribute list)\n");
         } else {
             text.push_str("Attributes:\n");
-            // Wrap into lines of at most ~72 chars of attribute names.
-            let line = attrs.join(", ");
-            // Simple line-wrap at word boundaries (commas).
-            text.push_str(&wrap_attr_line(&line, 2, 72));
-            text.push('\n');
+            text.push_str(&format_attr_table(&attrs));
         }
         text.push_str(
-            "\nNote: attribute types, required-ness, and valid values are\n\
-             enforced by `zenith validate` (the authoritative diagnostic loop).",
+            "\nNote: required-ness and full valid values are enforced by\n\
+             `zenith validate` (the authoritative diagnostic loop).",
         );
         (text.trim_end().to_owned(), 0)
     }
@@ -252,15 +251,23 @@ pub fn document(json: bool) -> (String, u8) {
 fn surface_detail(
     surface: &'static str,
     summary: &'static str,
-    attrs: Vec<&'static str>,
+    raw_attrs: Vec<&'static str>,
     json: bool,
 ) -> (String, u8) {
+    let attrs: Vec<SchemaAttr> = raw_attrs
+        .iter()
+        .map(|&a| SchemaAttr {
+            name: a.to_owned(),
+            ty: core_schema::attribute_type(a).to_owned(),
+        })
+        .collect();
+
     if json {
         let out = SchemaSurfaceOutput {
             schema: "zenith-schema-v1",
             surface,
             summary: summary.to_owned(),
-            attributes: attrs.iter().map(|&a| a.to_owned()).collect(),
+            attributes: attrs,
         };
         (serialize_pretty(&out), 0)
     } else {
@@ -269,13 +276,11 @@ fn surface_detail(
             text.push_str("  (no fixed attribute list)\n");
         } else {
             text.push_str("Attributes:\n");
-            let line = attrs.join(", ");
-            text.push_str(&wrap_attr_line(&line, 2, 72));
-            text.push('\n');
+            text.push_str(&format_attr_table(&attrs));
         }
         text.push_str(
-            "\nNote: attribute types, required-ness, and valid values are\n\
-             enforced by `zenith validate` (the authoritative diagnostic loop).",
+            "\nNote: required-ness and full valid values are enforced by\n\
+             `zenith validate` (the authoritative diagnostic loop).",
         );
         (text.trim_end().to_owned(), 0)
     }
@@ -283,38 +288,21 @@ fn surface_detail(
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-/// Indent and soft-wrap a comma-separated attribute list to `max_width` columns.
+/// Format a list of attributes as a two-column table: `name  —  type`.
 ///
-/// Each wrapped line is prefixed with `indent` spaces.  Words are never split;
-/// breaking only happens at ", " boundaries.
-fn wrap_attr_line(line: &str, indent: usize, max_width: usize) -> String {
-    let prefix = " ".repeat(indent);
-    let usable = if max_width > indent {
-        max_width - indent
-    } else {
-        max_width
-    };
+/// The name column is left-padded by 2 spaces and right-padded to the longest
+/// name in the list so the `—` separators align vertically.
+fn format_attr_table(attrs: &[SchemaAttr]) -> String {
+    let col_width = attrs.iter().map(|a| a.name.len()).max().unwrap_or(0);
 
     let mut out = String::new();
-    let mut current = String::new();
-
-    for part in line.split(", ") {
-        if current.is_empty() {
-            current.push_str(part);
-        } else if current.len() + 2 + part.len() <= usable {
-            current.push_str(", ");
-            current.push_str(part);
-        } else {
-            out.push_str(&prefix);
-            out.push_str(&current);
-            out.push('\n');
-            current = part.to_owned();
-        }
-    }
-    if !current.is_empty() {
-        out.push_str(&prefix);
-        out.push_str(&current);
-        out.push('\n');
+    for attr in attrs {
+        out.push_str(&format!(
+            "  {:<col_width$}  —  {}\n",
+            attr.name,
+            attr.ty,
+            col_width = col_width,
+        ));
     }
     out
 }
@@ -371,8 +359,30 @@ mod tests {
         assert!(text.contains("Attributes:"), "must list attributes");
         assert!(text.contains("fill"), "rect must have a fill attribute");
         assert!(
+            text.contains("token ref"),
+            "fill must show its type hint (token ref)"
+        );
+        assert!(text.contains("—"), "attributes must use — separator");
+        assert!(
             text.contains("zenith validate"),
             "must mention zenith validate for types"
+        );
+    }
+
+    #[test]
+    fn node_detail_human_shows_name_and_type() {
+        // Human output: each attribute line is "  <name>  —  <type>"
+        let (text, code) = node_detail("rect", false);
+        assert_eq!(code, 0);
+        // x is a px literal, fill is a token ref.
+        assert!(text.contains("x  "), "must list x attribute; got:\n{text}");
+        assert!(
+            text.contains("px literal"),
+            "x must show px literal type; got:\n{text}"
+        );
+        assert!(
+            text.contains("token ref: color/gradient"),
+            "fill must show token ref type; got:\n{text}"
         );
     }
 
@@ -383,6 +393,35 @@ mod tests {
         assert!(text.contains("zenith-schema-v1"));
         assert!(text.contains("\"kind\""));
         assert!(text.contains("\"attributes\""));
+        // New shape: attributes is an array of {name, ty} objects.
+        assert!(
+            text.contains("\"name\""),
+            "attribute objects must have name field"
+        );
+        assert!(
+            text.contains("\"ty\""),
+            "attribute objects must have ty field"
+        );
+    }
+
+    #[test]
+    fn node_detail_json_attr_has_type_hint() {
+        let (text, code) = node_detail("rect", true);
+        assert_eq!(code, 0);
+        // fill must appear with its type.
+        assert!(
+            text.contains("\"fill\""),
+            "fill attribute must appear; got:\n{text}"
+        );
+        assert!(
+            text.contains("token ref"),
+            "fill type must be a token ref; got:\n{text}"
+        );
+        // x must appear with px literal type.
+        assert!(
+            text.contains("px literal"),
+            "x must have px literal type; got:\n{text}"
+        );
     }
 
     #[test]
@@ -491,6 +530,11 @@ mod tests {
         assert!(text.contains("Attributes:"), "must list attributes");
         assert!(text.contains("w"), "page must have w attribute");
         assert!(text.contains("h"), "page must have h attribute");
+        assert!(text.contains("—"), "attributes must use — separator");
+        assert!(
+            text.contains("px literal"),
+            "w/h must show px literal type hint"
+        );
         assert!(
             text.contains("zenith validate"),
             "must mention zenith validate"
@@ -505,6 +549,15 @@ mod tests {
         assert!(text.contains("\"surface\""));
         assert!(text.contains("\"attributes\""));
         assert!(text.contains("\"page\""));
+        // New shape: attributes is an array of {name, ty} objects.
+        assert!(
+            text.contains("\"name\""),
+            "attribute objects must have name field"
+        );
+        assert!(
+            text.contains("\"ty\""),
+            "attribute objects must have ty field"
+        );
     }
 
     #[test]

@@ -182,12 +182,19 @@ pub struct SchemaNodeEntry {
     pub summary: String,
 }
 
+/// A single attribute entry in the `schema node <kind>` and `schema page/asset/document` JSON output.
+#[derive(Debug, Serialize)]
+pub struct SchemaAttr {
+    pub name: String,
+    pub ty: String,
+}
+
 /// A single node-kind detail entry in the `schema node <kind>` JSON output.
 #[derive(Debug, Serialize)]
 pub struct SchemaNodeDetail {
     pub kind: String,
     pub summary: String,
-    pub attributes: Vec<String>,
+    pub attributes: Vec<SchemaAttr>,
 }
 
 /// A single op entry in the `schema ops` JSON output.
@@ -257,7 +264,7 @@ pub struct SchemaSurfaceOutput {
     /// Which non-node surface this describes: `"page"`, `"asset"`, or `"document"`.
     pub surface: &'static str,
     pub summary: String,
-    pub attributes: Vec<String>,
+    pub attributes: Vec<SchemaAttr>,
 }
 
 // ── Agent-run inspect JSON types ──────────────────────────────────────────────
