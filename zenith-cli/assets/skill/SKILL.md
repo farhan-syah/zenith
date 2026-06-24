@@ -116,7 +116,7 @@ Read only the pack you need for the current sub-task (progressive disclosure). E
 | Transaction op fields and semantics                                                                   | `zenith schema op <name>` · `zenith schema ops`            |
 | Command flags and usage                                                                               | `zenith <cmd> --help`                                      |
 | Syntax errors, type mismatches, "did you mean?" — act on the diagnostic                              | `zenith validate <file> --json`                            |
-| The full agent run: scratch experiments, multiple candidates, select, promote, clean up, provenance   | `references/agentic-workflow.md`                           |
+| The full agent run: scratch experiments, multiple candidates, select, promote, clean up, provenance   | `references/agentic-workflow.md` + `zenith workspace --help` |
 | Procedural grid/scatter tiling — the `pattern` node or the `detach_pattern` op                        | `references/pattern.md`                                    |
 | Recording a generated motif as a `recipes` block (provenance, seed/params, recipe `tx` ops)           | `references/recipes-model.md`                              |
 | Picking or applying a ready-made visual theme (palette + shape language)                              | `references/themes.md` + `themes/*.zen`                    |

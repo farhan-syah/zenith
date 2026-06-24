@@ -2,49 +2,39 @@
 
 Take a vague brief to a finished, auditable design without polluting the final file.
 
+The `.zen` holds ONLY final content. Process state — scratch candidates, their lifecycle, history
+— lives in the app-managed store keyed by the document's `doc-id`, reachable through the
+`zenith workspace` commands. You never hand-edit it.
+
 > Op fields: `zenith schema op <name>`, `zenith tx --help`, `examples/*.tx.json`.
 > Attributes: `zenith schema node <kind>` / `zenith schema page`.
+> Store commands: `zenith workspace --help`.
 
-## 1. Capture the brief and plan
+## 1. Plan for addressability
 
-Record intent in the `agent-runs` block (`zenith inspect` surfaces it):
+There is no in-file brief block; keep the plan in the work itself.
 
-```kdl
-agent-runs {
-  run id="run.hero" brief="Launch hero: dark, energetic, product-forward" {
-    step id="s1" action="generate-bg" action-version="1" {
-      param name="palette" value="brand"
-      param name="seed" value="7"
-    }
-  }
-}
-```
-
-Steps carry action + params; the engine attaches affected node ids + diagnostics per step.
-
+- Give every node a stable `id` so each edit is a precise transaction.
 - Give each layer group a `semantic-role` (+ optional `layer-priority`/`intensity`) so layers stay
   addressable: `group id="bg.grunge" semantic-role="background" layer-priority=0`.
-- Record acceptance criteria (e.g. "title contrast ≥ Lc 60 APCA"); check with `zenith validate`
-  and the render.
+- Write down acceptance criteria (e.g. "title contrast ≥ Lc 60 APCA") and check them with
+  `zenith validate` and the render — these are your gate, not decoration.
 
-## 2. Scratch experiments
+## 2. Generate candidates from one plan
 
-Set `workspace-role="scratch"` on every experiment page; `finalize_run` acts on it later.
+Edit the document to a take, then snapshot it into the store as a scratch candidate. Each
+candidate is a content-addressed `.zen` snapshot — it never lives in the deliverable.
 
-- Final pages: `page.<name>`. Experiments: `workspace-role="scratch"`.
-- Set each experiment's `candidate-status` and `cleanup-policy` up front (step 3) so finalize is
-  automatic (step 6).
-- Scratch content reaches the deliverable only via promotion (step 5).
+```bash
+zenith workspace scratch new doc.zen --page page.hero --status draft \
+  --notes "take A: dark, product-forward" --workspace-role scratch --cleanup-policy delete
+```
 
-## 3. Generate candidates from one plan
+- `--page <id>` is the page this candidate captures (default `*` = whole document).
+- Repeat for each take. `--promotion-target` records where it is meant to land.
+- Keep all takes on the same tokens so a palette change is one edit.
 
-- Create several candidate pages, each a different take on the same plan + tokens.
-- Set `candidate-status` (`draft` → `selected`/`rejected`; other values fire
-  `page.invalid_candidate_status`), `promotion-target` (the final page id), and `notes` /
-  `cleanup-policy`.
-- Keep all candidates on the same tokens so a palette change is one edit.
-
-## 4. Render-preview and self-critique
+## 3. Render-preview and self-critique
 
 ```bash
 zenith validate doc.zen --json              # hard diagnostics must be empty
@@ -53,35 +43,41 @@ zenith render doc.zen --all-pages preview/  # one PNG per page
 
 - Treat every Error as blocking.
 - Look at the PNGs: headline legible over the motif? product safe area clear? texture too noisy?
-  Revise nodes by id and re-render.
-- Record each preview in the `previews` block: one `preview` entry per `candidate` with
-  `source-hash`, `output` + `output-hash`, `parent-revision` (provenance only; `zenith inspect`
-  surfaces it).
+  Revise nodes by id, re-snapshot.
+
+## 4. Review and set lifecycle
+
+```bash
+zenith workspace scratch list doc.zen            # enumerate candidates (cand0, cand1, …)
+zenith workspace scratch show doc.zen cand0      # detail for one (add --json)
+zenith workspace candidate doc.zen cand0 selected   # or: rejected
+```
+
+Lifecycle is `draft → selected | rejected`. Only a `selected` candidate can be promoted.
 
 ## 5. Promote the chosen candidate
 
-Set `candidate-status="selected"` on the winner, then:
-
 ```bash
-# {"ops":[{"op":"promote_candidate","source_page":"page.scratch.hero.02","target_page":"page.hero","id_suffix":".final"}]}
-zenith tx doc.zen promote.json --apply
+zenith workspace promote doc.zen cand0 --into page.export
+# keep cloned ids unique with a custom suffix:
+zenith workspace promote doc.zen cand0 --into page.export --id-suffix .v2
 ```
 
-Deep-copies the selected page into the target (content replaced), suffixing ids to stay unique.
-Fields: `zenith schema op promote_candidate`. Then `validate` + `render`.
+Fetches the candidate's stored snapshot, deep-copies its source page into the target page
+(suffixing all ids, default `.promoted`), validates, writes the document back in place, and records
+the promote in version history. Then `validate` + `render` the deliverable.
 
 ## 6. Finalize and clean up
 
 ```bash
-# {"ops":[{"op":"finalize_run","run_pages":["page.scratch.hero.01","page.scratch.hero.02"]}]}
-zenith tx doc.zen finalize.json --apply
+zenith workspace finalize doc.zen            # add --json for a machine-readable report
 ```
 
-For each rejected page, applies its `cleanup-policy`: `delete` removes the page; `archive` (or
-absent) sets `workspace-role="archived"`. Fields: `zenith schema op finalize_run`. Then check
-`zenith tokens <file>` for unused-token advisories; final source must validate + render clean.
+Removes candidates with `status = rejected` and `cleanup-policy = delete` from the scratch index
+(snapshot objects are left for a future GC pass); all other candidates are preserved. Then check
+`zenith tokens doc.zen` for unused-token advisories; final source must validate + render clean.
 
-## 7. History
+## 7. History and portability
 
 ```bash
 zenith history doc.zen                      # list versions
@@ -89,9 +85,12 @@ zenith version doc.zen "v1-pre-promote"     # name a checkpoint
 zenith undo doc.zen  /  zenith redo doc.zen
 zenith restore doc.zen <rev>                # <rev> grammar: zenith restore --help
 zenith sync doc.zen                         # capture an external/hand edit
+zenith workspace bundle doc.zen --out doc.zenithbundle   # pack the whole store (history + scratch)
+zenith workspace unbundle doc.zenithbundle               # restore it on another machine/clone
 ```
 
-Name a checkpoint before risky steps (e.g. promotion).
+Name a checkpoint before risky steps (e.g. promotion). The `doc-id` in the `.zen` is the key that
+reattaches a bundle to its file.
 
 ## 8. Later semantic edits
 
@@ -103,4 +102,6 @@ Stable ids + tokens + `semantic-role` groups make edits precise transactions:
 
 ## Not implemented (don't assume these)
 
-Brush/stamp definitions; an automated critique report (self-critique by reading the render, step 4).
+Brush/stamp definitions; an automated critique report (self-critique by reading the render, step 3);
+recording an agent-run/preview log via the CLI (the store has the schema, but no command writes to
+it yet).
