@@ -937,6 +937,288 @@ fn anchor_sibling_inside_group() {
     );
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Adjacent-edge placement: anchor-edge + anchor-gap
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// Shared scene: sibling `s` at x=50 y=60 w=120 h=80. All edge tests use that
+// sibling unless noted otherwise. Page is 400×300.
+//
+// Helper constants (using the doc_with_children wrapper from above):
+//   sib_x=50, sib_y=60, sib_w=120, sib_h=80
+
+// ── below with gap, no 9-pt anchor → leading-edge (left) x, y past bottom ──
+
+#[test]
+fn anchor_edge_below_gap_no_anchor() {
+    // Sibling: x=50 y=60 w=120 h=80.
+    // Node: w=100 h=40, anchor-edge="below", anchor-gap=(px)10, no anchor.
+    // Expected:
+    //   x = sib_x = 50  (leading edge default, cross-axis left)
+    //   y = sib_y + sib_h + gap = 60 + 80 + 10 = 150
+    let src = doc_with_children(
+        r##"rect id="s" x=(px)50 y=(px)60 w=(px)120 h=(px)80 fill="#888888"
+  rect id="n" anchor-sibling="s" anchor-edge="below" anchor-gap=(px)10 w=(px)100 h=(px)40 fill="#ff0000""##,
+    );
+    let doc = parse(&src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "expected no diagnostics, got: {:?}",
+        result.diagnostics
+    );
+
+    let rects = fill_rects(&result);
+    assert!(
+        rects.iter().any(|&(x, y, w, h)| {
+            (x - 50.0).abs() < 0.001
+                && (y - 150.0).abs() < 0.001
+                && (w - 100.0).abs() < 0.001
+                && (h - 40.0).abs() < 0.001
+        }),
+        "expected FillRect at (50, 150, 100, 40) for edge=below gap=10; got: {rects:?}"
+    );
+}
+
+// ── above with gap, no anchor → leading-edge x, y before top ────────────────
+
+#[test]
+fn anchor_edge_above_gap_no_anchor() {
+    // Sibling: x=50 y=60 w=120 h=80.
+    // Node: w=100 h=40, anchor-edge="above", anchor-gap=(px)10, no anchor.
+    // Expected:
+    //   x = sib_x = 50  (leading edge default)
+    //   y = sib_y - gap - node_h = 60 - 10 - 40 = 10
+    let src = doc_with_children(
+        r##"rect id="s" x=(px)50 y=(px)60 w=(px)120 h=(px)80 fill="#888888"
+  rect id="n" anchor-sibling="s" anchor-edge="above" anchor-gap=(px)10 w=(px)100 h=(px)40 fill="#0000ff""##,
+    );
+    let doc = parse(&src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "expected no diagnostics, got: {:?}",
+        result.diagnostics
+    );
+
+    let rects = fill_rects(&result);
+    assert!(
+        rects.iter().any(|&(x, y, w, h)| {
+            (x - 50.0).abs() < 0.001
+                && (y - 10.0).abs() < 0.001
+                && (w - 100.0).abs() < 0.001
+                && (h - 40.0).abs() < 0.001
+        }),
+        "expected FillRect at (50, 10, 100, 40) for edge=above gap=10; got: {rects:?}"
+    );
+}
+
+// ── after with gap, no anchor → x past right edge, leading-edge (top) y ─────
+
+#[test]
+fn anchor_edge_after_gap_no_anchor() {
+    // Sibling: x=50 y=60 w=120 h=80.
+    // Node: w=60 h=30, anchor-edge="after", anchor-gap=(px)8, no anchor.
+    // Expected:
+    //   x = sib_x + sib_w + gap = 50 + 120 + 8 = 178
+    //   y = sib_y = 60  (leading edge default, cross-axis top)
+    let src = doc_with_children(
+        r##"rect id="s" x=(px)50 y=(px)60 w=(px)120 h=(px)80 fill="#888888"
+  rect id="n" anchor-sibling="s" anchor-edge="after" anchor-gap=(px)8 w=(px)60 h=(px)30 fill="#00ff00""##,
+    );
+    let doc = parse(&src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "expected no diagnostics, got: {:?}",
+        result.diagnostics
+    );
+
+    let rects = fill_rects(&result);
+    assert!(
+        rects.iter().any(|&(x, y, w, h)| {
+            (x - 178.0).abs() < 0.001
+                && (y - 60.0).abs() < 0.001
+                && (w - 60.0).abs() < 0.001
+                && (h - 30.0).abs() < 0.001
+        }),
+        "expected FillRect at (178, 60, 60, 30) for edge=after gap=8; got: {rects:?}"
+    );
+}
+
+// ── before with gap, no anchor → x before left edge, leading-edge (top) y ───
+
+#[test]
+fn anchor_edge_before_gap_no_anchor() {
+    // Sibling: x=50 y=60 w=120 h=80.
+    // Node: w=60 h=30, anchor-edge="before", anchor-gap=(px)5, no anchor.
+    // Expected:
+    //   x = sib_x - gap - node_w = 50 - 5 - 60 = -15
+    //   y = sib_y = 60  (leading edge default)
+    let src = doc_with_children(
+        r##"rect id="s" x=(px)50 y=(px)60 w=(px)120 h=(px)80 fill="#888888"
+  rect id="n" anchor-sibling="s" anchor-edge="before" anchor-gap=(px)5 w=(px)60 h=(px)30 fill="#ff00ff""##,
+    );
+    let doc = parse(&src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "expected no diagnostics, got: {:?}",
+        result.diagnostics
+    );
+
+    let rects = fill_rects(&result);
+    assert!(
+        rects.iter().any(|&(x, y, w, h)| {
+            (x - (-15.0)).abs() < 0.001
+                && (y - 60.0).abs() < 0.001
+                && (w - 60.0).abs() < 0.001
+                && (h - 30.0).abs() < 0.001
+        }),
+        "expected FillRect at (-15, 60, 60, 30) for edge=before gap=5; got: {rects:?}"
+    );
+}
+
+// ── below + anchor="top-center" → horizontally centered on the sibling ───────
+
+#[test]
+fn anchor_edge_below_cross_axis_center() {
+    // Sibling: x=50 y=60 w=120 h=80.
+    // Node: w=60 h=30, anchor-edge="below", anchor-gap=(px)6, anchor="top-center".
+    // cross_h: "top-center" → center horizontally:
+    //   x = sib_x + (sib_w - node_w) / 2 = 50 + (120 - 60) / 2 = 50 + 30 = 80
+    //   y = sib_y + sib_h + gap = 60 + 80 + 6 = 146
+    let src = doc_with_children(
+        r##"rect id="s" x=(px)50 y=(px)60 w=(px)120 h=(px)80 fill="#888888"
+  rect id="n" anchor="top-center" anchor-sibling="s" anchor-edge="below" anchor-gap=(px)6 w=(px)60 h=(px)30 fill="#ffaa00""##,
+    );
+    let doc = parse(&src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "expected no diagnostics, got: {:?}",
+        result.diagnostics
+    );
+
+    let rects = fill_rects(&result);
+    assert!(
+        rects.iter().any(|&(x, y, w, h)| {
+            (x - 80.0).abs() < 0.001
+                && (y - 146.0).abs() < 0.001
+                && (w - 60.0).abs() < 0.001
+                && (h - 30.0).abs() < 0.001
+        }),
+        "expected FillRect at (80, 146, 60, 30) for edge=below anchor=top-center; got: {rects:?}"
+    );
+}
+
+// ── after + anchor="center-right" → cross-axis bottom-aligned vertically ─────
+
+#[test]
+fn anchor_edge_after_cross_axis_bottom() {
+    // Sibling: x=50 y=60 w=120 h=80.
+    // Node: w=40 h=20, anchor-edge="after", anchor-gap=(px)4, anchor="bottom-left".
+    // cross_v: "bottom-left" → bottom-align:
+    //   y = sib_y + sib_h - node_h = 60 + 80 - 20 = 120
+    //   x = sib_x + sib_w + gap = 50 + 120 + 4 = 174
+    let src = doc_with_children(
+        r##"rect id="s" x=(px)50 y=(px)60 w=(px)120 h=(px)80 fill="#888888"
+  rect id="n" anchor="bottom-left" anchor-sibling="s" anchor-edge="after" anchor-gap=(px)4 w=(px)40 h=(px)20 fill="#00ccff""##,
+    );
+    let doc = parse(&src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "expected no diagnostics, got: {:?}",
+        result.diagnostics
+    );
+
+    let rects = fill_rects(&result);
+    assert!(
+        rects.iter().any(|&(x, y, w, h)| {
+            (x - 174.0).abs() < 0.001
+                && (y - 120.0).abs() < 0.001
+                && (w - 40.0).abs() < 0.001
+                && (h - 20.0).abs() < 0.001
+        }),
+        "expected FillRect at (174, 120, 40, 20) for edge=after anchor=bottom-left; got: {rects:?}"
+    );
+}
+
+// ── explicit x/y still win over anchor-edge ──────────────────────────────────
+
+#[test]
+fn anchor_edge_explicit_xy_wins() {
+    // Sibling: x=50 y=60 w=120 h=80.
+    // Node has anchor-edge="below" gap=10 but ALSO explicit x=(px)0 y=(px)0.
+    // Explicit x/y override the anchor-derived placement on both axes,
+    // so the node lands at (0, 0), not (50, 150).
+    let src = doc_with_children(
+        r##"rect id="s" x=(px)50 y=(px)60 w=(px)120 h=(px)80 fill="#888888"
+  rect id="n" anchor-sibling="s" anchor-edge="below" anchor-gap=(px)10 x=(px)0 y=(px)0 w=(px)100 h=(px)40 fill="#cc0000""##,
+    );
+    let doc = parse(&src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "expected no diagnostics, got: {:?}",
+        result.diagnostics
+    );
+
+    let rects = fill_rects(&result);
+    assert!(
+        rects.iter().any(|&(x, y, w, h)| {
+            (x - 0.0).abs() < 0.001
+                && (y - 0.0).abs() < 0.001
+                && (w - 100.0).abs() < 0.001
+                && (h - 40.0).abs() < 0.001
+        }),
+        "expected FillRect at (0, 0, 100, 40): explicit x/y override anchor-edge; got: {rects:?}"
+    );
+}
+
+// ── anchor-edge with absent/unresolved sibling → no anchor-derived position ──
+
+#[test]
+fn anchor_edge_without_sibling_no_position() {
+    // A node with anchor-edge="below" but NO anchor-sibling. The validator
+    // emits anchor.edge_without_sibling, and the compiler produces no entry
+    // in the anchor map — the node falls back to its authored x/y.
+    // We verify: (a) the diagnostic is produced, (b) the node lands at its
+    // explicit (x=5, y=5) rather than at any anchor-derived position.
+    use zenith_core::{KdlAdapter, KdlSource};
+
+    let src = doc_with_children(
+        r##"rect id="n" anchor-edge="below" x=(px)5 y=(px)5 w=(px)80 h=(px)40 fill="#333333""##,
+    );
+
+    // Validate path confirms the diagnostic.
+    let kdl_doc = KdlAdapter.parse(src.as_bytes()).expect("must parse");
+    let report = zenith_core::validate(&kdl_doc);
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "anchor.edge_without_sibling"),
+        "expected anchor.edge_without_sibling diagnostic; got: {:?}",
+        report.diagnostics
+    );
+
+    // Compile path: node still renders at its authored (5, 5).
+    let doc = parse(&src);
+    let result = compile(&doc, &default_provider());
+    let rects = fill_rects(&result);
+    assert!(
+        rects.iter().any(|&(x, y, w, h)| {
+            (x - 5.0).abs() < 0.001
+                && (y - 5.0).abs() < 0.001
+                && (w - 80.0).abs() < 0.001
+                && (h - 40.0).abs() < 0.001
+        }),
+        "expected FillRect at (5, 5, 80, 40): fallback to authored x/y; got: {rects:?}"
+    );
+}
+
 // ── anchor-parent without anchor → parent_without_anchor warning ─
 
 #[test]

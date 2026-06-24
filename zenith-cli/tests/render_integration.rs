@@ -179,6 +179,11 @@ fn noise_zen_renders_to_valid_png() {
 }
 
 #[test]
+fn stack_zen_renders_to_valid_png() {
+    assert_example_renders("stack");
+}
+
+#[test]
 fn styled_zen_renders_to_valid_png() {
     assert_example_renders("styled");
 }

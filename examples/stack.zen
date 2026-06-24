@@ -1,0 +1,42 @@
+zenith version=1 {
+  project id="proj.stack" name="Stacked Cards"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#0f172a"
+    token id="color.title" type="color" value="#f1f5f9"
+    token id="color.card" type="color" value="#1e293b"
+    token id="color.border" type="color" value="#334155"
+    token id="color.accent" type="color" value="#7dd3fc"
+    token id="color.muted" type="color" value="#cbd5e1"
+    token id="font.sans" type="fontFamily" value="Noto Sans"
+    token id="size.heading" type="dimension" value=(px)22
+    token id="size.body" type="dimension" value=(px)14
+    token id="size.border" type="dimension" value=(px)1
+    token id="size.radius" type="dimension" value=(px)10
+  }
+  styles {}
+  document id="doc.stack" title="Stacked Cards" {
+    // Relative stacking: each card is placed BELOW the previous one with
+    // `anchor-sibling` + `anchor-edge="below"` + `anchor-gap` — no x/y math,
+    // and moving the title cascades the whole stack automatically.
+    page id="page.stack" w=(px)480 h=(px)360 background=(token)"color.bg" {
+      // Title — the only node with an explicit position.
+      text id="title" x=(px)32 y=(px)28 w=(px)380 h=(px)32 fill=(token)"color.title" font-family=(token)"font.sans" font-size=(token)"size.heading" { span "Featured Projects" }
+
+      // Accent rule — placed AFTER (right of) the title, vertically centered.
+      rect id="accent" anchor-sibling="title" anchor-edge="after" anchor-gap=(px)10 anchor="center-left" w=(px)6 h=(px)26 fill=(token)"color.accent" radius=(token)"size.border"
+
+      // Card A — placed BELOW the title with anchor-edge. Its label is centered
+      // INSIDE the card with within-box sibling anchoring (anchor, no edge).
+      rect id="card.a" anchor-sibling="title" anchor-edge="below" anchor-gap=(px)18 w=(px)416 h=(px)64 fill=(token)"color.card" stroke=(token)"color.border" stroke-width=(token)"size.border" radius=(token)"size.radius"
+      text id="label.a" anchor-sibling="card.a" anchor="center" align="center" w=(px)384 h=(px)24 fill=(token)"color.accent" font-family=(token)"font.sans" font-size=(token)"size.body" { span "Zenith — declarative slide & document engine" }
+
+      // Card B — below card A.
+      rect id="card.b" anchor-sibling="card.a" anchor-edge="below" anchor-gap=(px)14 w=(px)416 h=(px)64 fill=(token)"color.card" stroke=(token)"color.border" stroke-width=(token)"size.border" radius=(token)"size.radius"
+      text id="label.b" anchor-sibling="card.b" anchor="center" align="center" w=(px)384 h=(px)24 fill=(token)"color.muted" font-family=(token)"font.sans" font-size=(token)"size.body" { span "zenith-render — CPU PNG and vector PDF backends" }
+
+      // Card C — below card B.
+      rect id="card.c" anchor-sibling="card.b" anchor-edge="below" anchor-gap=(px)14 w=(px)416 h=(px)64 fill=(token)"color.card" stroke=(token)"color.border" stroke-width=(token)"size.border" radius=(token)"size.radius"
+      text id="label.c" anchor-sibling="card.c" anchor="center" align="center" w=(px)384 h=(px)24 fill=(token)"color.muted" font-family=(token)"font.sans" font-size=(token)"size.body" { span "zenith-tx — transaction ops, dry-run, and audit records" }
+    }
+  }
+}

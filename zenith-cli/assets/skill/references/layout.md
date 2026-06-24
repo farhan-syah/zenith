@@ -53,6 +53,50 @@ All four resolve to explicit, deterministic geometry at compile time (absent anc
 to hand-placed coords). Use them for logos, page numbers, captions, badges, and CTAs so they stay
 correctly placed across size variants (see `references/format-variants.md`).
 
+### Adjacent-edge placement (`anchor-edge`, `anchor-gap`)
+
+When you want a node placed **outside** a sibling — stacked above, below, before (left), or after
+(right) — add `anchor-edge` alongside `anchor-sibling`. Unlike the nine-point `anchor` (which
+positions a node *inside* the sibling's box), `anchor-edge` places the node flush against the
+named edge:
+
+| `anchor-edge` | Main-axis position | Cross-axis default |
+|---|---|---|
+| `below` | `sib_y + sib_h + gap` | left-aligned with sibling (`sib_x`) |
+| `above` | `sib_y − gap − node_h` | left-aligned with sibling (`sib_x`) |
+| `after` | `sib_x + sib_w + gap` | top-aligned with sibling (`sib_y`) |
+| `before` | `sib_x − gap − node_w` | top-aligned with sibling (`sib_y`) |
+
+`anchor-gap=(px)N` inserts a pixel gap between the sibling's edge and the node (default 0).
+
+**Cross-axis alignment** is controlled by the nine-point `anchor` value — only the relevant
+component is used:
+
+- For `above`/`below`: the *horizontal* component (`top-left`/`top-center`/`top-right` etc.)
+  left-, center-, or right-aligns the node relative to the sibling's width.
+- For `before`/`after`: the *vertical* component top-, center-, or bottom-aligns relative to the
+  sibling's height.
+- When `anchor` is absent, the cross-axis defaults to the leading edge (left for `above`/`below`;
+  top for `before`/`after`).
+
+When `anchor-edge` is present, `anchor` and explicit `x`/`y` are both optional — `anchor-edge`
+derives the full position without them. Explicit `x` or `y` still win per-axis over any
+anchor-derived value.
+
+```kdl
+// Stack a caption card directly below a title, centered, with an 8 px gap.
+text id="title" x=(px)40 y=(px)30 w=(px)320 h=(px)48 font-size=(token)"size.heading" { span "Launch" }
+rect id="card" anchor-sibling="title" anchor-edge="below" anchor-gap=(px)8 anchor="top-center"
+     w=(px)240 h=(px)120 fill=(token)"color.card" radius=(token)"size.radius"
+```
+
+**Diagnostics:**
+
+- `anchor.edge_without_sibling` (Warning) — `anchor-edge` is set but `anchor-sibling` is absent;
+  the placement has no effect.
+- `anchor.unknown_edge` (Error) — the `anchor-edge` value is not one of `above below before after`.
+- `anchor.gap_invalid_unit` (Warning) — `anchor-gap` unit cannot be resolved to px.
+
 ## Frames (clipping) and groups
 
 - `frame id x y w h { … }` clips its children to its box — use it for image windows, cards,
