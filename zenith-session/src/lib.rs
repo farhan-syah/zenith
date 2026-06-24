@@ -18,6 +18,7 @@
 //! - [`revspec`] — revision-spec resolver: map a human/agent revspec string to a record id
 //! - [`session`] — Tier-1 ephemeral session: snapshot DAG with HEAD + redo stack
 //! - [`store`] — content-addressed object store (SHA-256 + DEFLATE)
+//! - [`runs`] — [`RunRecord`] schema and append-only agent-run provenance log
 //! - [`tier2`] — Tier-2 durable version history: bounded flat list in `versions.jsonl`
 
 pub mod adapter;
@@ -31,6 +32,7 @@ pub mod layout;
 pub mod manifest;
 pub mod retention;
 pub mod revspec;
+pub mod runs;
 pub mod session;
 pub mod store;
 pub mod tier2;
@@ -48,6 +50,7 @@ pub use retention::{
     thin_versions,
 };
 pub use revspec::{resolve_revspec, resolve_revspec_for};
+pub use runs::{RunDiagnostic, RunRecord, RunStep, append_run, read_runs};
 pub use session::{
     RecordOutcome, SessionState, clear_session, current_content, record_state, redo, undo,
 };
