@@ -421,6 +421,7 @@ fn page_unknown_unit_produces_invalid_geometry() {
             margin_top: None,
             margin_bottom: None,
             baseline_grid: None,
+            line_jumps: None,
             parity: None,
             master: None,
             safe_zones: Vec::new(),

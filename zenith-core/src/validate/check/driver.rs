@@ -484,6 +484,27 @@ pub fn validate(doc: &Document) -> ValidationReport {
             ));
         }
 
+        // ── Per-page line-jump style validity ─────────────────────────────
+        // `line-jumps` selects how connector-vs-connector crossings hop. Only
+        // "none"/"arc"/"gap" are recognized; any other value is a Warning
+        // (forward-compatible — never a hard error) and renders as if absent
+        // (no hops).
+        if let Some(lj) = &page.line_jumps
+            && lj != "none"
+            && lj != "arc"
+            && lj != "gap"
+        {
+            diagnostics.push(Diagnostic::warning(
+                "page.invalid_line_jumps",
+                format!(
+                    "page '{}': line-jumps '{}' is not one of none/arc/gap",
+                    page.id, lj
+                ),
+                page.source_span,
+                Some(page.id.clone()),
+            ));
+        }
+
         // Single source of truth for this page's parity (drives the margin
         // advisory's binding side + recto/verso label).
         let is_recto = doc.page_is_recto(page, page_index_1based);

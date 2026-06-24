@@ -53,6 +53,7 @@ fn write_page(page: &Page, out: &mut String, depth: usize) {
     write_opt_property_value(out, "background", &page.background);
     write_opt_dimension(out, "bleed", &page.bleed);
     write_opt_dimension(out, "baseline-grid", &page.baseline_grid);
+    write_opt_str(out, "line-jumps", &page.line_jumps);
     write_opt_dimension(out, "margin-inner", &page.margin_inner);
     write_opt_dimension(out, "margin-outer", &page.margin_outer);
     write_opt_dimension(out, "margin-top", &page.margin_top);

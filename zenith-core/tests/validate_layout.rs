@@ -376,6 +376,39 @@ fn page_parity_override_invalid_warns() {
     );
 }
 
+// ── Page line-jumps validation ────────────────────────────────────────
+
+#[test]
+fn line_jumps_known_values_do_not_warn() {
+    for value in ["none", "arc", "gap"] {
+        let mut page = minimal_page("page.lj", vec![]);
+        page.line_jumps = Some(value.to_owned());
+        let report = validate(&doc_with(vec![], vec![page]));
+        assert!(
+            !has_code(&report, "page.invalid_line_jumps"),
+            "line-jumps=\"{value}\" must not warn: {:?}",
+            codes(&report)
+        );
+        assert!(!report.has_errors());
+    }
+}
+
+#[test]
+fn line_jumps_unknown_value_warns_not_errors() {
+    let mut page = minimal_page("page.lj", vec![]);
+    page.line_jumps = Some("sproing".to_owned());
+    let report = validate(&doc_with(vec![], vec![page]));
+    assert!(
+        has_code(&report, "page.invalid_line_jumps"),
+        "an unrecognized line-jumps value must warn; got {:?}",
+        codes(&report)
+    );
+    assert!(
+        !report.has_errors(),
+        "line-jumps warning must not be a hard error"
+    );
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // Configurable parity drives the mirrored-margin live area
 // ══════════════════════════════════════════════════════════════════════
@@ -452,6 +485,7 @@ fn page_with_folds(id: &str, w: f64, h: f64, folds: Vec<Fold>, children: Vec<Nod
         margin_top: None,
         margin_bottom: None,
         baseline_grid: None,
+        line_jumps: None,
         parity: None,
         master: None,
         safe_zones: Vec::new(),
@@ -632,6 +666,7 @@ fn page_with_zones(
         margin_top: None,
         margin_bottom: None,
         baseline_grid: None,
+        line_jumps: None,
         parity: None,
         master: None,
         safe_zones,

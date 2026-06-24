@@ -24,6 +24,7 @@ mod field;
 mod footnote;
 mod image;
 mod leaf;
+mod line_jumps;
 mod paint;
 mod pattern;
 mod table;
@@ -480,6 +481,12 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
     // the emitted baselines live in, so a bleed-shifted page snaps consistently.
     root_ctx.baseline_grid = baseline_grid;
 
+    // Absolute indices, in document order, of the `StrokePolyline` emitted by
+    // each top-level connector (master-projected then page-own). Used only by
+    // the opt-in line-jump post-pass; empty/unused when the page declares no
+    // `line-jumps`, so the rest of compile is byte-identical.
+    let mut connector_strokes: Vec<usize> = Vec::new();
+
     // ── Step 7a: project the page's master (UNDER its own children) ──────
     // When `page.master` names a declared master, clone the master's children,
     // prefix every projected id with the page id (avoid cross-page collisions),
@@ -494,6 +501,7 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
         let prefix = format!("{}/", page.id);
         container::prefix_ids_in_children(&mut projected, &prefix);
         for node in &projected {
+            let start = scene.commands.len();
             compile_node(
                 node,
                 node_cx,
@@ -501,11 +509,15 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
                 &mut diagnostics,
                 root_ctx,
             );
+            if matches!(node, Node::Connector(_)) {
+                line_jumps::record_connector_stroke(&scene.commands, start, &mut connector_strokes);
+            }
         }
     }
 
     // ── Step 7b: page children in source order (z-order: first = bottom) ─
     for node in &page.children {
+        let start = scene.commands.len();
         compile_node(
             node,
             node_cx,
@@ -513,6 +525,18 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
             &mut diagnostics,
             root_ctx,
         );
+        if matches!(node, Node::Connector(_)) {
+            line_jumps::record_connector_stroke(&scene.commands, start, &mut connector_strokes);
+        }
+    }
+
+    // ── Step 7b′: opt-in connector line-jumps (hops at crossings) ────────
+    // Only "arc"/"gap" run; "none"/an unrecognized value/absent leaves the
+    // commands untouched, so a page without `line-jumps` is byte-identical.
+    if let Some(mode) = page.line_jumps.as_deref()
+        && (mode == "arc" || mode == "gap")
+    {
+        line_jumps::apply_line_jumps(&mut scene.commands, &connector_strokes, mode);
     }
 
     // ── Step 7c: footnote zone (page furniture, above the bottom margin) ─

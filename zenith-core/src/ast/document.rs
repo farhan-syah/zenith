@@ -69,6 +69,14 @@ pub struct Page {
     /// horizontally across columns. `None` or a non-positive value renders
     /// byte-identically to a page with no grid. KDL: `baseline-grid=(px)14`.
     pub baseline_grid: Option<Dimension>,
+    /// Optional page-level line-jump style for connector-vs-connector crossings.
+    /// When `Some("arc")` or `Some("gap")`, every place where two top-level
+    /// connectors cross gains a deterministic hop on one of the two strokes (a
+    /// small semicircular bump for `arc`, a broken gap for `gap`) so overlapping
+    /// connectors read clearly. `Some("none")`, `None`, or any unrecognized value
+    /// renders byte-identically to a page with no line jumps. An unrecognized
+    /// value is surfaced as a validation warning (`page.invalid_line_jumps`).
+    pub line_jumps: Option<String>,
     /// Author-declared safe/dead zones for this page. These are not rendering
     /// nodes; the validator checks page children against them.
     pub safe_zones: Vec<SafeZone>,
@@ -419,6 +427,7 @@ mod parity_tests {
             margin_top: None,
             margin_bottom: None,
             baseline_grid: None,
+            line_jumps: None,
             parity: parity.map(str::to_owned),
             master: None,
             safe_zones: Vec::new(),

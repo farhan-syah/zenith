@@ -787,6 +787,14 @@ fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
     let baseline_grid = optional_dimension_prop(node, "baseline-grid")
         .or_else(|| optional_dimension_prop(node, "baseline_grid"));
 
+    // Optional page-level line-jump style (`line-jumps="arc"`). Value validity
+    // ("none"|"arc"|"gap") is checked by the validator, not the parser, so an
+    // unrecognized value is preserved verbatim for a precise warning. Both the
+    // hyphenated and underscored spellings are accepted for forward-compat.
+    let line_jumps = optional_string_prop(node, "line-jumps")
+        .or_else(|| optional_string_prop(node, "line_jumps"))
+        .map(str::to_owned);
+
     // Optional explicit per-page parity override (`parity="verso"`). Value
     // validity ("recto"|"verso") is checked by the validator, not the parser, so
     // an unrecognized value is preserved verbatim for a precise warning.
@@ -827,6 +835,7 @@ fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
         margin_top,
         margin_bottom,
         baseline_grid,
+        line_jumps,
         parity,
         master,
         safe_zones,

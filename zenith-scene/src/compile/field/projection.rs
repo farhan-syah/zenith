@@ -281,6 +281,7 @@ mod tests {
             margin_top: Some(px(80.0)),
             margin_bottom: Some(px(80.0)),
             baseline_grid: None,
+            line_jumps: None,
             parity: None,
             master: None,
             safe_zones: Vec::new(),

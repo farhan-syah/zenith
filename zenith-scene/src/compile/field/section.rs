@@ -128,6 +128,7 @@ mod tests {
                 margin_top: None,
                 margin_bottom: None,
                 baseline_grid: None,
+                line_jumps: None,
                 parity: None,
                 master: None,
                 safe_zones: Vec::new(),

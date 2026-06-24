@@ -885,3 +885,100 @@ fn blur_without_mask_emits_no_mask_bracket() {
         "exactly one fill inside the blur bracket: {cmds:?}"
     );
 }
+
+// ── connector line-jumps (hops at connector-vs-connector crossings) ───────────
+//
+// A page-level `line-jumps="arc"` makes the horizontal connector hop over the
+// vertical one at their crossing. Without the property the routes are
+// byte-identical to today's plain connector routes.
+
+/// Two crossing connectors: a HORIZONTAL one (a→b) and a VERTICAL one (c→d),
+/// meeting at (320, 160). All auto anchors.
+fn crossing_connectors_src(page_props: &str) -> String {
+    format!(
+        r##"zenith version=1 {{
+  project id="proj.lj" name="LJ"
+  tokens format="zenith-token-v1" {{
+token id="color.line" type="color" value="#1e3a8a"
+  }}
+  styles {{}}
+  document id="doc.lj" title="LJ" {{
+page id="page.lj" w=(px)640 h=(px)360 {page_props} {{
+  rect id="a" x=(px)40 y=(px)140 w=(px)80 h=(px)40 stroke=(token)"color.line"
+  rect id="b" x=(px)520 y=(px)140 w=(px)80 h=(px)40 stroke=(token)"color.line"
+  rect id="c" x=(px)300 y=(px)20 w=(px)40 h=(px)40 stroke=(token)"color.line"
+  rect id="d" x=(px)300 y=(px)300 w=(px)40 h=(px)40 stroke=(token)"color.line"
+  connector id="ch" from="a" to="b" stroke=(token)"color.line"
+  connector id="cv" from="c" to="d" stroke=(token)"color.line"
+}}
+  }}
+}}
+"##
+    )
+}
+
+/// Collect every connector `StrokePolyline`'s points (those with an even number
+/// of coords, in emission order). All four rect strokes here are closed
+/// outlines; connectors are open-center polylines, so filter on `closed:false`
+/// AND a 2-point-or-more open path that is NOT a rect outline. Simplest robust
+/// filter: open, center-aligned strokes whose first point matches a connector
+/// endpoint. We just collect all open center strokes.
+fn open_center_strokes(cmds: &[SceneCommand]) -> Vec<Vec<f64>> {
+    cmds.iter()
+        .filter_map(|c| match c {
+            SceneCommand::StrokePolyline {
+                points,
+                closed: false,
+                align: StrokeAlign::Center,
+                ..
+            } => Some(points.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn line_jumps_absent_is_byte_identical() {
+    let doc = parse(&crossing_connectors_src(""));
+    let result = compile(&doc, &default_provider());
+    let strokes = open_center_strokes(&result.scene.commands);
+
+    // Two connector polylines, plain straight routes, untouched.
+    assert_eq!(
+        strokes,
+        vec![
+            vec![120.0, 160.0, 520.0, 160.0], // horizontal a→b
+            vec![320.0, 60.0, 320.0, 300.0],  // vertical c→d
+        ],
+        "without line-jumps both connectors keep their plain routes"
+    );
+}
+
+#[test]
+fn line_jumps_arc_horizontal_hops() {
+    let doc = parse(&crossing_connectors_src(r#"line-jumps="arc""#));
+    let result = compile(&doc, &default_provider());
+    let strokes = open_center_strokes(&result.scene.commands);
+    assert_eq!(strokes.len(), 2, "still two connector polylines");
+
+    let horiz = &strokes[0];
+    let vert = &strokes[1];
+
+    // The horizontal connector gains a bump (more than the plain 4 coords);
+    // the vertical one is unchanged.
+    assert!(
+        horiz.len() > 4,
+        "horizontal connector should gain bump points: {horiz:?}"
+    );
+    assert_eq!(
+        vert,
+        &vec![320.0, 60.0, 320.0, 300.0],
+        "vertical connector must be unchanged"
+    );
+    // Bump bulges above the line (smaller y) near the x=320 crossing.
+    let min_y = horiz
+        .chunks_exact(2)
+        .map(|p| p[1])
+        .fold(f64::INFINITY, f64::min);
+    assert!(min_y < 160.0, "bump must dip above the line: {horiz:?}");
+}

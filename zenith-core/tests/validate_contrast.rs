@@ -51,6 +51,7 @@ fn page_with_bg(id: &str, bg_token_id: &str, children: Vec<Node>) -> Page {
         margin_top: None,
         margin_bottom: None,
         baseline_grid: None,
+        line_jumps: None,
         parity: None,
         master: None,
         safe_zones: Vec::new(),
