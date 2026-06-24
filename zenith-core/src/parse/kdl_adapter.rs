@@ -15,6 +15,33 @@ use super::KdlSource;
 #[derive(Debug, Clone, Default)]
 pub struct KdlAdapter;
 
+/// Converts a byte offset within `text` into a 1-based (line, column) pair.
+///
+/// Both line and column are counted in bytes, which matches the convention used
+/// by the `kdl` crate's `SourceSpan`. The offset is clamped to `text.len()` so
+/// no unchecked indexing can occur.
+fn line_col(text: &str, offset: usize) -> (usize, usize) {
+    let safe_offset = offset.min(text.len());
+    // Iterate over bytes up to safe_offset.  We only need to count '\n' bytes;
+    // the source is valid UTF-8 (guaranteed by Step 1) so byte-by-byte is safe.
+    let prefix = match text.get(..safe_offset) {
+        Some(s) => s,
+        // `safe_offset` is already clamped, so this branch is unreachable in
+        // practice, but we handle it gracefully rather than panicking.
+        None => text,
+    };
+    let mut line = 1usize;
+    let mut last_newline_byte = 0usize;
+    for (i, b) in prefix.bytes().enumerate() {
+        if b == b'\n' {
+            line += 1;
+            last_newline_byte = i + 1;
+        }
+    }
+    let col = safe_offset - last_newline_byte + 1;
+    (line, col)
+}
+
 impl KdlSource for KdlAdapter {
     fn parse(&self, source: &[u8]) -> Result<Document, ParseError> {
         // Step 1: validate UTF-8.
@@ -27,20 +54,42 @@ impl KdlSource for KdlAdapter {
 
         // Step 2: parse KDL.
         let kdl_doc: kdl::KdlDocument = text.parse().map_err(|e: kdl::KdlError| {
-            // Extract the first diagnostic span if available.
-            let span = e.diagnostics.first().map(|d| {
-                let ss = d.span;
-                crate::ast::Span {
-                    start: ss.offset(),
-                    end: ss.offset() + ss.len(),
+            // Extract the first diagnostic span and rich message if available.
+            match e.diagnostics.first() {
+                Some(d) => {
+                    let offset = d.span.offset();
+                    let (line, col) = line_col(text, offset);
+                    let mut msg = format!("KDL parse error at line {line}, column {col}");
+                    match (&d.message, &d.help) {
+                        (Some(m), Some(h)) => {
+                            msg.push_str(": ");
+                            msg.push_str(m);
+                            msg.push_str(" (help: ");
+                            msg.push_str(h);
+                            msg.push(')');
+                        }
+                        (Some(m), None) => {
+                            msg.push_str(": ");
+                            msg.push_str(m);
+                        }
+                        (None, Some(h)) => {
+                            msg.push_str(" (help: ");
+                            msg.push_str(h);
+                            msg.push(')');
+                        }
+                        (None, None) => {
+                            // No per-diagnostic detail; fall back to the top-level
+                            // error so no information is lost.
+                            msg.push_str(": ");
+                            msg.push_str(&e.to_string());
+                        }
+                    }
+                    let span = crate::ast::Span {
+                        start: offset,
+                        end: offset + d.span.len(),
+                    };
+                    ParseError::with_span(ParseErrorCode::InvalidKdl, span, msg)
                 }
-            });
-            match span {
-                Some(s) => ParseError::with_span(
-                    ParseErrorCode::InvalidKdl,
-                    s,
-                    format!("KDL parse error: {e}"),
-                ),
                 None => ParseError::spanless(
                     ParseErrorCode::InvalidKdl,
                     format!("KDL parse error: {e}"),
@@ -381,6 +430,53 @@ mod tests {
             "expected InvalidKdl, got {:?}",
             err.code
         );
+    }
+
+    /// A KDL parse error on a known line must produce a message that starts
+    /// with `"KDL parse error at line N, column M"`.
+    #[test]
+    fn test_malformed_kdl_error_message_contains_location() {
+        let adapter = KdlAdapter;
+        // Three lines of valid KDL then a syntax error on line 4.
+        let bad_kdl = b"foo\nbar\nbaz\n{{{ invalid";
+        let err = adapter
+            .parse(bad_kdl)
+            .expect_err("must fail on malformed KDL");
+        assert!(
+            err.message.starts_with("KDL parse error at line "),
+            "error message must start with location prefix; got: {:?}",
+            err.message
+        );
+    }
+
+    // ── line_col helper ──────────────────────────────────────────────────────
+
+    #[test]
+    fn line_col_first_line() {
+        assert_eq!(line_col("hello world", 0), (1, 1));
+        assert_eq!(line_col("hello world", 5), (1, 6));
+    }
+
+    #[test]
+    fn line_col_second_line() {
+        // "foo\nbar" — offset 4 is 'b', line 2 col 1.
+        assert_eq!(line_col("foo\nbar", 4), (2, 1));
+        assert_eq!(line_col("foo\nbar", 6), (2, 3));
+    }
+
+    #[test]
+    fn line_col_clamps_past_end() {
+        let text = "ab";
+        // offset beyond length must not panic.
+        let (l, c) = line_col(text, 999);
+        assert_eq!(l, 1);
+        assert_eq!(c, 3); // clamped to text.len() = 2, col = 2 - 0 + 1 = 3
+    }
+
+    #[test]
+    fn line_col_empty_string() {
+        assert_eq!(line_col("", 0), (1, 1));
+        assert_eq!(line_col("", 5), (1, 1));
     }
 
     /// A gradient token (angle + 2 stops) parses into the expected AST shape:
