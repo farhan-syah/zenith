@@ -11,7 +11,8 @@ use crate::commands::serialize_pretty;
 use crate::json_types::{
     SchemaAttr, SchemaDiagnosticCode, SchemaDiagnosticsOutput, SchemaNodeDetail, SchemaNodeEntry,
     SchemaNodeOutput, SchemaNodesOutput, SchemaOpDetail, SchemaOpEntry, SchemaOpFieldEntry,
-    SchemaOpOutput, SchemaOpsOutput, SchemaOverviewOutput, SchemaSurfaceOutput,
+    SchemaOpOutput, SchemaOpsOutput, SchemaOverviewOutput, SchemaSurfaceOutput, SchemaTokenDetail,
+    SchemaTokenEntry, SchemaTokenOutput, SchemaTokensOutput,
 };
 
 /// Precedence note shown on the `schema diagnostics` surface.
@@ -26,24 +27,29 @@ block (last-wins per code); CLI flags and config-file overrides resolve in a lat
 pub fn overview(json: bool) -> (String, u8) {
     let node_count = core_schema::node_kinds().len();
     let op_count = tx_schema::op_names().len();
+    let token_type_count = core_schema::token_types().len();
 
     if json {
         let out = SchemaOverviewOutput {
             schema: "zenith-schema-v1",
             node_kinds: node_count,
             tx_ops: op_count,
+            token_types: token_type_count,
         };
         (serialize_pretty(&out), 0)
     } else {
         let diag_count = core_schema::diagnostic_codes().len();
         let text = format!(
-            "Zenith schema — {node_count} node kinds, {op_count} tx ops, 3 non-node surfaces, \
+            "Zenith schema — {node_count} node kinds, {op_count} tx ops, \
+             {token_type_count} token types, 3 non-node surfaces, \
              {diag_count} diagnostic codes\n\n\
              Drill in:\n  \
              zenith schema nodes              # list all node kinds\n  \
              zenith schema node <kind>        # attributes for one kind\n  \
              zenith schema ops                # list all tx ops\n  \
              zenith schema op <name>          # fields + example for one op\n  \
+             zenith schema tokens             # list all token types\n  \
+             zenith schema token <type>       # value form + children + example for one type\n  \
              zenith schema page               # page declaration attributes\n  \
              zenith schema asset              # asset declaration attributes\n  \
              zenith schema document           # document root attributes\n  \
@@ -216,6 +222,80 @@ pub fn op_detail(name: &str, json: bool) -> (String, u8) {
     }
 }
 
+// ── Token type formatters ─────────────────────────────────────────────────────
+
+/// `zenith schema tokens`: list all token types with their summaries.
+///
+/// Returns `(stdout, exit_code)`.
+pub fn tokens(json: bool) -> (String, u8) {
+    let types = core_schema::token_types();
+
+    if json {
+        let entries: Vec<SchemaTokenEntry> = types
+            .iter()
+            .map(|&ty| SchemaTokenEntry {
+                ty: ty.to_owned(),
+                // token_type_summary is always Some for every type in token_types().
+                summary: core_schema::token_type_summary(ty).unwrap_or("").to_owned(),
+            })
+            .collect();
+        let out = SchemaTokensOutput {
+            schema: "zenith-schema-v1",
+            token_types: entries,
+        };
+        (serialize_pretty(&out), 0)
+    } else {
+        let mut text = String::from("token types:\n");
+        for &ty in types {
+            let summary = core_schema::token_type_summary(ty).unwrap_or("");
+            text.push_str(&format!("  {ty:<12}  {summary}\n"));
+        }
+        (text.trim_end().to_owned(), 0)
+    }
+}
+
+/// `zenith schema token <type>`: full detail for one token type.
+///
+/// Returns `(stdout, exit_code)`. On unknown type, exit_code is 1 and stdout
+/// contains the error message.
+pub fn token_detail(ty: &str, json: bool) -> (String, u8) {
+    let desc = match core_schema::token_type_descriptor(ty) {
+        Some(d) => d,
+        None => {
+            let valid = core_schema::token_types().join(", ");
+            let msg = format!("error: unknown token type '{ty}'\nvalid types: {valid}");
+            return (msg, 1);
+        }
+    };
+
+    if json {
+        let out = SchemaTokenOutput {
+            schema: "zenith-schema-v1",
+            token: SchemaTokenDetail {
+                ty: desc.type_name.to_owned(),
+                summary: desc.summary.to_owned(),
+                value_form: desc.value_form.to_owned(),
+                child_nodes: desc.child_nodes.to_owned(),
+                example: desc.example.to_owned(),
+            },
+        };
+        (serialize_pretty(&out), 0)
+    } else {
+        let mut text = format!("{}: {}\n", desc.type_name, desc.summary);
+        if !desc.value_form.is_empty() {
+            text.push_str(&format!("\nValue form:\n  {}\n", desc.value_form));
+        }
+        if !desc.child_nodes.is_empty() {
+            text.push_str(&format!("\nChild nodes:\n  {}\n", desc.child_nodes));
+        }
+        text.push_str(&format!(
+            "\nExample:\n  {}",
+            desc.example.replace('\n', "\n  ")
+        ));
+        (text, 0)
+    }
+}
+
 // ── Non-node surface formatters ───────────────────────────────────────────────
 
 /// `zenith schema page`: summary + recognized attributes for a page declaration.
@@ -307,7 +387,7 @@ pub fn diagnostics(json: bool) -> (String, u8) {
             .iter()
             .map(|info| SchemaDiagnosticCode {
                 code: info.code.to_owned(),
-                severity: severity_word(info.severity).to_owned(),
+                severity: crate::json_types::severity_str(&info.severity).to_owned(),
                 summary: info.summary.to_owned(),
                 governable: info.is_governable(),
             })
@@ -340,7 +420,7 @@ pub fn diagnostics(json: bool) -> (String, u8) {
             text.push_str(&format!(
                 "  {:<col_width$}  {:<9}  {}\n",
                 info.code,
-                severity_word(info.severity),
+                crate::json_types::severity_str(&info.severity),
                 info.summary,
                 col_width = col_width,
             ));
@@ -351,15 +431,6 @@ pub fn diagnostics(json: bool) -> (String, u8) {
              Error code is reported as `policy.ineffective_on_error`.",
         );
         (text.trim_end().to_owned(), 0)
-    }
-}
-
-/// Lowercase word form of a [`zenith_core::Severity`] for schema output.
-fn severity_word(severity: zenith_core::Severity) -> &'static str {
-    match severity {
-        zenith_core::Severity::Error => "error",
-        zenith_core::Severity::Warning => "warning",
-        zenith_core::Severity::Advisory => "advisory",
     }
 }
 
@@ -672,5 +743,136 @@ mod tests {
         assert_eq!(code, 0);
         assert!(text.contains("zenith-schema-v1"));
         assert!(text.contains("\"document\""));
+    }
+
+    #[test]
+    fn overview_mentions_token_types() {
+        let (text, code) = overview(false);
+        assert_eq!(code, 0);
+        assert!(
+            text.contains("token types"),
+            "overview must mention token types; got:\n{text}"
+        );
+        assert!(
+            text.contains("zenith schema tokens"),
+            "overview must mention 'zenith schema tokens'; got:\n{text}"
+        );
+        assert!(
+            text.contains("zenith schema token"),
+            "overview must mention 'zenith schema token <type>'; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn overview_json_has_token_types_count() {
+        let (text, code) = overview(true);
+        assert_eq!(code, 0);
+        assert!(
+            text.contains("token_types"),
+            "JSON overview must carry token_types count; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn tokens_human_lists_all_types() {
+        let (text, code) = tokens(false);
+        assert_eq!(code, 0);
+        assert!(text.contains("color"), "must list color type");
+        assert!(text.contains("gradient"), "must list gradient type");
+        assert!(text.contains("shadow"), "must list shadow type");
+        assert!(text.contains("filter"), "must list filter type");
+        assert!(text.contains("mask"), "must list mask type");
+        assert!(text.contains("dimension"), "must list dimension type");
+        assert!(text.contains("number"), "must list number type");
+        assert!(text.contains("fontFamily"), "must list fontFamily type");
+        assert!(text.contains("fontWeight"), "must list fontWeight type");
+    }
+
+    #[test]
+    fn tokens_json_schema_field() {
+        let (text, code) = tokens(true);
+        assert_eq!(code, 0);
+        assert!(text.contains("zenith-schema-v1"));
+        assert!(text.contains("\"token_types\""));
+        assert!(text.contains("\"ty\""));
+        assert!(text.contains("\"summary\""));
+    }
+
+    #[test]
+    fn token_detail_color_human() {
+        let (text, code) = token_detail("color", false);
+        assert_eq!(code, 0);
+        assert!(text.contains("color"), "must name the type");
+        assert!(
+            text.contains("Value form:"),
+            "must include Value form section"
+        );
+        assert!(text.contains("#rrggbb"), "must describe hex color form");
+        assert!(text.contains("Example:"), "must include Example section");
+    }
+
+    #[test]
+    fn token_detail_gradient_human() {
+        let (text, code) = token_detail("gradient", false);
+        assert_eq!(code, 0);
+        assert!(text.contains("gradient"), "must name the type");
+        assert!(
+            text.contains("Child nodes:"),
+            "gradient must include Child nodes section"
+        );
+        assert!(text.contains("stop"), "gradient must describe stop child");
+        assert!(text.contains("Example:"), "must include Example section");
+    }
+
+    #[test]
+    fn token_detail_shadow_human() {
+        let (text, code) = token_detail("shadow", false);
+        assert_eq!(code, 0);
+        assert!(text.contains("shadow"), "must name the type");
+        assert!(
+            text.contains("Child nodes:"),
+            "shadow must include Child nodes section"
+        );
+        assert!(text.contains("layer"), "shadow must describe layer child");
+    }
+
+    #[test]
+    fn token_detail_json_has_all_fields() {
+        let (text, code) = token_detail("gradient", true);
+        assert_eq!(code, 0);
+        assert!(text.contains("zenith-schema-v1"));
+        assert!(text.contains("\"token\""));
+        assert!(text.contains("\"ty\""));
+        assert!(text.contains("\"summary\""));
+        assert!(text.contains("\"value_form\""));
+        assert!(text.contains("\"child_nodes\""));
+        assert!(text.contains("\"example\""));
+    }
+
+    #[test]
+    fn token_detail_unknown_type_returns_error() {
+        let (text, code) = token_detail("bogus", false);
+        assert_eq!(code, 1);
+        assert!(
+            text.contains("unknown token type"),
+            "must report unknown type"
+        );
+        assert!(text.contains("valid types"), "must list valid types");
+    }
+
+    #[test]
+    fn token_detail_fontweight_no_value_form_confusion() {
+        // fontWeight must explicitly say bare integer, NOT a string or dimension.
+        let (text, code) = token_detail("fontWeight", false);
+        assert_eq!(code, 0);
+        assert!(
+            text.contains("700"),
+            "fontWeight example must use a bare integer"
+        );
+        // The value form must not suggest string or dimension syntax.
+        assert!(
+            !text.contains("\"700\""),
+            "fontWeight must not suggest string form"
+        );
     }
 }

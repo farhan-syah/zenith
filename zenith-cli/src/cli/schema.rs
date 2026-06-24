@@ -10,6 +10,8 @@ zenith schema nodes                 # list all node kinds with summaries\n  \
 zenith schema node pattern          # attributes for one node kind\n  \
 zenith schema ops                   # list all transaction ops\n  \
 zenith schema op set_fill           # summary for one op\n  \
+zenith schema tokens                # list all token types with summaries\n  \
+zenith schema token gradient        # value form + children + example for one token type\n  \
 zenith schema page                  # attributes for a page declaration\n  \
 zenith schema asset                 # attributes for an asset declaration\n  \
 zenith schema document              # attributes for the document root\n  \
@@ -65,6 +67,26 @@ pub enum SchemaSub {
     /// node and the `document { … }` child block: version, colorspace, doc-id,
     /// mirror-margins, page-progression, spread-gutter, margin-*, and more.
     Document,
+
+    /// List all authorable token types with their one-line summaries.
+    ///
+    /// Shows every recognized `type=` value for a token node (color, dimension,
+    /// fontFamily, fontWeight, gradient, shadow, filter, mask, number) with a
+    /// one-line description. Use `zenith schema token <type>` for the full
+    /// value form, child-node structure, and a working example.
+    Tokens,
+
+    /// Show the value form, child-node structure, and a working example for one token type.
+    ///
+    /// Describes exactly what to write for a given `type=` value: whether the
+    /// token takes an inline `value=` literal (color, dimension, number,
+    /// fontFamily, fontWeight) or is defined by child nodes (gradient, shadow,
+    /// filter, mask), including the exact syntax for each.
+    Token {
+        /// The token type to look up (e.g. `color`, `gradient`, `shadow`).
+        #[arg(value_name = "TYPE")]
+        ty: String,
+    },
 
     /// Show the in-file diagnostic-policy verbs and the governable diagnostic codes.
     ///

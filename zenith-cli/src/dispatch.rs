@@ -563,6 +563,8 @@ pub fn run() -> ExitCode {
                 Some(cli::SchemaSub::Node { kind }) => commands::schema::node_detail(&kind, json),
                 Some(cli::SchemaSub::Ops) => commands::schema::ops(json),
                 Some(cli::SchemaSub::Op { name }) => commands::schema::op_detail(&name, json),
+                Some(cli::SchemaSub::Tokens) => commands::schema::tokens(json),
+                Some(cli::SchemaSub::Token { ty }) => commands::schema::token_detail(&ty, json),
                 Some(cli::SchemaSub::Page) => commands::schema::page(json),
                 Some(cli::SchemaSub::Asset) => commands::schema::asset(json),
                 Some(cli::SchemaSub::Document) => commands::schema::document(json),

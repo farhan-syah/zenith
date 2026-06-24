@@ -255,6 +255,38 @@ pub struct SchemaOverviewOutput {
     pub schema: &'static str,
     pub node_kinds: usize,
     pub tx_ops: usize,
+    pub token_types: usize,
+}
+
+/// A single token-type entry in the `schema tokens` JSON output.
+#[derive(Debug, Serialize)]
+pub struct SchemaTokenEntry {
+    pub ty: String,
+    pub summary: String,
+}
+
+/// Full detail for one token type in the `schema token <type>` JSON output.
+#[derive(Debug, Serialize)]
+pub struct SchemaTokenDetail {
+    pub ty: String,
+    pub summary: String,
+    pub value_form: String,
+    pub child_nodes: String,
+    pub example: String,
+}
+
+/// Top-level JSON envelope for `schema tokens`.
+#[derive(Debug, Serialize)]
+pub struct SchemaTokensOutput {
+    pub schema: &'static str,
+    pub token_types: Vec<SchemaTokenEntry>,
+}
+
+/// Top-level JSON envelope for `schema token <type>`.
+#[derive(Debug, Serialize)]
+pub struct SchemaTokenOutput {
+    pub schema: &'static str,
+    pub token: SchemaTokenDetail,
 }
 
 /// Top-level JSON envelope for `schema page`, `schema asset`, `schema document`.
