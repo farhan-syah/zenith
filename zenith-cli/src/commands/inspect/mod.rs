@@ -9,5 +9,5 @@ pub mod recipes;
 
 pub use document::{
     InspectCmdErr, InspectNodeOutput, InspectOutput, NodeEntry, NodeGeometry, PageEntry,
-    build_doc_tree, find_node_tree, run,
+    build_doc_tree, find_node_tree, run, summary,
 };

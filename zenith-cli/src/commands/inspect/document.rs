@@ -164,6 +164,107 @@ pub fn run(src: &str, node_id: Option<&str>, json: bool) -> Result<String, Inspe
     }
 }
 
+// ── Token-efficient summary (MCP) ───────────────────────────────────────────────
+
+/// Build a token-minimal structured summary of a document's node tree.
+///
+/// This is the shape the MCP `zenith_inspect` tool returns: instead of the full
+/// recursive tree with geometry on every node, it returns a *shallow* view.
+///
+/// - `node`   — when `Some`, summarise only the subtree rooted at that id.
+/// - `depth`  — how many node levels below each page (or below `node`) to expand.
+///   Deeper children collapse to a `childCount`. `0` shows only the top level.
+/// - `detail` — when `true`, re-include `geometry`/`visible`/`locked` per node.
+///
+/// Returns a [`serde_json::Value`] ready to embed as the tool's structured
+/// result; the caller decides inline-vs-offload by serialized size.
+pub fn summary(
+    src: &str,
+    node: Option<&str>,
+    depth: usize,
+    detail: bool,
+) -> Result<serde_json::Value, InspectCmdErr> {
+    let doc = KdlAdapter
+        .parse(src.as_bytes())
+        .map_err(|e| InspectCmdErr::new(format!("error[parse.error]: {}", e.message), 2))?;
+
+    if let Some(id) = node {
+        let entry = find_node_tree(&doc.body.pages, id)
+            .ok_or_else(|| InspectCmdErr::new(format!("error: node '{id}' not found"), 2))?;
+        Ok(serde_json::json!({
+            "schema": "zenith-inspect-summary-v1",
+            "node": trim_node(&entry, depth, detail),
+        }))
+    } else {
+        let pages = build_doc_tree(&doc.body.pages);
+        let page_values: Vec<serde_json::Value> =
+            pages.iter().map(|p| trim_page(p, depth, detail)).collect();
+        Ok(serde_json::json!({
+            "schema": "zenith-inspect-summary-v1",
+            "pages": page_values,
+            "recipe_count": doc.recipes.len(),
+        }))
+    }
+}
+
+/// Trim a [`PageEntry`] to the shallow summary shape.
+fn trim_page(p: &PageEntry, depth: usize, detail: bool) -> serde_json::Value {
+    let mut obj = serde_json::Map::new();
+    obj.insert("id".into(), p.id.clone().into());
+    if let Some(name) = &p.name {
+        obj.insert("name".into(), name.clone().into());
+    }
+    obj.insert("width".into(), p.width.into());
+    obj.insert("height".into(), p.height.into());
+    insert_children(&mut obj, &p.children, depth, detail);
+    serde_json::Value::Object(obj)
+}
+
+/// Trim a [`NodeEntry`] to the shallow summary shape, recursing `depth` levels.
+fn trim_node(n: &NodeEntry, depth: usize, detail: bool) -> serde_json::Value {
+    let mut obj = serde_json::Map::new();
+    obj.insert("id".into(), n.id.clone().into());
+    obj.insert("kind".into(), n.kind.clone().into());
+    if detail {
+        if let Some(g) = &n.geometry {
+            obj.insert(
+                "geometry".into(),
+                serde_json::to_value(g).unwrap_or(serde_json::Value::Null),
+            );
+        }
+        if let Some(v) = n.visible {
+            obj.insert("visible".into(), v.into());
+        }
+        if let Some(l) = n.locked {
+            obj.insert("locked".into(), l.into());
+        }
+    }
+    insert_children(&mut obj, &n.children, depth, detail);
+    serde_json::Value::Object(obj)
+}
+
+/// Insert either an expanded `children` array (when `depth > 0`) or a collapsed
+/// `child_count` (when `depth == 0`), omitting both when there are no children.
+fn insert_children(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    children: &[NodeEntry],
+    depth: usize,
+    detail: bool,
+) {
+    if children.is_empty() {
+        return;
+    }
+    if depth == 0 {
+        obj.insert("child_count".into(), children.len().into());
+    } else {
+        let kids: Vec<serde_json::Value> = children
+            .iter()
+            .map(|c| trim_node(c, depth - 1, detail))
+            .collect();
+        obj.insert("children".into(), serde_json::Value::Array(kids));
+    }
+}
+
 // ── Tree builders ─────────────────────────────────────────────────────────────
 
 /// Build the full page tree for all pages in the document (in order).

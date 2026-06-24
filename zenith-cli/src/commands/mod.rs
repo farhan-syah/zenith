@@ -29,6 +29,15 @@ pub(crate) fn serialize_pretty<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|e| e.to_string())
 }
 
+/// Serialise `value` to compact (whitespace-free) JSON.
+///
+/// This is the token-minimal form used by the MCP server for the text mirror of
+/// a structured result — `serialize_pretty` is for human terminals, this is for
+/// machine consumers where every whitespace byte is a wasted token.
+pub(crate) fn serialize_compact<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_string(value).unwrap_or_else(|e| e.to_string())
+}
+
 /// Format a single diagnostic as a human-readable line:
 /// `severity[code] (subject_id): message` (the subject is omitted when absent).
 pub(crate) fn format_diagnostic_line(d: &zenith_core::Diagnostic) -> String {
