@@ -91,10 +91,11 @@ pub(in crate::validate::check) fn check_pattern(
         diagnostics,
     );
 
-    // Visual properties — token refs collected for token-usage checks.
-    // This mirrors the complete set that check_rect collects so that a token
-    // used only on a pattern's border/stroke-outer/blur props is counted as
-    // used. Pattern has no corner-radius props, so all radius fields are `None`.
+    // Visual properties — token refs collected for token-usage checks, and the
+    // shared per-corner-radius / stroke-dash guards. This mirrors the complete
+    // set that check_rect collects so a token used only on a pattern's
+    // border/stroke-outer/radius/blur props is counted as used; the pattern's
+    // fill/stroke/radius paint its bounds background panel.
     let props = VisualProps {
         fill: p.fill.as_ref(),
         stroke: p.stroke.as_ref(),
@@ -110,11 +111,11 @@ pub(in crate::validate::check) fn check_pattern(
         border_width: p.border_width.as_ref(),
         stroke_outer_width: p.stroke_outer_width.as_ref(),
         blend_mode: p.blend_mode.as_deref(),
-        radius: None,
-        radius_tl: None,
-        radius_tr: None,
-        radius_br: None,
-        radius_bl: None,
+        radius: p.radius.as_ref(),
+        radius_tl: p.radius_tl.as_ref(),
+        radius_tr: p.radius_tr.as_ref(),
+        radius_br: p.radius_br.as_ref(),
+        radius_bl: p.radius_bl.as_ref(),
         shadow: p.shadow.as_ref(),
         filter: p.filter.as_ref(),
         mask: p.mask.as_ref(),

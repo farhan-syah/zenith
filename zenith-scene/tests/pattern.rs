@@ -206,6 +206,105 @@ fn clip_brackets_instances() {
     );
 }
 
+// ── Background panel: a fill paints behind the clipped motif tiling ───────────
+
+#[test]
+fn background_fill_paints_before_clip() {
+    // The pattern carries its OWN `fill` → a FillRect of the bounds box is
+    // emitted BEFORE the bounds PushClip (so the panel sits behind the tiling
+    // and any stroke outline is not clipped).
+    let src = doc_with_node(
+        r##"pattern id="pat.bg" kind="grid" x=(px)10 y=(px)20 w=(px)100 h=(px)50 spacing=(px)50 fill="#102030" {
+      ellipse id="dot" x=(px)0 y=(px)0 w=(px)10 h=(px)10 fill="#ffffff"
+    }"##,
+    );
+    let doc = parse(&src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+
+    // Index of the bounds PushClip.
+    let push_idx = cmds
+        .iter()
+        .position(|c| {
+            matches!(
+                c,
+                SceneCommand::PushClip { x, y, w, h }
+                    if (*x - 10.0).abs() < 1e-6
+                        && (*y - 20.0).abs() < 1e-6
+                        && (*w - 100.0).abs() < 1e-6
+                        && (*h - 50.0).abs() < 1e-6
+            )
+        })
+        .expect("expected a PushClip of the pattern bounds box");
+
+    // A FillRect of the bounds box must precede the clip.
+    let fill_idx = cmds
+        .iter()
+        .position(|c| {
+            matches!(
+                c,
+                SceneCommand::FillRect { x, y, w, h, .. }
+                    if (*x - 10.0).abs() < 1e-6
+                        && (*y - 20.0).abs() < 1e-6
+                        && (*w - 100.0).abs() < 1e-6
+                        && (*h - 50.0).abs() < 1e-6
+            )
+        })
+        .expect("expected a FillRect of the pattern bounds box (background panel)");
+    assert!(
+        fill_idx < push_idx,
+        "background fill must be emitted before the bounds clip"
+    );
+}
+
+#[test]
+fn no_background_without_fill_or_stroke() {
+    // A pattern WITHOUT fill/stroke emits no background panel: the first command
+    // for the pattern is the bounds PushClip, exactly as before (byte-identical).
+    let src = doc_with_node(
+        r##"pattern id="pat.plain" kind="grid" x=(px)10 y=(px)20 w=(px)100 h=(px)50 spacing=(px)50 {
+      ellipse id="dot" x=(px)0 y=(px)0 w=(px)10 h=(px)10 fill="#ffffff"
+    }"##,
+    );
+    let doc = parse(&src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+
+    let push_idx = cmds
+        .iter()
+        .position(|c| {
+            matches!(
+                c,
+                SceneCommand::PushClip { x, y, w, h }
+                    if (*x - 10.0).abs() < 1e-6
+                        && (*y - 20.0).abs() < 1e-6
+                        && (*w - 100.0).abs() < 1e-6
+                        && (*h - 50.0).abs() < 1e-6
+            )
+        })
+        .expect("expected a PushClip of the pattern bounds box");
+
+    // No bounds-box FillRect / FillRoundedRect / StrokeRect / StrokeRoundedRect
+    // exists anywhere before the clip.
+    let has_panel = cmds[..push_idx].iter().any(|c| {
+        matches!(
+            c,
+            SceneCommand::FillRect { x, y, w, h, .. }
+            | SceneCommand::FillRoundedRect { x, y, w, h, .. }
+            | SceneCommand::StrokeRect { x, y, w, h, .. }
+            | SceneCommand::StrokeRoundedRect { x, y, w, h, .. }
+                if (*x - 10.0).abs() < 1e-6
+                    && (*y - 20.0).abs() < 1e-6
+                    && (*w - 100.0).abs() < 1e-6
+                    && (*h - 50.0).abs() < 1e-6
+        )
+    });
+    assert!(
+        !has_panel,
+        "a pattern without fill/stroke must emit no background panel"
+    );
+}
+
 // ── Absent pattern: byte-identical compile (sanity) ───────────────────────────
 
 #[test]

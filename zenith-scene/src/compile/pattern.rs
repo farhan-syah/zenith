@@ -8,21 +8,24 @@
 //! folded into its [`RenderCtx`] — exactly how a group translates its children —
 //! so the motif keeps its own authored geometry and gains the instance offset.
 //!
-//! Only the motif instances render: the pattern's own visual properties
-//! (fill/stroke/shadow/…) are inert here; the bounds box is used solely to clip
-//! the instances. Placement is fully deterministic — instance offsets are
-//! computed by `zenith_core::pattern_positions`, which is the single source of
-//! truth shared with any other backend (e.g. the detach transaction op).
+//! The pattern's own `fill` (solid or gradient), `radius` (uniform rounded
+//! corners), and `stroke` + `stroke-width` paint a background panel behind the
+//! clipped motif tiling; a pattern without any of those emits nothing new and is
+//! byte-identical to before. The remaining visual properties (shadow/blur/mask/
+//! per-corner radii/…) are inert. Placement is fully deterministic — instance
+//! offsets are computed by `zenith_core::pattern_positions`, which is the single
+//! source of truth shared with any other backend (e.g. the detach transaction op).
 
 use zenith_core::{Diagnostic, PatternLayout, PatternNode, Severity, dim_to_px, pattern_positions};
 
-use crate::ir::SceneCommand;
+use crate::ir::{Paint, SceneCommand};
 
 use super::NodeCtx;
 use super::RenderCtx;
 use super::anchor::AnchorMap;
 use super::compile_node;
-use super::util::resolve_anchored_axis;
+use super::paint::{apply_gradient_opacity, resolve_property_color, resolve_property_gradient};
+use super::util::{resolve_anchored_axis, resolve_property_dimension_px};
 
 /// Compile a `pattern` node by expanding its motif across the resolved bounds.
 ///
@@ -79,6 +82,12 @@ pub(in crate::compile) fn compile_pattern(
     // each instance is recompiled at its own offset below.
     diagnostics.extend(scratch_diags);
 
+    // Paint the pattern's own background panel (fill + stroke) for the bounds
+    // box BEFORE the clip, so the stroke outline is not clipped. A pattern with
+    // neither a resolvable fill nor stroke emits nothing here, leaving the
+    // command stream byte-identical to before.
+    emit_background(pattern, cx, commands, diagnostics, ctx, (bx, by, bw, bh));
+
     // Clip every instance to the bounds box (in device space).
     commands.push(SceneCommand::PushClip {
         x: ctx.dx + bx,
@@ -110,6 +119,129 @@ pub(in crate::compile) fn compile_pattern(
     commands.push(SceneCommand::PopClip);
 
     0.0
+}
+
+/// Paint the pattern's background panel (fill, then stroke on top) for the
+/// bounds box in device space, using the pattern's OWN visual props.
+///
+/// `box_local` is `(bx, by, bw, bh)` in LOCAL space; device coords add
+/// `ctx.dx`/`ctx.dy`. The fill honors a solid color or a gradient token; the
+/// stroke honors a color + width (defaulting to 1px like the rect compiler).
+/// `radius` resolves to a UNIFORM rounded corner (absent/≤0 → sharp). The node
+/// opacity (× `ctx.opacity`) scales solid-color alpha and gradient stops.
+///
+/// Emits nothing when neither fill nor stroke resolves → byte-identical to a
+/// pattern that never carried these props. Shadow/blur/mask/per-corner radii are
+/// intentionally NOT handled here (they remain inert for patterns).
+fn emit_background(
+    pattern: &PatternNode,
+    cx: NodeCtx,
+    commands: &mut Vec<SceneCommand>,
+    diagnostics: &mut Vec<Diagnostic>,
+    ctx: RenderCtx,
+    box_local: (f64, f64, f64, f64),
+) {
+    let (bx, by, bw, bh) = box_local;
+    let x = ctx.dx + bx;
+    let y = ctx.dy + by;
+
+    // Opacity cascade: node opacity × ctx opacity (no blend layer for the panel).
+    let color_op = pattern.opacity.unwrap_or(1.0).clamp(0.0, 1.0) * ctx.opacity;
+
+    // Uniform corner radius (absent/≤0 → sharp). Per-corner overrides are inert.
+    let radius = resolve_property_dimension_px(pattern.radius.as_ref(), cx.resolved, 0.0);
+    let is_rounded = radius > 0.0;
+    // The rect compiler passes `None` for `radii` when there are no per-corner
+    // overrides; match that so a uniform-radius panel is byte-identical in shape.
+    let radii: Option<[f64; 4]> = None;
+
+    // FILL (emitted first, under the stroke).
+    if let Some(fill_prop) = pattern.fill.as_ref() {
+        if let Some(mut gradient) = resolve_property_gradient(fill_prop, cx.resolved, &pattern.id) {
+            apply_gradient_opacity(&mut gradient, color_op, 1.0);
+            let paint = Paint::Gradient(gradient);
+            if is_rounded {
+                commands.push(SceneCommand::FillRoundedRect {
+                    x,
+                    y,
+                    w: bw,
+                    h: bh,
+                    radius,
+                    radii,
+                    paint,
+                });
+            } else {
+                commands.push(SceneCommand::FillRect {
+                    x,
+                    y,
+                    w: bw,
+                    h: bh,
+                    paint,
+                });
+            }
+        } else if let Some(mut color) =
+            resolve_property_color(fill_prop, cx.resolved, diagnostics, &pattern.id)
+        {
+            color.a = (color.a as f64 * color_op).round() as u8;
+            let paint = Paint::solid(color);
+            if is_rounded {
+                commands.push(SceneCommand::FillRoundedRect {
+                    x,
+                    y,
+                    w: bw,
+                    h: bh,
+                    radius,
+                    radii,
+                    paint,
+                });
+            } else {
+                commands.push(SceneCommand::FillRect {
+                    x,
+                    y,
+                    w: bw,
+                    h: bh,
+                    paint,
+                });
+            }
+        }
+    }
+
+    // STROKE (emitted on top of the fill, centered on the bounds edge).
+    if let Some(stroke_prop) = pattern.stroke.as_ref()
+        && let Some(mut color) =
+            resolve_property_color(stroke_prop, cx.resolved, diagnostics, &pattern.id)
+    {
+        color.a = (color.a as f64 * color_op).round() as u8;
+        let stroke_width =
+            resolve_property_dimension_px(pattern.stroke_width.as_ref(), cx.resolved, 1.0);
+        if is_rounded {
+            commands.push(SceneCommand::StrokeRoundedRect {
+                x,
+                y,
+                w: bw,
+                h: bh,
+                radius,
+                radii,
+                color,
+                stroke_width,
+                stroke_dash: None,
+                stroke_gap: None,
+                stroke_linecap: None,
+            });
+        } else {
+            commands.push(SceneCommand::StrokeRect {
+                x,
+                y,
+                w: bw,
+                h: bh,
+                color,
+                stroke_width,
+                stroke_dash: None,
+                stroke_gap: None,
+                stroke_linecap: None,
+            });
+        }
+    }
 }
 
 /// Resolve the pattern's bounds box `(bx, by, bw, bh)` in LOCAL (pre-ctx) space.
