@@ -12,7 +12,7 @@ use crate::error::ParseError;
 use super::document::transform_children;
 use super::helpers::{
     collect_unknown_props, node_span, optional_bool_prop, optional_dimension_prop,
-    optional_f64_prop, optional_property_value, optional_property_value_aliased,
+    optional_f64_prop, optional_i64_prop, optional_property_value, optional_property_value_aliased,
     optional_string_prop, optional_string_prop_aliased, optional_u32_prop, required_string_prop,
 };
 use super::leaf::transform_span;
@@ -108,6 +108,11 @@ pub(crate) const GROUP_KNOWN_PROPS: &[&str] = &[
     "blend_mode",
     "blur",
     "style",
+    "semantic-role",
+    "semantic_role",
+    "intensity",
+    "layer-priority",
+    "layer_priority",
     "anchor",
     "anchor-zone",
     "anchor_zone",
@@ -142,6 +147,11 @@ pub(super) fn transform_group(node: &KdlNode) -> Result<GroupNode, ParseError> {
             .map(str::to_owned),
         blur: optional_dimension_prop(node, "blur"),
         style: optional_string_prop(node, "style").map(str::to_owned),
+        semantic_role: optional_string_prop_aliased(node, "semantic-role", "semantic_role")
+            .map(str::to_owned),
+        intensity: optional_f64_prop(node, "intensity"),
+        layer_priority: optional_i64_prop(node, "layer-priority")
+            .or_else(|| optional_i64_prop(node, "layer_priority")),
         children: transform_children(node)?,
         anchor: optional_string_prop(node, "anchor").map(str::to_owned),
         anchor_zone: optional_string_prop(node, "anchor-zone")

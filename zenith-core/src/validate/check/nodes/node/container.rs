@@ -199,6 +199,17 @@ pub(in crate::validate::check) fn check_group(
         ));
     }
 
+    if let Some(v) = g.intensity
+        && !(0.0..=1.0).contains(&v)
+    {
+        diagnostics.push(Diagnostic::warning(
+            "group.invalid_intensity",
+            format!("group '{}': intensity {v} is out of range 0.0..=1.0", g.id),
+            g.source_span,
+            Some(g.id.clone()),
+        ));
+    }
+
     // Unknown properties.
     check_unknown_props("group", &g.id, &g.unknown_props, g.source_span, diagnostics);
 }

@@ -583,3 +583,109 @@ fn test_unknown_node_preserves_known_child() {
         "unknown node with a known child must survive parse → format → parse"
     );
 }
+
+/// **group semantic scalars round-trip**: a group with all three semantic-role,
+/// intensity, and layer-priority set parses into the correct AST fields and
+/// survives a parse → format → parse cycle with values preserved.
+#[test]
+fn group_semantic_scalars_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.sem" name="SEM"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.sem" title="SEM" {
+    page id="page.sem" w=(px)800 h=(px)600 {
+      group id="grp.sem" semantic-role="overlay" intensity=0.75 layer-priority=3 {
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let grp = match &doc.body.pages[0].children[0] {
+        Node::Group(g) => g,
+        other => panic!("expected Group node, got {other:?}"),
+    };
+    assert_eq!(grp.semantic_role.as_deref(), Some("overlay"));
+    assert_eq!(grp.intensity, Some(0.75));
+    assert_eq!(grp.layer_priority, Some(3));
+
+    let formatted = format_document(&doc).expect("format must succeed");
+    let doc2 = adapter
+        .parse(&formatted)
+        .expect("re-parse after format must succeed");
+    assert_eq!(
+        strip_spans(doc).body.pages[0].children,
+        strip_spans(doc2).body.pages[0].children,
+        "group with semantic scalars must survive parse → format → parse"
+    );
+}
+
+/// **group semantic scalars absent — byte identity**: a plain group with none of
+/// the three fields must not emit any of semantic-role, intensity, or
+/// layer-priority in its formatted output.
+#[test]
+fn group_semantic_scalars_absent_byte_identity() {
+    let src = r##"zenith version=1 {
+  project id="proj.plain" name="PLAIN"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.plain" title="PLAIN" {
+    page id="page.plain" w=(px)800 h=(px)600 {
+      group id="grp.plain" {
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let formatted = format_document(&doc).expect("format must succeed");
+    let text = String::from_utf8_lossy(&formatted);
+    assert!(
+        !text.contains("semantic-role"),
+        "plain group must not emit semantic-role; got:\n{text}"
+    );
+    assert!(
+        !text.contains("intensity"),
+        "plain group must not emit intensity; got:\n{text}"
+    );
+    assert!(
+        !text.contains("layer-priority"),
+        "plain group must not emit layer-priority; got:\n{text}"
+    );
+}
+
+/// **group semantic scalars format idempotency**: formatting a document that
+/// contains all three semantic scalar fields twice must produce the same output.
+#[test]
+fn group_semantic_scalars_format_idempotency() {
+    let src = r##"zenith version=1 {
+  project id="proj.idem" name="IDEM"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.idem" title="IDEM" {
+    page id="page.idem" w=(px)800 h=(px)600 {
+      group id="grp.idem" semantic-role="background" intensity=0.5 layer-priority=-1 {
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let first = format_document(&doc).expect("first format must succeed");
+    let doc2 = adapter.parse(&first).expect("re-parse must succeed");
+    let second = format_document(&doc2).expect("second format must succeed");
+    assert_eq!(
+        first, second,
+        "format must be idempotent for group semantic scalars"
+    );
+}

@@ -125,6 +125,16 @@ pub struct GroupNode {
     /// no blur (byte-identical to having no attribute).
     pub blur: Option<Dimension>,
     pub style: Option<String>,
+    /// Advisory semantic layer role for external tooling (e.g. `"background"`,
+    /// `"overlay"`). Non-rendering; distinct from the structural `role` field.
+    /// Open-ended string; no value is invalid.
+    pub semantic_role: Option<String>,
+    /// Advisory visual prominence hint in the range `0.0..=1.0`. Non-rendering;
+    /// values outside this range produce a validation warning.
+    pub intensity: Option<f64>,
+    /// Advisory z-ordering hint for external tooling. Non-rendering; all integer
+    /// values are valid.
+    pub layer_priority: Option<i64>,
     /// Child nodes in source order.
     pub children: Vec<Node>,
     /// Page-relative placement anchor (one of the nine named positions, e.g.
