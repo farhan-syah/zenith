@@ -161,13 +161,26 @@ pub(super) fn write_opt_dimension(out: &mut String, key: &str, opt: &Option<Dime
     }
 }
 
-/// Emit `key="string"` for an optional string (quoted).
+/// Emit `key="string"` for an optional string (quoted, no escaping).
 pub(super) fn write_opt_str(out: &mut String, key: &str, opt: &Option<String>) {
     if let Some(s) = opt {
         out.push(' ');
         out.push_str(key);
         out.push_str("=\"");
         out.push_str(s);
+        out.push('"');
+    }
+}
+
+/// Emit `key="string"` for an optional string, running the value through
+/// [`escape_kdl_string`] so that backslashes, quotes, and whitespace control
+/// characters survive as a single-line KDL string.
+pub(super) fn write_opt_str_escaped(out: &mut String, key: &str, opt: &Option<String>) {
+    if let Some(s) = opt {
+        out.push(' ');
+        out.push_str(key);
+        out.push_str("=\"");
+        out.push_str(&escape_kdl_string(s));
         out.push('"');
     }
 }
@@ -438,7 +451,8 @@ fn write_asset_decl(decl: &AssetDecl, out: &mut String, depth: usize) {
     indent(out, depth);
     out.push_str("asset");
 
-    // Canonical property order: id, kind, src, sha256, then unknown_props (sorted).
+    // Canonical property order: id, kind, src, sha256, ai-* provenance fields
+    // (in the order below), then unknown_props (sorted).
     out.push_str(" id=\"");
     out.push_str(&decl.id);
     out.push('"');
@@ -456,6 +470,22 @@ fn write_asset_decl(decl: &AssetDecl, out: &mut String, depth: usize) {
         out.push_str(sha256);
         out.push('"');
     }
+
+    // AI-generation provenance fields — all optional, emitted only when Some.
+    // Free-form string fields pass through escape_kdl_string so quotes and
+    // newlines (common in prompts) survive as single-line KDL strings.
+    write_opt_str_escaped(out, "ai-prompt", &decl.ai_prompt);
+    write_opt_str_escaped(out, "ai-model", &decl.ai_model);
+    write_opt_str_escaped(out, "ai-provider", &decl.ai_provider);
+    if let Some(seed) = decl.ai_seed {
+        out.push_str(" ai-seed=");
+        let _ = write!(out, "{seed}");
+    }
+    write_opt_str_escaped(out, "ai-generation-date", &decl.ai_generation_date);
+    write_opt_str_escaped(out, "ai-license", &decl.ai_license);
+    write_opt_str_escaped(out, "ai-source-rights", &decl.ai_source_rights);
+    write_opt_str_escaped(out, "ai-safety-status", &decl.ai_safety_status);
+    write_opt_str_escaped(out, "ai-reuse-policy", &decl.ai_reuse_policy);
 
     // Unknown properties in sorted key order (BTreeMap iteration is sorted).
     for (key, prop) in &decl.unknown_props {

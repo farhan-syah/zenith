@@ -63,6 +63,15 @@ fn image_asset(id: &str, src: &str) -> AssetDecl {
         kind: AssetKind::Image,
         src: src.to_owned(),
         sha256: None,
+        ai_prompt: None,
+        ai_model: None,
+        ai_provider: None,
+        ai_seed: None,
+        ai_generation_date: None,
+        ai_license: None,
+        ai_source_rights: None,
+        ai_safety_status: None,
+        ai_reuse_policy: None,
         source_span: None,
         unknown_props: BTreeMap::new(),
     }
@@ -78,6 +87,15 @@ fn asset_clean_block_no_diagnostics() {
             kind: AssetKind::Svg,
             src: "assets/logo.svg".to_owned(),
             sha256: Some("deadbeef".to_owned()),
+            ai_prompt: None,
+            ai_model: None,
+            ai_provider: None,
+            ai_seed: None,
+            ai_generation_date: None,
+            ai_license: None,
+            ai_source_rights: None,
+            ai_safety_status: None,
+            ai_reuse_policy: None,
             source_span: None,
             unknown_props: BTreeMap::new(),
         },
@@ -136,6 +154,15 @@ fn asset_unknown_kind_produces_invalid_kind() {
         kind: AssetKind::Unknown("movie".to_owned()),
         src: "clips/intro.mp4".to_owned(),
         sha256: None,
+        ai_prompt: None,
+        ai_model: None,
+        ai_provider: None,
+        ai_seed: None,
+        ai_generation_date: None,
+        ai_license: None,
+        ai_source_rights: None,
+        ai_safety_status: None,
+        ai_reuse_policy: None,
         source_span: None,
         unknown_props: BTreeMap::new(),
     }]);
@@ -207,6 +234,15 @@ fn asset_unknown_property_produces_warning() {
         kind: AssetKind::Image,
         src: "img/hi.png".to_owned(),
         sha256: None,
+        ai_prompt: None,
+        ai_model: None,
+        ai_provider: None,
+        ai_seed: None,
+        ai_generation_date: None,
+        ai_license: None,
+        ai_source_rights: None,
+        ai_safety_status: None,
+        ai_reuse_policy: None,
         source_span: None,
         unknown_props,
     }]);
@@ -366,4 +402,39 @@ fn image_invalid_fit_warns() {
     assert_eq!(diag.severity, Severity::Warning);
     // invalid_fit is forward-compat: a Warning, not an Error.
     assert!(!report.has_errors());
+}
+
+// ── AI-provenance fields: no asset.unknown_property diagnostic ────────
+
+/// Assets with all 9 known `ai-` fields must not trigger `asset.unknown_property`.
+#[test]
+fn test_asset_ai_provenance_no_unknown_property_warning() {
+    let doc = doc_with_assets(vec![AssetDecl {
+        id: "asset.ai-full".to_owned(),
+        kind: AssetKind::Image,
+        src: "assets/ai.png".to_owned(),
+        sha256: None,
+        ai_prompt: Some("a red fox".to_owned()),
+        ai_model: Some("dall-e-3".to_owned()),
+        ai_provider: Some("openai".to_owned()),
+        ai_seed: Some(42),
+        ai_generation_date: Some("2024-01-15".to_owned()),
+        ai_license: Some("CC0-1.0".to_owned()),
+        ai_source_rights: Some("none".to_owned()),
+        ai_safety_status: Some("approved".to_owned()),
+        ai_reuse_policy: Some("free".to_owned()),
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    }]);
+    let report = validate(&doc);
+    let unknown_prop_diags: Vec<_> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "asset.unknown_property")
+        .collect();
+    assert!(
+        unknown_prop_diags.is_empty(),
+        "ai-provenance fields must not trigger asset.unknown_property; got: {:?}",
+        codes(&report)
+    );
 }

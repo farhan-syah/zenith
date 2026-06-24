@@ -58,6 +58,24 @@ pub struct AssetDecl {
     pub src: String,
     /// Optional SHA-256 hex digest for content integrity.
     pub sha256: Option<String>,
+    /// The prompt text used to generate this asset, if AI-generated.
+    pub ai_prompt: Option<String>,
+    /// The model identifier used to generate this asset (e.g. `"dall-e-3"`).
+    pub ai_model: Option<String>,
+    /// The provider that hosted the generation model (e.g. `"openai"`).
+    pub ai_provider: Option<String>,
+    /// The random seed passed to the generation model, for reproducibility.
+    pub ai_seed: Option<i64>,
+    /// The date on which this asset was generated (free-form string).
+    pub ai_generation_date: Option<String>,
+    /// The license under which the generated asset may be used.
+    pub ai_license: Option<String>,
+    /// Rights information for the source material used during generation.
+    pub ai_source_rights: Option<String>,
+    /// Safety review status of the generated asset.
+    pub ai_safety_status: Option<String>,
+    /// Policy governing reuse of this generated asset.
+    pub ai_reuse_policy: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Forward-compat unknown properties captured during parse.
