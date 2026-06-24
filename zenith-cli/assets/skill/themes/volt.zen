@@ -1,5 +1,5 @@
 // @zenith/theme.volt — electric lime + black on light
-// scheme: light | depth: 1 | noise: 0 (1 = apply a noise/grain filter; see examples/noise.zen)
+// scheme: light | depth: 1 | noise: 0 (1 = apply a noise/grain filter)
 zenith version=1 {
   project id="@zenith/theme.volt" name="Theme: volt"
   tokens format="zenith-token-v1" {

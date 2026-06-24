@@ -1,5 +1,5 @@
 // @zenith/theme.cobalt — crisp corporate indigo/blue, large rounded boxes
-// scheme: light | depth: 0 | noise: 1 (1 = apply a noise/grain filter; see examples/noise.zen)
+// scheme: light | depth: 0 | noise: 1 (1 = apply a noise/grain filter)
 zenith version=1 {
   project id="@zenith/theme.cobalt" name="Theme: cobalt"
   tokens format="zenith-token-v1" {

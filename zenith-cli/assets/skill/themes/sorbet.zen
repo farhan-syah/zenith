@@ -1,5 +1,5 @@
 // @zenith/theme.sorbet — soft warm pastel, rounded
-// scheme: light | depth: 0 | noise: 0 (1 = apply a noise/grain filter; see examples/noise.zen)
+// scheme: light | depth: 0 | noise: 0 (1 = apply a noise/grain filter)
 zenith version=1 {
   project id="@zenith/theme.sorbet" name="Theme: sorbet"
   tokens format="zenith-token-v1" {

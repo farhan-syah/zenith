@@ -1,5 +1,5 @@
 // @zenith/theme.lagoon — light teal and blue, crisp
-// scheme: light | depth: 1 | noise: 1 (1 = apply a noise/grain filter; see examples/noise.zen)
+// scheme: light | depth: 1 | noise: 1 (1 = apply a noise/grain filter)
 zenith version=1 {
   project id="@zenith/theme.lagoon" name="Theme: lagoon"
   tokens format="zenith-token-v1" {

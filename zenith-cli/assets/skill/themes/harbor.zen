@@ -1,5 +1,5 @@
 // @zenith/theme.harbor — dark navy with warm amber and sky accents
-// scheme: dark | depth: 0 | noise: 1 (1 = apply a noise/grain filter; see examples/noise.zen)
+// scheme: dark | depth: 0 | noise: 1 (1 = apply a noise/grain filter)
 zenith version=1 {
   project id="@zenith/theme.harbor" name="Theme: harbor"
   tokens format="zenith-token-v1" {

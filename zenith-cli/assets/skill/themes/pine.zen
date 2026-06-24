@@ -1,5 +1,5 @@
 // @zenith/theme.pine — dark emerald/teal, minimal and flat
-// scheme: dark | depth: 0 | noise: 0 (1 = apply a noise/grain filter; see examples/noise.zen)
+// scheme: dark | depth: 0 | noise: 0 (1 = apply a noise/grain filter)
 zenith version=1 {
   project id="@zenith/theme.pine" name="Theme: pine"
   tokens format="zenith-token-v1" {

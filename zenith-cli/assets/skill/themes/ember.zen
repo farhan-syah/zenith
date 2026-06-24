@@ -1,5 +1,5 @@
 // @zenith/theme.ember — warm dark, amber-gold with green accents
-// scheme: dark | depth: 1 | noise: 1 (1 = apply a noise/grain filter; see examples/noise.zen)
+// scheme: dark | depth: 1 | noise: 1 (1 = apply a noise/grain filter)
 zenith version=1 {
   project id="@zenith/theme.ember" name="Theme: ember"
   tokens format="zenith-token-v1" {

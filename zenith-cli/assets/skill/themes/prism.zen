@@ -1,5 +1,5 @@
 // @zenith/theme.prism — bright cyan/violet on clean light
-// scheme: light | depth: 1 | noise: 1 (1 = apply a noise/grain filter; see examples/noise.zen)
+// scheme: light | depth: 1 | noise: 1 (1 = apply a noise/grain filter)
 zenith version=1 {
   project id="@zenith/theme.prism" name="Theme: prism"
   tokens format="zenith-token-v1" {
