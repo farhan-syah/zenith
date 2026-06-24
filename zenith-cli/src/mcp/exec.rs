@@ -90,24 +90,28 @@ fn run_render(args: &Value) -> Result<String, String> {
     let locked = flag(args, "locked");
     let parent = Path::new(path).parent();
     let src = read(path)?;
+    // MCP has no policy flags; config files (global + local) are still resolved
+    // by parse_validate using the document's parent directory.
+    let flags = crate::config::CliPolicyFlags::default();
 
     match format {
         "png" => {
-            let art = commands::render::to_png_with_dir(&src, parent, page, locked)
+            let art = commands::render::to_png_with_dir(&src, parent, page, locked, &flags)
                 .map_err(|e| e.message)?;
             blocked(&art.diagnostics)?;
             std::fs::write(out, &art.png).map_err(|e| format!("error writing '{out}': {e}"))?;
             Ok(report_write("PNG", out, &art.diagnostics))
         }
         "pdf" => {
-            let art = commands::render::to_pdf_with_dir(&src, parent, page, locked)
+            let art = commands::render::to_pdf_with_dir(&src, parent, page, locked, &flags)
                 .map_err(|e| e.message)?;
             blocked(&art.diagnostics)?;
             std::fs::write(out, &art.pdf).map_err(|e| format!("error writing '{out}': {e}"))?;
             Ok(report_write("PDF", out, &art.diagnostics))
         }
         "scene" => {
-            let art = commands::render::to_scene_json(&src, parent, page).map_err(|e| e.message)?;
+            let art = commands::render::to_scene_json(&src, parent, page, &flags)
+                .map_err(|e| e.message)?;
             blocked(&art.diagnostics)?;
             std::fs::write(out, art.json.as_bytes())
                 .map_err(|e| format!("error writing '{out}': {e}"))?;

@@ -1,8 +1,12 @@
 //! Shared parse/validate, page-resolution, and hash-verification helpers.
 
+use std::path::Path;
+
 use sha2::{Digest, Sha256};
 
-use zenith_core::{Document, KdlAdapter, KdlSource, validate};
+use zenith_core::{Document, KdlAdapter, KdlSource, validate_with_policy};
+
+use crate::config::{CliPolicyFlags, load_global_and_local, merge_policy};
 
 use super::entry::RenderCmdErr;
 
@@ -34,18 +38,38 @@ pub(super) fn verify_locked_sha256(
     Ok(())
 }
 
-/// Parse → validate, returning the parsed [`Document`].
+/// Parse → validate with the merged diagnostic policy, returning the parsed
+/// [`Document`].
 ///
-/// Returns early with an error if parse fails (exit code 2) or if validation
-/// has errors (exit code 1).
-pub(super) fn parse_validate(src: &str) -> Result<Document, RenderCmdErr> {
+/// The effective policy is `merge_policy(global, local, in_file, flags)`,
+/// mirroring the `validate` command exactly:
+/// - Global config is always consulted.
+/// - Local config is walked up from `start_dir` when `Some`.
+/// - In-file policy comes from the parsed document.
+/// - CLI flags layer on top.
+///
+/// A config-load error returns exit code 2. Parse errors return exit code 2.
+/// Validation errors (at least one Error-severity diagnostic after policy
+/// application) return exit code 1. With no config files and no flags the
+/// merged policy equals the in-file policy, so the result is byte-identical
+/// to the old behaviour.
+pub(super) fn parse_validate(
+    src: &str,
+    start_dir: Option<&Path>,
+    flags: &CliPolicyFlags,
+) -> Result<Document, RenderCmdErr> {
+    // Resolve config policy ───────────────────────────────────────────────────
+    let (global, local) = load_global_and_local(start_dir)
+        .map_err(|msg| RenderCmdErr::new(format!("error[config.error]: {msg}"), 2))?;
+
     // Parse ─────────────────────────────────────────────────────────────────
     let doc = KdlAdapter
         .parse(src.as_bytes())
         .map_err(|e| RenderCmdErr::new(format!("error[parse.error]: {}", e.message), 2))?;
 
     // Validate ───────────────────────────────────────────────────────────────
-    let report = validate(&doc);
+    let merged = merge_policy(&global, &local, &doc.diagnostic_policy, flags);
+    let report = validate_with_policy(&doc, &merged);
     if report.has_errors() {
         let msgs: Vec<String> = report
             .diagnostics

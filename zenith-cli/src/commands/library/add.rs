@@ -282,7 +282,13 @@ mod tests {
 
         // Smoke: the document compiles to a non-empty scene (instance expands to
         // the shape) when rendered to a scene JSON.
-        let artifact = crate::commands::render::to_scene_json(&src, None, 1).expect("compile ok");
+        let artifact = crate::commands::render::to_scene_json(
+            &src,
+            None,
+            1,
+            &crate::config::CliPolicyFlags::default(),
+        )
+        .expect("compile ok");
         let scene: serde_json::Value =
             serde_json::from_str(&artifact.json).expect("scene json parses");
         let commands = scene["commands"].as_array().expect("commands array");
@@ -432,8 +438,13 @@ mod tests {
             "applied errors: {:?}",
             applied_errors
         );
-        let artifact =
-            crate::commands::render::to_scene_json(&applied_src, None, 1).expect("compile ok");
+        let artifact = crate::commands::render::to_scene_json(
+            &applied_src,
+            None,
+            1,
+            &crate::config::CliPolicyFlags::default(),
+        )
+        .expect("compile ok");
         let scene: serde_json::Value =
             serde_json::from_str(&artifact.json).expect("scene json parses");
         let commands = scene["commands"].as_array().expect("commands array");

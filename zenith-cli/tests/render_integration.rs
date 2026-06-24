@@ -3,6 +3,7 @@
 //! byte-identical determinism across two back-to-back renders.
 
 use zenith_cli::commands::render::to_png_with_dir;
+use zenith_cli::config::CliPolicyFlags;
 
 /// Render `examples/<name>.zen` twice and assert the output is a valid,
 /// byte-identical PNG.  All per-fixture tests delegate here.
@@ -19,9 +20,15 @@ fn assert_example_renders(name: &str) {
     let src = std::fs::read_to_string(&fixture)
         .unwrap_or_else(|e| panic!("could not read {}: {}", fixture.display(), e));
 
-    let png = to_png_with_dir(&src, Some(&examples_dir), 1, false)
-        .unwrap_or_else(|e| panic!("render failed (exit {}): {}", e.exit_code, e.message))
-        .png;
+    let png = to_png_with_dir(
+        &src,
+        Some(&examples_dir),
+        1,
+        false,
+        &CliPolicyFlags::default(),
+    )
+    .unwrap_or_else(|e| panic!("render failed (exit {}): {}", e.exit_code, e.message))
+    .png;
 
     // Must be non-empty.
     assert!(!png.is_empty(), "PNG output must not be empty");
@@ -39,9 +46,15 @@ fn assert_example_renders(name: &str) {
     );
 
     // Determinism: two renders must be byte-identical.
-    let png2 = to_png_with_dir(&src, Some(&examples_dir), 1, false)
-        .unwrap_or_else(|e| panic!("second render failed (exit {}): {}", e.exit_code, e.message))
-        .png;
+    let png2 = to_png_with_dir(
+        &src,
+        Some(&examples_dir),
+        1,
+        false,
+        &CliPolicyFlags::default(),
+    )
+    .unwrap_or_else(|e| panic!("second render failed (exit {}): {}", e.exit_code, e.message))
+    .png;
     assert_eq!(
         png, png2,
         "two renders of {name}.zen must produce identical bytes"
@@ -247,7 +260,13 @@ fn swatch_doc(sha256: Option<&str>) -> String {
 #[test]
 fn locked_correct_sha256_renders_ok() {
     let src = swatch_doc(Some(SWATCH_SHA256));
-    let result = to_png_with_dir(&src, Some(&examples_dir()), 1, true);
+    let result = to_png_with_dir(
+        &src,
+        Some(&examples_dir()),
+        1,
+        true,
+        &CliPolicyFlags::default(),
+    );
     assert!(
         result.is_ok(),
         "correct sha256 in --locked mode must render: {:?}",
@@ -260,16 +279,28 @@ fn locked_wrong_sha256_errors_exit_2() {
     // Flip the last hex digit.
     let wrong = "9c3fdf4f9c609c6ec749d4ccbd75fda384b32962d5d3893424e22e1fad44c043";
     let src = swatch_doc(Some(wrong));
-    let err = to_png_with_dir(&src, Some(&examples_dir()), 1, true)
-        .expect_err("wrong sha256 in --locked mode must error");
+    let err = to_png_with_dir(
+        &src,
+        Some(&examples_dir()),
+        1,
+        true,
+        &CliPolicyFlags::default(),
+    )
+    .expect_err("wrong sha256 in --locked mode must error");
     assert_eq!(err.exit_code, 2, "sha256 mismatch must exit with code 2");
 }
 
 #[test]
 fn locked_missing_sha256_errors_exit_2() {
     let src = swatch_doc(None);
-    let err = to_png_with_dir(&src, Some(&examples_dir()), 1, true)
-        .expect_err("missing sha256 in --locked mode must error");
+    let err = to_png_with_dir(
+        &src,
+        Some(&examples_dir()),
+        1,
+        true,
+        &CliPolicyFlags::default(),
+    )
+    .expect_err("missing sha256 in --locked mode must error");
     assert_eq!(err.exit_code, 2, "missing sha256 must exit with code 2");
 }
 
@@ -277,7 +308,13 @@ fn locked_missing_sha256_errors_exit_2() {
 fn unlocked_wrong_sha256_renders_ok() {
     let wrong = "0000000000000000000000000000000000000000000000000000000000000000";
     let src = swatch_doc(Some(wrong));
-    let result = to_png_with_dir(&src, Some(&examples_dir()), 1, false);
+    let result = to_png_with_dir(
+        &src,
+        Some(&examples_dir()),
+        1,
+        false,
+        &CliPolicyFlags::default(),
+    );
     assert!(
         result.is_ok(),
         "wrong sha256 must be ignored when not locked: {:?}",
@@ -316,8 +353,14 @@ fn render_missing_asset_yields_asset_missing_error_diagnostic() {
     // Render still returns Ok (the artifact carries the Error); the lib.rs gate
     // is what blocks the PNG write.
     let src = missing_asset_doc();
-    let artifact = to_png_with_dir(&src, Some(&examples_dir()), 1, false)
-        .expect("render must not hard-fail; the missing asset is carried as a diagnostic");
+    let artifact = to_png_with_dir(
+        &src,
+        Some(&examples_dir()),
+        1,
+        false,
+        &CliPolicyFlags::default(),
+    )
+    .expect("render must not hard-fail; the missing asset is carried as a diagnostic");
     let has_missing = artifact
         .diagnostics
         .iter()

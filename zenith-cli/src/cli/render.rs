@@ -53,4 +53,25 @@ pub struct RenderArgs {
     /// Emit machine-readable JSON (diagnostics + output path) to stdout.
     #[arg(long)]
     pub json: bool,
+
+    /// Suppress a diagnostic code (downgrade Warning/Advisory to nothing).
+    ///
+    /// Repeatable. Overrides the document's in-file `diagnostics` block and any
+    /// global/local config policy for this code.
+    #[arg(long = "allow", value_name = "CODE", action = clap::ArgAction::Append)]
+    pub allow: Vec<String>,
+
+    /// Force a diagnostic code to Warning severity.
+    ///
+    /// Repeatable. Overrides the document's in-file `diagnostics` block and any
+    /// global/local config policy for this code.
+    #[arg(long = "warn", value_name = "CODE", action = clap::ArgAction::Append)]
+    pub warn: Vec<String>,
+
+    /// Elevate a diagnostic code to a blocking Error (CI gate).
+    ///
+    /// Repeatable. Overrides the document's in-file `diagnostics` block and any
+    /// global/local config policy for this code.
+    #[arg(long = "deny", value_name = "CODE", action = clap::ArgAction::Append)]
+    pub deny: Vec<String>,
 }

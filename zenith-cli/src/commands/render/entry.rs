@@ -6,6 +6,8 @@ use zenith_core::{BytesAssetProvider, Diagnostic, dim_to_px};
 use zenith_render::{render_pdf, render_png, render_spread_png};
 use zenith_scene::compile_page;
 
+use crate::config::CliPolicyFlags;
+
 use super::assets::{build_asset_provider, build_font_provider, disk_diagnostics};
 use super::pipeline::{parse_validate, resolve_page_index};
 
@@ -61,8 +63,9 @@ pub struct PdfArtifact {
 
 // ── Entry points ──────────────────────────────────────────────────────────────
 
-/// Parse `src`, validate it, compile the requested `page` (1-based), and return
-/// the scene JSON plus the compile-stage diagnostics.
+/// Parse `src`, validate it with the merged diagnostic policy, compile the
+/// requested `page` (1-based), and return the scene JSON plus the
+/// compile-stage diagnostics.
 ///
 /// `project_dir` is the `.zen` file's parent directory. When `Some`, font
 /// assets declared in the document are loaded and registered in the font
@@ -70,7 +73,11 @@ pub struct PdfArtifact {
 /// actual face rather than falling back to the bundled Noto fonts. When
 /// `None`, only the bundled fonts are available.
 ///
+/// `flags` carries the `--allow`/`--warn`/`--deny` CLI overrides; pass
+/// `&CliPolicyFlags::default()` when no flags are available (e.g. MCP).
+///
 /// Returns `Err` when:
+/// - A config file cannot be read (exit code 2).
 /// - The source fails to parse (exit code 2).
 /// - The document has validation errors (exit code 1).
 /// - The `page` is out of range (exit code 2).
@@ -79,8 +86,9 @@ pub fn to_scene_json(
     src: &str,
     project_dir: Option<&Path>,
     page: usize,
+    flags: &CliPolicyFlags,
 ) -> Result<SceneArtifact, RenderCmdErr> {
-    let doc = parse_validate(src)?;
+    let doc = parse_validate(src, project_dir, flags)?;
     let fonts = build_font_provider(&doc, project_dir, false)?;
     let page_index = resolve_page_index(&doc, page)?;
     let compile_result = compile_page(&doc, &fonts, page_index);
@@ -100,19 +108,22 @@ pub fn to_scene_json(
 /// [`to_png_with_dir`] to source asset bytes relative to the document's
 /// directory.
 ///
-/// `page` is the 1-based page number to render.
+/// `page` is the 1-based page number to render. No CLI policy flags are
+/// applied; config files are still resolved (global only, no `start_dir`).
 ///
 /// Returns `Err` when:
+/// - A config file cannot be read (exit code 2).
 /// - The source fails to parse (exit code 2).
 /// - The document has validation errors (exit code 1).
 /// - The `page` is out of range (exit code 2).
 /// - Rendering fails (exit code 2).
 pub fn to_png(src: &str, page: usize) -> Result<PngArtifact, RenderCmdErr> {
-    to_png_with_dir(src, None, page, false)
+    to_png_with_dir(src, None, page, false, &CliPolicyFlags::default())
 }
 
 /// Like [`to_png`], but sources image and SVG asset bytes from `project_dir`
-/// (the `.zen` file's parent directory) when provided.
+/// (the `.zen` file's parent directory) when provided, and honours the merged
+/// diagnostic policy.
 ///
 /// For each `image`- or `svg`-kind `AssetDecl`, the `src` is resolved relative
 /// to `project_dir` and read into a [`BytesAssetProvider`]. A read failure
@@ -126,13 +137,17 @@ pub fn to_png(src: &str, page: usize) -> Result<PngArtifact, RenderCmdErr> {
 /// so `locked` is a no-op.
 ///
 /// `page` is the 1-based page number to render.
+///
+/// `flags` carries the `--allow`/`--warn`/`--deny` CLI overrides; pass
+/// `&CliPolicyFlags::default()` when no flags are available (e.g. MCP).
 pub fn to_png_with_dir(
     src: &str,
     project_dir: Option<&Path>,
     page: usize,
     locked: bool,
+    flags: &CliPolicyFlags,
 ) -> Result<PngArtifact, RenderCmdErr> {
-    let doc = parse_validate(src)?;
+    let doc = parse_validate(src, project_dir, flags)?;
     let fonts = build_font_provider(&doc, project_dir, locked)?;
     let page_index = resolve_page_index(&doc, page)?;
     let assets = match project_dir {
@@ -147,20 +162,24 @@ pub fn to_png_with_dir(
     Ok(PngArtifact { png, diagnostics })
 }
 
-/// Parse `src`, validate it, compile the requested `page`, and render a vector
-/// PDF, sourcing image/SVG and font asset bytes from `project_dir` when
-/// provided (exactly like [`to_png_with_dir`]).
+/// Parse `src`, validate it with the merged diagnostic policy, compile the
+/// requested `page`, and render a vector PDF, sourcing image/SVG and font asset
+/// bytes from `project_dir` when provided (exactly like [`to_png_with_dir`]).
 ///
 /// The PDF carries print box metadata (MediaBox / TrimBox / BleedBox /
 /// CropBox) and native DeviceCMYK for CMYK-origin colors. Output is
 /// deterministic. `page` is the 1-based page number.
+///
+/// `flags` carries the `--allow`/`--warn`/`--deny` CLI overrides; pass
+/// `&CliPolicyFlags::default()` when no flags are available (e.g. MCP).
 pub fn to_pdf_with_dir(
     src: &str,
     project_dir: Option<&Path>,
     page: usize,
     locked: bool,
+    flags: &CliPolicyFlags,
 ) -> Result<PdfArtifact, RenderCmdErr> {
-    let doc = parse_validate(src)?;
+    let doc = parse_validate(src, project_dir, flags)?;
     let fonts = build_font_provider(&doc, project_dir, locked)?;
     let page_index = resolve_page_index(&doc, page)?;
     let assets = match project_dir {
@@ -174,20 +193,25 @@ pub fn to_pdf_with_dir(
     Ok(PdfArtifact { pdf, diagnostics })
 }
 
-/// Parse `src`, validate it, and render EVERY page to PNG, returning one
-/// [`PngArtifact`] per page in document order (page 1 first).
+/// Parse `src`, validate it with the merged diagnostic policy, and render
+/// EVERY page to PNG, returning one [`PngArtifact`] per page in document
+/// order (page 1 first).
 ///
 /// Image and SVG asset bytes are sourced once from `project_dir` (shared
 /// across all pages). Returns `Err` on parse failure (exit 2), validation
 /// errors (exit 1), an empty document (exit 2), or a render failure (exit 2).
 /// When `locked` is set, image and SVG asset bytes are verified against their
 /// declared `sha256` (exit 2 on any mismatch/missing hash/read failure).
+///
+/// `flags` carries the `--allow`/`--warn`/`--deny` CLI overrides; pass
+/// `&CliPolicyFlags::default()` when no flags are available (e.g. MCP).
 pub fn to_png_all_pages(
     src: &str,
     project_dir: Option<&Path>,
     locked: bool,
+    flags: &CliPolicyFlags,
 ) -> Result<Vec<PngArtifact>, RenderCmdErr> {
-    let doc = parse_validate(src)?;
+    let doc = parse_validate(src, project_dir, flags)?;
     let fonts = build_font_provider(&doc, project_dir, locked)?;
     let page_count = doc.body.pages.len();
     if page_count == 0 {
@@ -210,9 +234,10 @@ pub fn to_png_all_pages(
     Ok(artifacts)
 }
 
-/// Parse `src`, validate it, compile pages `page_a` and `page_b` (both 1-based),
-/// composite them side by side (A on the left, B on the right), and return the
-/// spread PNG bytes plus the merged compile-stage diagnostics.
+/// Parse `src`, validate it with the merged diagnostic policy, compile pages
+/// `page_a` and `page_b` (both 1-based), composite them side by side (A on
+/// the left, B on the right), and return the spread PNG bytes plus the merged
+/// compile-stage diagnostics.
 ///
 /// The output canvas width is `page_a_width + gutter_override_px + page_b_width`
 /// (or `page_a_width + doc.spread_gutter + page_b_width` when the override is
@@ -221,7 +246,11 @@ pub fn to_png_all_pages(
 /// bytes are sourced from `project_dir` (shared across both pages) exactly like
 /// [`to_png_with_dir`].
 ///
+/// `flags` carries the `--allow`/`--warn`/`--deny` CLI overrides; pass
+/// `&CliPolicyFlags::default()` when no flags are available (e.g. MCP).
+///
 /// Returns `Err` when:
+/// - A config file cannot be read (exit code 2).
 /// - The source fails to parse (exit code 2).
 /// - The document has validation errors (exit code 1).
 /// - Either page is out of range (exit code 2).
@@ -233,8 +262,9 @@ pub fn to_png_spread(
     page_b: usize,
     gutter_override: Option<u32>,
     locked: bool,
+    flags: &CliPolicyFlags,
 ) -> Result<PngArtifact, RenderCmdErr> {
-    let doc = parse_validate(src)?;
+    let doc = parse_validate(src, project_dir, flags)?;
     let fonts = build_font_provider(&doc, project_dir, locked)?;
     let index_a = resolve_page_index(&doc, page_a)?;
     let index_b = resolve_page_index(&doc, page_b)?;

@@ -158,6 +158,26 @@ pub fn load_global_policy() -> Result<DiagnosticPolicy, String> {
     }
 }
 
+/// Load the global and local policies for a command run.
+///
+/// This is the shared resolution preamble used by both `validate` and `render`:
+/// - Global policy is always loaded from `$HOME/.config/zenith/config.kdl`.
+/// - Local policy is walked up from `start_dir` when `Some`; when `None` the
+///   local policy is the default (empty).
+///
+/// Returns `Err` with a human-facing message on any config I/O or parse
+/// failure. Missing files are not errors — they yield the default policy.
+pub fn load_global_and_local(
+    start_dir: Option<&Path>,
+) -> Result<(DiagnosticPolicy, DiagnosticPolicy), String> {
+    let global = load_global_policy()?;
+    let local = match start_dir {
+        Some(dir) => find_local_policy(dir)?,
+        None => DiagnosticPolicy::default(),
+    };
+    Ok((global, local))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use crate::config::CliPolicyFlags;
+
 use super::{to_png, to_png_all_pages, to_png_with_dir, to_scene_json};
 
 const VALID_DOC: &str = r##"zenith version=1 {
@@ -90,7 +92,8 @@ fn to_png_surfaces_compile_diagnostics() {
 
 #[test]
 fn to_scene_json_surfaces_compile_diagnostics() {
-    let artifact = to_scene_json(UNKNOWN_NODE_DOC, None, 1).expect("scene must succeed");
+    let artifact = to_scene_json(UNKNOWN_NODE_DOC, None, 1, &CliPolicyFlags::default())
+        .expect("scene must succeed");
     assert!(
         artifact
             .diagnostics
@@ -116,7 +119,7 @@ fn to_png_with_validation_error_returns_err() {
 
 #[test]
 fn to_scene_json_contains_schema_field() {
-    let json = to_scene_json(VALID_DOC, None, 1)
+    let json = to_scene_json(VALID_DOC, None, 1, &CliPolicyFlags::default())
         .expect("scene JSON must succeed")
         .json;
     assert!(
@@ -128,7 +131,7 @@ fn to_scene_json_contains_schema_field() {
 
 #[test]
 fn to_scene_json_with_validation_error_returns_err() {
-    let result = to_scene_json(INVALID_DOC, None, 1);
+    let result = to_scene_json(INVALID_DOC, None, 1, &CliPolicyFlags::default());
     assert!(result.is_err(), "invalid doc must not produce scene JSON");
 }
 
@@ -178,8 +181,8 @@ fn to_png_page_zero_is_err_exit_2() {
 
 #[test]
 fn to_png_all_pages_returns_one_artifact_per_page() {
-    let artifacts =
-        to_png_all_pages(TWO_PAGE_DOC, None, false).expect("all-pages render must succeed");
+    let artifacts = to_png_all_pages(TWO_PAGE_DOC, None, false, &CliPolicyFlags::default())
+        .expect("all-pages render must succeed");
     assert_eq!(
         artifacts.len(),
         2,
@@ -207,7 +210,8 @@ fn to_png_all_pages_empty_doc_is_err() {
   document id="doc.e" title="E" {}
 }
 "##;
-    let err = to_png_all_pages(empty, None, false).expect_err("a doc with no pages must error");
+    let err = to_png_all_pages(empty, None, false, &CliPolicyFlags::default())
+        .expect_err("a doc with no pages must error");
     // A zero-page document is now rejected at validation (document.no_pages,
     // exit 1) rather than later at the render stage (exit 2).
     assert_eq!(err.exit_code, 1);
@@ -279,8 +283,14 @@ fn to_png_missing_asset_has_asset_missing_error_diagnostic() {
     // render still returns Ok (the gate in lib.rs is what blocks the write);
     // the artifact must carry the asset.missing Error diagnostic.
     let dir = Path::new("/nonexistent-zenith-project-dir");
-    let artifact = to_png_with_dir(MISSING_ASSET_DOC, Some(dir), 1, false)
-        .expect("render must not hard-fail; missing asset is carried as a diagnostic");
+    let artifact = to_png_with_dir(
+        MISSING_ASSET_DOC,
+        Some(dir),
+        1,
+        false,
+        &CliPolicyFlags::default(),
+    )
+    .expect("render must not hard-fail; missing asset is carried as a diagnostic");
     let has_missing = artifact
         .diagnostics
         .iter()
@@ -299,7 +309,8 @@ fn to_png_missing_asset_has_asset_missing_error_diagnostic() {
 #[test]
 fn to_scene_json_missing_asset_has_asset_missing_error_diagnostic() {
     let dir = Path::new("/nonexistent-zenith-project-dir");
-    let artifact = to_scene_json(MISSING_ASSET_DOC, Some(dir), 1).expect("scene JSON must succeed");
+    let artifact = to_scene_json(MISSING_ASSET_DOC, Some(dir), 1, &CliPolicyFlags::default())
+        .expect("scene JSON must succeed");
     assert!(
         artifact
             .diagnostics

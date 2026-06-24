@@ -8,6 +8,7 @@ use crate::cli_helpers::{
 };
 use crate::commands;
 use crate::commands::serialize_pretty;
+use crate::config::CliPolicyFlags;
 use crate::json_types::RenderOutput;
 
 pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
@@ -26,6 +27,12 @@ pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
             eprintln!("{}", msg);
             return ExitCode::from(2);
         }
+    };
+
+    let flags = CliPolicyFlags {
+        allow: args.allow,
+        warn: args.warn,
+        deny: args.deny,
     };
 
     // --spread ────────────────────────────────────────────────────────
@@ -59,6 +66,7 @@ pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
             page_b,
             args.gutter,
             args.locked,
+            &flags,
         ) {
             Ok(artifact) => {
                 let n_hard = count_hard_diagnostics(&artifact.diagnostics);
@@ -91,7 +99,7 @@ pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
 
     // --scene ─────────────────────────────────────────────────────────
     if let Some(scene_out) = &args.scene {
-        match commands::render::to_scene_json(&src, args.path.parent(), args.page) {
+        match commands::render::to_scene_json(&src, args.path.parent(), args.page, &flags) {
             Ok(artifact) => {
                 // Block on hard (Error-severity) compile diagnostics.
                 let n_hard = count_hard_diagnostics(&artifact.diagnostics);
@@ -128,7 +136,13 @@ pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
     if let (Some(png_out), None) = (&args.png, &args.spread) {
         // Source image asset bytes relative to the .zen file's parent
         // directory so `image` nodes render their raster.
-        match commands::render::to_png_with_dir(&src, args.path.parent(), args.page, args.locked) {
+        match commands::render::to_png_with_dir(
+            &src,
+            args.path.parent(),
+            args.page,
+            args.locked,
+            &flags,
+        ) {
             Ok(artifact) => {
                 // Block on hard (Error-severity) compile diagnostics.
                 let n_hard = count_hard_diagnostics(&artifact.diagnostics);
@@ -161,7 +175,13 @@ pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
 
     // --pdf ───────────────────────────────────────────────────────────
     if let Some(pdf_out) = &args.pdf {
-        match commands::render::to_pdf_with_dir(&src, args.path.parent(), args.page, args.locked) {
+        match commands::render::to_pdf_with_dir(
+            &src,
+            args.path.parent(),
+            args.page,
+            args.locked,
+            &flags,
+        ) {
             Ok(artifact) => {
                 // Block on hard (Error-severity) compile diagnostics.
                 let n_hard = count_hard_diagnostics(&artifact.diagnostics);
@@ -198,7 +218,7 @@ pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
             eprintln!("error creating directory '{}': {}", dir.display(), e);
             return ExitCode::from(2);
         }
-        match commands::render::to_png_all_pages(&src, args.path.parent(), args.locked) {
+        match commands::render::to_png_all_pages(&src, args.path.parent(), args.locked, &flags) {
             Ok(artifacts) => {
                 // Collect all diagnostics first; block if any are hard errors
                 // before writing any page to disk.

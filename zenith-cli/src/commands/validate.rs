@@ -11,7 +11,7 @@ use crate::commands::render::{
     collect_image_dimension_diagnostics, collect_missing_asset_diagnostics,
 };
 use crate::commands::serialize_pretty;
-use crate::config::{CliPolicyFlags, find_local_policy, load_global_policy, merge_policy};
+use crate::config::{CliPolicyFlags, load_global_and_local, merge_policy};
 use crate::json_types::{DiagnosticJson, ValidateOutput};
 
 // ── Result type ───────────────────────────────────────────────────────────────
@@ -49,16 +49,9 @@ pub fn run(src: &str, project_dir: Option<&Path>, json: bool, flags: &CliPolicyF
     // Resolve config policy ───────────────────────────────────────────────────
     // Global config is always consulted; local config is walked up from the
     // document's directory when known. A load error is a hard exit-2 failure.
-    let global = match load_global_policy() {
-        Ok(p) => p,
+    let (global, local) = match load_global_and_local(project_dir) {
+        Ok(pair) => pair,
         Err(msg) => return config_error(&msg, json),
-    };
-    let local = match project_dir {
-        Some(dir) => match find_local_policy(dir) {
-            Ok(p) => p,
-            Err(msg) => return config_error(&msg, json),
-        },
-        None => zenith_core::DiagnosticPolicy::default(),
     };
 
     // Parse ─────────────────────────────────────────────────────────────────
