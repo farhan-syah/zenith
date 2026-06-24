@@ -96,6 +96,21 @@ impl StorePaths {
     pub fn scratch_index(&self, doc_id: &str) -> PathBuf {
         self.scratch_dir(doc_id).join("index.jsonl")
     }
+
+    /// Per-document workspace directory for ephemeral working artifacts that are
+    /// NOT part of the deliverable `.zen`: `<root>/docs/<doc_id>/workspace`.
+    pub fn workspace_dir(&self, doc_id: &str) -> PathBuf {
+        self.doc_dir(doc_id).join("workspace")
+    }
+
+    /// Predictable scratch area for rendered previews produced via the agent
+    /// (MCP) surface: `<root>/docs/<doc_id>/workspace/renders`.
+    ///
+    /// Keeping previews here means the `.zen` holds only final content while the
+    /// agent still has one stable, per-document place to find its render output.
+    pub fn workspace_renders_dir(&self, doc_id: &str) -> PathBuf {
+        self.workspace_dir(doc_id).join("renders")
+    }
 }
 
 #[cfg(test)]
@@ -183,6 +198,22 @@ mod tests {
         assert_eq!(
             paths().scratch_index("doc1"),
             PathBuf::from("/data/docs/doc1/scratch/index.jsonl")
+        );
+    }
+
+    #[test]
+    fn workspace_dir() {
+        assert_eq!(
+            paths().workspace_dir("doc1"),
+            PathBuf::from("/data/docs/doc1/workspace")
+        );
+    }
+
+    #[test]
+    fn workspace_renders_dir() {
+        assert_eq!(
+            paths().workspace_renders_dir("doc1"),
+            PathBuf::from("/data/docs/doc1/workspace/renders")
         );
     }
 }
