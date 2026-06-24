@@ -13,6 +13,21 @@ use serde::{Deserialize, Serialize};
 use crate::adapter::Fs;
 use crate::error::SessionError;
 
+// ── CheckpointMeta ────────────────────────────────────────────────────────────
+
+/// Optional agent-checkpoint metadata attached to a durable version record.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CheckpointMeta {
+    /// Id of the agent action that produced this record.
+    pub action_id: Option<String>,
+    /// Version pin for `action_id` (e.g. an action revision string).
+    pub action_version: Option<String>,
+    /// Content hash linking this record to a rendered preview artifact.
+    pub preview_hash: Option<String>,
+    /// Whether this record can be deterministically re-run.
+    pub replay_eligible: bool,
+}
+
 // ── Record ────────────────────────────────────────────────────────────────────
 
 /// A single entry in the history manifest.
@@ -46,6 +61,18 @@ pub struct HistoryRecord {
     /// Optional author/participant id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
+    /// Id of the agent action that produced this record (agent checkpoints only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_id: Option<String>,
+    /// Version pin for `action_id` (e.g. an action revision string).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_version: Option<String>,
+    /// Content hash linking this record to a rendered preview artifact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_hash: Option<String>,
+    /// Whether this record can be deterministically re-run. Defaults to false.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub replay_eligible: bool,
 }
 
 impl HistoryRecord {
@@ -67,8 +94,16 @@ impl HistoryRecord {
             affected: Vec::new(),
             timestamp_ms: None,
             author: None,
+            action_id: None,
+            action_version: None,
+            preview_hash: None,
+            replay_eligible: false,
         }
     }
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 // ── Manifest I/O ──────────────────────────────────────────────────────────────
@@ -189,8 +224,70 @@ mod tests {
             !line.contains("author"),
             "author must be absent in lean form"
         );
+        assert!(
+            !line.contains("action_id"),
+            "action_id must be absent in lean form"
+        );
+        assert!(
+            !line.contains("action_version"),
+            "action_version must be absent in lean form"
+        );
+        assert!(
+            !line.contains("preview_hash"),
+            "preview_hash must be absent in lean form"
+        );
+        assert!(
+            !line.contains("replay_eligible"),
+            "replay_eligible must be absent in lean form"
+        );
         assert!(line.contains("\"snapshot\""), "snapshot must be present");
         assert!(line.contains("\"seq\""), "seq must be present");
+    }
+
+    #[test]
+    fn checkpoint_record_roundtrips() {
+        let fs = make_fs();
+        let path = manifest_path();
+        let mut rec = HistoryRecord::new("cp0", 0, None, "cafef00d");
+        rec.action_id = Some("act-1".to_string());
+        rec.action_version = Some("rev-3".to_string());
+        rec.preview_hash = Some("preview123".to_string());
+        rec.replay_eligible = true;
+        append_record(&fs, &path, &rec).unwrap();
+        let raw = fs.read(&path).unwrap();
+        let line = std::str::from_utf8(&raw).unwrap();
+        assert!(line.contains("action_id"), "action_id must appear when set");
+        assert!(
+            line.contains("action_version"),
+            "action_version must appear when set"
+        );
+        assert!(
+            line.contains("preview_hash"),
+            "preview_hash must appear when set"
+        );
+        assert!(
+            line.contains("replay_eligible"),
+            "replay_eligible must appear when true"
+        );
+        let records = read_records(&fs, &path).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0], rec);
+    }
+
+    #[test]
+    fn old_manifest_without_checkpoint_fields_deserializes() {
+        let fs = make_fs();
+        let path = manifest_path();
+        // A JSONL line as produced before the checkpoint fields were added.
+        let old_line = b"{\"id\":\"r0\",\"seq\":0,\"snapshot\":\"oldhash\",\"op_kind\":\"edit\"}\n";
+        fs.create_dir_all(path.parent().unwrap()).unwrap();
+        fs.write(&path, old_line).unwrap();
+        let records = read_records(&fs, &path).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_id, None);
+        assert_eq!(records[0].action_version, None);
+        assert_eq!(records[0].preview_hash, None);
+        assert!(!records[0].replay_eligible);
     }
 
     #[test]
@@ -207,6 +304,10 @@ mod tests {
             affected: vec!["node-a".to_string(), "node-b".to_string()],
             timestamp_ms: Some(1_700_000_000_000),
             author: Some("alice".to_string()),
+            action_id: Some("act-42".to_string()),
+            action_version: Some("rev-7".to_string()),
+            preview_hash: Some("deadbeef".to_string()),
+            replay_eligible: true,
         };
         append_record(&fs, &path, &rec).unwrap();
         let records = read_records(&fs, &path).unwrap();

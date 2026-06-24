@@ -16,8 +16,9 @@ use std::path::Path;
 use zenith_core::{KdlAdapter, KdlSource as _};
 use zenith_session::adapter::{OsClock, OsFs, OsRng};
 use zenith_session::{
-    Outcome, RecordOutcome, StorePaths, VersionOutcome, current_content, list_versions, reconcile,
-    record_state, record_version, resolve_data_dir, resolve_version, version_content,
+    Outcome, RecordOutcome, StorePaths, VersionMeta, VersionOutcome, current_content,
+    list_versions, reconcile, record_state, record_version, resolve_data_dir, resolve_version,
+    version_content,
 };
 
 // ── Public result type ────────────────────────────────────────────────────────
@@ -137,8 +138,10 @@ pub fn record_edit_in(
         &clock,
         &reconciled.doc_id,
         &final_bytes,
-        None,
-        Some(op_kind),
+        VersionMeta {
+            op_kind: Some(op_kind),
+            ..Default::default()
+        },
     ) {
         return Recorded {
             bytes: final_bytes,
@@ -336,8 +339,11 @@ pub fn name_version_in(paths: &StorePaths, doc_path: &Path, name: &str) -> Resul
         &clock,
         &doc_id,
         &bytes,
-        Some(name),
-        Some("named"),
+        VersionMeta {
+            label: Some(name),
+            op_kind: Some("named"),
+            ..Default::default()
+        },
     ) {
         Ok(VersionOutcome::Recorded { id }) => Ok(id),
         Ok(VersionOutcome::Unchanged) => {

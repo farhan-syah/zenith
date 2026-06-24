@@ -79,6 +79,7 @@ mod tests {
 
     use super::*;
     use crate::adapter::{FakeClock, FakeRng, MemFs};
+    use crate::tier2::VersionMeta;
     use crate::{session, store, tier2};
 
     fn setup() -> (MemFs, StorePaths, FakeClock, FakeRng) {
@@ -105,7 +106,7 @@ mod tests {
     #[test]
     fn gc_keeps_version_referenced() {
         let (fs, paths, clock, _rng) = setup();
-        tier2::record_version(&fs, &paths, &clock, "doc1", b"V1", None, None).unwrap();
+        tier2::record_version(&fs, &paths, &clock, "doc1", b"V1", VersionMeta::default()).unwrap();
         let report = gc(&fs, &paths, "doc1").unwrap();
         assert_eq!(report.deleted, 0);
         assert!(report.kept >= 1);
@@ -147,7 +148,8 @@ mod tests {
     fn gc_mixed() {
         let (fs, paths, clock, _rng) = setup();
         // Record a version (referenced).
-        tier2::record_version(&fs, &paths, &clock, "doc1", b"kept", None, None).unwrap();
+        tier2::record_version(&fs, &paths, &clock, "doc1", b"kept", VersionMeta::default())
+            .unwrap();
         // Store an orphan object directly (unreferenced).
         store::put_object(&fs, &paths, "doc1", b"orphan").unwrap();
         let report = gc(&fs, &paths, "doc1").unwrap();
@@ -167,7 +169,15 @@ mod tests {
         let (fs, paths, clock, rng) = setup();
         // Same content → same hash → one object file shared by both tiers.
         session::record_state(&fs, &paths, &clock, &rng, "doc1", b"shared", None).unwrap();
-        tier2::record_version(&fs, &paths, &clock, "doc1", b"shared", None, None).unwrap();
+        tier2::record_version(
+            &fs,
+            &paths,
+            &clock,
+            "doc1",
+            b"shared",
+            VersionMeta::default(),
+        )
+        .unwrap();
         let report = gc(&fs, &paths, "doc1").unwrap();
         assert_eq!(report.deleted, 0);
         assert!(report.kept >= 1);

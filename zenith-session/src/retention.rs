@@ -318,6 +318,7 @@ mod tests {
     use crate::adapter::{FakeClock, MemFs};
     use crate::layout::StorePaths;
     use crate::manifest::append_record;
+    use crate::tier2::VersionMeta;
 
     // ── Helper ────────────────────────────────────────────────────────────────
 
@@ -349,7 +350,18 @@ mod tests {
         for (i, content) in contents.iter().enumerate() {
             let clock = FakeClock(UNIX_EPOCH + Duration::from_millis(base_ms + i as u64 * 100));
             let label = labels.get(i).copied().flatten();
-            crate::tier2::record_version(fs, paths, &clock, doc_id, content, label, None).unwrap();
+            crate::tier2::record_version(
+                fs,
+                paths,
+                &clock,
+                doc_id,
+                content,
+                VersionMeta {
+                    label,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
         }
     }
 
