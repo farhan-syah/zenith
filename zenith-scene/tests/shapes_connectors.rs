@@ -982,3 +982,44 @@ fn line_jumps_arc_horizontal_hops() {
         .fold(f64::INFINITY, f64::min);
     assert!(min_y < 160.0, "bump must dip above the line: {horiz:?}");
 }
+
+/// A self-loop (`from` and `to` name the SAME node) routes as a rectangular loop
+/// off the box edge — a 4-point path that bulges above the top edge by default —
+/// not a degenerate zero-length line.
+#[test]
+fn connector_self_loop_routes_a_loop() {
+    let src = r##"zenith version=1 {
+  project id="proj.cn" name="CN"
+  tokens format="zenith-token-v1" {
+token id="color.fill" type="color" value="#dbeafe"
+token id="color.line" type="color" value="#1e3a8a"
+token id="size.stroke" type="dimension" value=(px)2
+  }
+  styles {}
+  document id="doc.cn" title="CN" {
+page id="page.cn" w=(px)400 h=(px)300 {
+  rect id="a" x=(px)100 y=(px)120 w=(px)120 h=(px)60 fill=(token)"color.fill"
+  connector id="c1" from="a" to="a" stroke=(token)"color.line" stroke-width=(token)"size.stroke"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let pts = first_stroke_polyline_points(&result.scene.commands);
+
+    // a: x=100 y=120 w=120 h=60 → top edge y=120, center x=160.
+    // Default top loop: two feet on y=120, bulging up by 28px to y=92.
+    assert_eq!(
+        pts.len(),
+        8,
+        "self-loop must be a 4-point loop; got {pts:?}"
+    );
+    // Both feet sit on the top edge; both bulge points are strictly above it.
+    assert_eq!(pts[1], 120.0);
+    assert_eq!(pts[7], 120.0);
+    assert!(
+        pts[3] < 120.0 && pts[5] < 120.0,
+        "loop must bulge above the top edge; got {pts:?}"
+    );
+}

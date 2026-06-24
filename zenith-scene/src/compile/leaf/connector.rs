@@ -185,6 +185,92 @@ fn outward_dir(side: AnchorSide, pt: (f64, f64), boxr: (f64, f64, f64, f64)) -> 
     }
 }
 
+/// How far a self-loop bulges out from the box edge, in pixels.
+const LOOP_DEPTH: f64 = 28.0;
+/// The largest half-width of a self-loop's two feet on the box edge, in pixels;
+/// the actual half-width is also capped at 30% of the spanning box dimension so
+/// the loop stays within the edge on small boxes.
+const LOOP_HALF_MAX: f64 = 25.0;
+
+/// Pick which edge a self-loop bulges from, parsed loosely from an anchor string
+/// (`top`/`bottom`/`left`/`right`); anything else (including `auto`/absent)
+/// defaults to the top edge.
+fn loop_side(anchor: Option<&str>) -> &'static str {
+    match anchor {
+        Some(a) if a.contains("bottom") => "bottom",
+        Some(a) if a.contains("left") => "left",
+        Some(a) if a.contains("right") => "right",
+        _ => "top",
+    }
+}
+
+/// Build a small rectangular self-loop off one `side` of a `(x, y, w, h)` box:
+/// two feet on that edge, bulging out by [`LOOP_DEPTH`]. The path runs foot →
+/// out → across → back → foot, so the last segment arrives perpendicular to the
+/// edge and an end marker points back into the box.
+fn self_loop_path(boxr: (f64, f64, f64, f64), side: &str) -> Vec<f64> {
+    let (x, y, w, h) = boxr;
+    let cx = x + w / 2.0;
+    let cy = y + h / 2.0;
+    let d = LOOP_DEPTH;
+    match side {
+        "bottom" => {
+            let half = (w * 0.3).min(LOOP_HALF_MAX);
+            let yb = y + h;
+            vec![
+                cx - half,
+                yb,
+                cx - half,
+                yb + d,
+                cx + half,
+                yb + d,
+                cx + half,
+                yb,
+            ]
+        }
+        "left" => {
+            let half = (h * 0.3).min(LOOP_HALF_MAX);
+            vec![
+                x,
+                cy - half,
+                x - d,
+                cy - half,
+                x - d,
+                cy + half,
+                x,
+                cy + half,
+            ]
+        }
+        "right" => {
+            let half = (h * 0.3).min(LOOP_HALF_MAX);
+            let xr = x + w;
+            vec![
+                xr,
+                cy - half,
+                xr + d,
+                cy - half,
+                xr + d,
+                cy + half,
+                xr,
+                cy + half,
+            ]
+        }
+        _ => {
+            let half = (w * 0.3).min(LOOP_HALF_MAX);
+            vec![
+                cx - half,
+                y,
+                cx - half,
+                y - d,
+                cx + half,
+                y - d,
+                cx + half,
+                y,
+            ]
+        }
+    }
+}
+
 /// Bounds-safe read of the `i`-th `(x, y)` point from a flat `[x0,y0,x1,y1,…]`
 /// list. Returns `None` if the point is out of range (no panic, no indexing).
 fn point_at(pts: &[f64], i: usize) -> Option<(f64, f64)> {
@@ -245,25 +331,47 @@ pub(in crate::compile) fn compile_connector(
     let (f_pt, f_side) = resolve_anchor(from_box, from_anchor, to_center);
     let (t_pt, t_side) = resolve_anchor(to_box, to_anchor, from_center);
 
-    // Route selection: `orthogonal` builds a right-angle elbow path; `avoid`
-    // runs an obstacle-avoiding orthogonal router around the other boxes (and
-    // falls back to the plain elbow when no clear path exists); everything else
-    // (None / "straight" / unknown — validation already warned) is the straight
-    // 2-point line, byte-identical to Unit 1/2.
-    let flat_points = match connector.route.as_deref() {
-        Some("orthogonal") => orthogonal_route(f_pt, f_side, t_pt, t_side),
-        Some("avoid") => {
-            let obstacles: Vec<(f64, f64, f64, f64)> = node_boxes
-                .iter()
-                .filter(|(id, _)| id.as_str() != from_id && id.as_str() != to_id)
-                .map(|(_, b)| *b)
-                .collect();
-            let f_out = outward_dir(f_side, f_pt, from_box);
-            let t_out = outward_dir(t_side, t_pt, to_box);
-            routing::route_orthogonal_avoiding(f_pt, f_out, t_pt, t_out, &obstacles, ROUTE_MARGIN)
+    // A self-loop (`from` and `to` name the same node) cannot be a line between
+    // two distinct points — it routes as a small rectangular loop off one edge of
+    // the box (the side picked from the `from`/`to` anchor, defaulting to the
+    // top), with the marker landing back on that edge.
+    //
+    // Otherwise route selection applies: `orthogonal` builds a right-angle elbow
+    // path; `avoid` runs an obstacle-avoiding orthogonal router around the other
+    // boxes (and falls back to the plain elbow when no clear path exists);
+    // everything else (None / "straight" / unknown — validation already warned)
+    // is the straight 2-point line, byte-identical to Unit 1/2.
+    let flat_points = if from_id == to_id {
+        let side = loop_side(
+            connector
+                .from_anchor
+                .as_deref()
+                .or(connector.to_anchor.as_deref()),
+        );
+        self_loop_path(from_box, side)
+    } else {
+        match connector.route.as_deref() {
+            Some("orthogonal") => orthogonal_route(f_pt, f_side, t_pt, t_side),
+            Some("avoid") => {
+                let obstacles: Vec<(f64, f64, f64, f64)> = node_boxes
+                    .iter()
+                    .filter(|(id, _)| id.as_str() != from_id && id.as_str() != to_id)
+                    .map(|(_, b)| *b)
+                    .collect();
+                let f_out = outward_dir(f_side, f_pt, from_box);
+                let t_out = outward_dir(t_side, t_pt, to_box);
+                routing::route_orthogonal_avoiding(
+                    f_pt,
+                    f_out,
+                    t_pt,
+                    t_out,
+                    &obstacles,
+                    ROUTE_MARGIN,
+                )
                 .unwrap_or_else(|| orthogonal_route(f_pt, f_side, t_pt, t_side))
+            }
+            _ => vec![f_pt.0, f_pt.1, t_pt.0, t_pt.1],
         }
-        _ => vec![f_pt.0, f_pt.1, t_pt.0, t_pt.1],
     };
 
     // STROKE — only emit when a stroke color is present (mirrors polyline: no
@@ -375,4 +483,61 @@ fn arrowhead_points(tip: (f64, f64), from_pt: (f64, f64), stroke_width: f64) -> 
     let right_x = base_cx - px * half_w;
     let right_y = base_cy - py * half_w;
     Some(vec![tip.0, tip.1, left_x, left_y, right_x, right_y])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loop_side_parses_edges_and_defaults_to_top() {
+        assert_eq!(loop_side(Some("bottom-center")), "bottom");
+        assert_eq!(loop_side(Some("center-left")), "left");
+        assert_eq!(loop_side(Some("right")), "right");
+        assert_eq!(loop_side(Some("top")), "top");
+        assert_eq!(loop_side(Some("auto")), "top");
+        assert_eq!(loop_side(None), "top");
+    }
+
+    #[test]
+    fn self_loop_top_bulges_above_the_box() {
+        // 120×60 box at (60,110): top edge y=110, center x=120.
+        let pts = self_loop_path((60.0, 110.0, 120.0, 60.0), "top");
+        // Four points: foot, out, across, foot — all above the top edge.
+        assert_eq!(pts.len(), 8);
+        let half = (120.0_f64 * 0.3).min(LOOP_HALF_MAX);
+        assert_eq!(
+            pts,
+            vec![
+                120.0 - half,
+                110.0,
+                120.0 - half,
+                110.0 - LOOP_DEPTH,
+                120.0 + half,
+                110.0 - LOOP_DEPTH,
+                120.0 + half,
+                110.0,
+            ]
+        );
+        // The two feet sit on the top edge; the bulge is strictly above it.
+        assert!(pts[3] < 110.0 && pts[5] < 110.0);
+    }
+
+    #[test]
+    fn self_loop_right_bulges_past_the_right_edge() {
+        // 120×60 box at (250,110): right edge x=370, center y=140.
+        let pts = self_loop_path((250.0, 110.0, 120.0, 60.0), "right");
+        assert_eq!(pts.len(), 8);
+        // Feet on the right edge (x=370); bulge extends past it.
+        assert_eq!(pts[0], 370.0);
+        assert_eq!(pts[6], 370.0);
+        assert!(pts[2] > 370.0 && pts[4] > 370.0);
+    }
+
+    #[test]
+    fn self_loop_is_deterministic() {
+        let a = self_loop_path((10.0, 20.0, 80.0, 40.0), "bottom");
+        let b = self_loop_path((10.0, 20.0, 80.0, 40.0), "bottom");
+        assert_eq!(a, b);
+    }
 }
