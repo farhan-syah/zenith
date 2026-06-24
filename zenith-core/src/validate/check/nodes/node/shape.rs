@@ -314,12 +314,12 @@ pub(in crate::validate::check) fn check_connector(
 
     // Enum-value checks (Warnings on unrecognized values, not errors).
     if let Some(r) = c.route.as_deref()
-        && !matches!(r, "straight" | "orthogonal")
+        && !matches!(r, "straight" | "orthogonal" | "avoid")
     {
         diagnostics.push(Diagnostic::warning(
             "connector.invalid_route",
             format!(
-                "connector '{}': route '{r}' is not one of straight/orthogonal",
+                "connector '{}': route '{r}' is not one of straight/orthogonal/avoid",
                 c.id
             ),
             c.source_span,

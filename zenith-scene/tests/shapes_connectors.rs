@@ -573,6 +573,124 @@ page id="page.co" w=(px)640 h=(px)360 {
     );
 }
 
+// ── connector node: obstacle-avoiding routing (route="avoid") ─────────────────
+//
+// `route="avoid"` routes an orthogonal path that steers around every OTHER box
+// in the document (boxes other than the connector's own from/to targets). The
+// resulting polyline never passes through an obstacle's interior; when no clear
+// path exists it degrades to the plain elbow. A connector with no obstacle in
+// the way still produces a valid polyline from the from-anchor to the to-anchor.
+
+/// Assert no segment of a flat `[x0,y0,x1,y1,…]` polyline passes through the
+/// strict interior of the box `(x, y, w, h)`. Mirrors the router's own crossing
+/// check but operates on the un-inflated box.
+fn assert_polyline_misses_box(pts: &[f64], boxr: (f64, f64, f64, f64)) {
+    const E: f64 = 1e-6;
+    let (l, t, r, bot) = (boxr.0, boxr.1, boxr.0 + boxr.2, boxr.1 + boxr.3);
+    let n = pts.len() / 2;
+    for i in 0..n.saturating_sub(1) {
+        let x0 = pts[i * 2];
+        let y0 = pts[i * 2 + 1];
+        let x1 = pts[(i + 1) * 2];
+        let y1 = pts[(i + 1) * 2 + 1];
+        if (y0 - y1).abs() <= E {
+            if y0 > t + E && y0 < bot - E {
+                let (xa, xb) = if x0 < x1 { (x0, x1) } else { (x1, x0) };
+                let ov_lo = xa.max(l);
+                let ov_hi = xb.min(r);
+                assert!(
+                    ov_lo + E >= ov_hi - E,
+                    "horizontal segment {:?}->{:?} crosses interior of {boxr:?}; pts {pts:?}",
+                    (x0, y0),
+                    (x1, y1)
+                );
+            }
+        } else if (x0 - x1).abs() <= E && x0 > l + E && x0 < r - E {
+            let (ya, yb) = if y0 < y1 { (y0, y1) } else { (y1, y0) };
+            let ov_lo = ya.max(t);
+            let ov_hi = yb.min(bot);
+            assert!(
+                ov_lo + E >= ov_hi - E,
+                "vertical segment {:?}->{:?} crosses interior of {boxr:?}; pts {pts:?}",
+                (x0, y0),
+                (x1, y1)
+            );
+        }
+    }
+}
+
+/// Two boxes separated horizontally with a THIRD box sitting on the straight
+/// line between them; `route="avoid"` must produce a polyline that detours
+/// around the middle box's interior while still starting/ending at the anchors.
+#[test]
+fn connector_avoid_routes_around_obstacle() {
+    let src = r##"zenith version=1 {
+  project id="proj.av" name="AV"
+  tokens format="zenith-token-v1" {
+token id="color.line" type="color" value="#1e3a8a"
+  }
+  styles {}
+  document id="doc.av" title="AV" {
+page id="page.av" w=(px)640 h=(px)360 {
+  rect id="a" x=(px)40 y=(px)80 w=(px)80 h=(px)80 stroke=(token)"color.line"
+  rect id="obs" x=(px)260 y=(px)60 w=(px)80 h=(px)120 stroke=(token)"color.line"
+  rect id="b" x=(px)480 y=(px)80 w=(px)80 h=(px)80 stroke=(token)"color.line"
+  connector id="c1" from="a" to="b" route="avoid" stroke=(token)"color.line"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let pts = first_stroke_polyline_points(&result.scene.commands);
+
+    // a center (80,120) left of b center (520,120): auto picks a's right edge
+    // (120,120) and b's left edge (480,120). The obstacle box spans x∈[260,340],
+    // y∈[60,180] — squarely on the y=120 straight line.
+    assert_eq!(pts[0], 120.0, "path starts at a's right-edge x");
+    assert_eq!(pts[1], 120.0, "path starts at a's right-edge y");
+    let n = pts.len();
+    assert_eq!(pts[n - 2], 480.0, "path ends at b's left-edge x");
+    assert_eq!(pts[n - 1], 120.0, "path ends at b's left-edge y");
+
+    assert_polyline_misses_box(&pts, (260.0, 60.0, 80.0, 120.0));
+}
+
+/// `route="avoid"` with no obstacle between the two boxes still yields a valid
+/// polyline running from the from-anchor to the to-anchor.
+#[test]
+fn connector_avoid_without_obstacle_routes_cleanly() {
+    let src = r##"zenith version=1 {
+  project id="proj.av" name="AV"
+  tokens format="zenith-token-v1" {
+token id="color.line" type="color" value="#1e3a8a"
+  }
+  styles {}
+  document id="doc.av" title="AV" {
+page id="page.av" w=(px)640 h=(px)360 {
+  rect id="a" x=(px)40 y=(px)80 w=(px)80 h=(px)80 stroke=(token)"color.line"
+  rect id="b" x=(px)480 y=(px)80 w=(px)80 h=(px)80 stroke=(token)"color.line"
+  connector id="c1" from="a" to="b" route="avoid" stroke=(token)"color.line"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let pts = first_stroke_polyline_points(&result.scene.commands);
+
+    assert!(
+        pts.len() >= 4,
+        "must have at least start and end; got {pts:?}"
+    );
+    // a right-edge (120,120) → b left-edge (480,120).
+    assert_eq!(pts[0], 120.0);
+    assert_eq!(pts[1], 120.0);
+    let n = pts.len();
+    assert_eq!(pts[n - 2], 480.0);
+    assert_eq!(pts[n - 1], 120.0);
+}
+
 // ── Mask ──────────────────────────────────────────────────────────────
 
 /// A rect carrying `mask=(token)` with NO effect must emit a

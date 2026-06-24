@@ -413,7 +413,7 @@ fn connector_invalid_route_warns() {
 
 #[test]
 fn connector_valid_route_does_not_warn() {
-    for route in ["straight", "orthogonal"] {
+    for route in ["straight", "orthogonal", "avoid"] {
         let doc = doc_with(
             vec![],
             vec![minimal_page(

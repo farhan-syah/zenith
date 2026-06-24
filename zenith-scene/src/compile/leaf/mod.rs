@@ -11,6 +11,7 @@ mod common;
 mod connector;
 mod poly;
 mod rect_ellipse;
+mod routing;
 mod shape;
 
 pub(super) use connector::{ConnectorEnv, compile_connector};

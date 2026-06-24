@@ -13,6 +13,12 @@ use super::super::paint::resolve_property_color;
 use super::super::style_prop;
 use super::super::util::{resolve_property_dimension_px, rotation_degrees};
 use super::poly::flat_points_centroid_center;
+use super::routing;
+
+/// Obstacle-clearance margin (px) used by `route="avoid"`: obstacles inflate by
+/// this amount and the path stubs out of each box face by the same distance, so
+/// the routed line keeps a small gap from every box it skirts.
+const ROUTE_MARGIN: f64 = 8.0;
 
 /// Read-only borrow + scalar context for [`compile_connector`].
 ///
@@ -160,6 +166,25 @@ fn orthogonal_route(f: (f64, f64), fs: AnchorSide, t: (f64, f64), ts: AnchorSide
     }
 }
 
+/// The unit outward normal of an anchor point on its box face, used to stub the
+/// `route="avoid"` path cleanly out of (and into) each box. A `Horizontal` edge
+/// (left/right) leaves along ±x toward the side the anchor sits on; a `Vertical`
+/// edge (top/bottom) leaves along ±y.
+fn outward_dir(side: AnchorSide, pt: (f64, f64), boxr: (f64, f64, f64, f64)) -> (f64, f64) {
+    let cx = boxr.0 + boxr.2 / 2.0;
+    let cy = boxr.1 + boxr.3 / 2.0;
+    match side {
+        AnchorSide::Horizontal => {
+            let sign = if pt.0 - cx >= 0.0 { 1.0 } else { -1.0 };
+            (sign, 0.0)
+        }
+        AnchorSide::Vertical => {
+            let sign = if pt.1 - cy >= 0.0 { 1.0 } else { -1.0 };
+            (0.0, sign)
+        }
+    }
+}
+
 /// Bounds-safe read of the `i`-th `(x, y)` point from a flat `[x0,y0,x1,y1,…]`
 /// list. Returns `None` if the point is out of range (no panic, no indexing).
 fn point_at(pts: &[f64], i: usize) -> Option<(f64, f64)> {
@@ -220,11 +245,24 @@ pub(in crate::compile) fn compile_connector(
     let (f_pt, f_side) = resolve_anchor(from_box, from_anchor, to_center);
     let (t_pt, t_side) = resolve_anchor(to_box, to_anchor, from_center);
 
-    // Route selection: `orthogonal` builds a right-angle elbow path; everything
-    // else (None / "straight" / unknown — validation already warned) is the
-    // straight 2-point line, byte-identical to Unit 1/2.
+    // Route selection: `orthogonal` builds a right-angle elbow path; `avoid`
+    // runs an obstacle-avoiding orthogonal router around the other boxes (and
+    // falls back to the plain elbow when no clear path exists); everything else
+    // (None / "straight" / unknown — validation already warned) is the straight
+    // 2-point line, byte-identical to Unit 1/2.
     let flat_points = match connector.route.as_deref() {
         Some("orthogonal") => orthogonal_route(f_pt, f_side, t_pt, t_side),
+        Some("avoid") => {
+            let obstacles: Vec<(f64, f64, f64, f64)> = node_boxes
+                .iter()
+                .filter(|(id, _)| id.as_str() != from_id && id.as_str() != to_id)
+                .map(|(_, b)| *b)
+                .collect();
+            let f_out = outward_dir(f_side, f_pt, from_box);
+            let t_out = outward_dir(t_side, t_pt, to_box);
+            routing::route_orthogonal_avoiding(f_pt, f_out, t_pt, t_out, &obstacles, ROUTE_MARGIN)
+                .unwrap_or_else(|| orthogonal_route(f_pt, f_side, t_pt, t_side))
+        }
         _ => vec![f_pt.0, f_pt.1, t_pt.0, t_pt.1],
     };
 
