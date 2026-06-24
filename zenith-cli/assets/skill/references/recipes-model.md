@@ -69,7 +69,6 @@ Errors mirror token ops: `tx.duplicate_id`, `tx.unknown_recipe`.
 3. `zenith validate`, then `zenith inspect` to confirm the recipe and its nodes.
 
 > Note: the `pattern` node (grid and scatter tiling) **is now shipped** — see
-> `references/pattern.md` for attributes, diagnostics, and the `detach_pattern` op. Dedicated
-> procedural **noise/texture** render primitives remain roadmap; a recipe still documents those
-> motifs built from the shipped primitives. Don't assume a `noise` node renders until
-> `zenith --help`/examples show it.
+> `references/pattern.md` for attributes, diagnostics, and the `detach_pattern` op. Procedural
+> **noise/grain** is also shipped, as a `noise` filter kind (`noise seed=.. scale=.. amount=..`
+> inside a `filter` token); see `examples/noise.zen`.

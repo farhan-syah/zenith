@@ -174,6 +174,11 @@ fn table_zen_renders_to_valid_png() {
 }
 
 #[test]
+fn noise_zen_renders_to_valid_png() {
+    assert_example_renders("noise");
+}
+
+#[test]
 fn styled_zen_renders_to_valid_png() {
     assert_example_renders("styled");
 }

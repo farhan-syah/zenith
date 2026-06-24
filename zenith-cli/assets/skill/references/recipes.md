@@ -132,18 +132,21 @@ group id="bg.motif" {
 }
 ```
 
-## Recipe: grain / paper texture overlay
+## Recipe: grain / paper texture
 
-No confirmed native noise primitive — overlay a transparent texture PNG as a full-bleed image
-asset, declared with `sha256`, blended subtly. (Image nodes carry no `fill`, so no token needed
-for the image itself.)
+Use the native `noise` filter kind — no external asset required. Declare it inside a `filter`
+token and apply it to any node via `filter=(token)`. `seed` pins the deterministic grain, `scale`
+sets the cell size (1 = fine, larger = coarser blocks), `amount` (0..1) sets intensity.
 
 ```kdl
-assets { asset id="asset.grain" kind="image" src="assets/grain.png" sha256="<64-hex>" }
-image id="bg.grain" asset="asset.grain" x=(px)0 y=(px)0 w=(px)1080 h=(px)1080 fit="cover" blend-mode="overlay"
+tokens format="zenith-token-v1" {
+  token id="filter.grain" type="filter" { noise seed=7 scale=1 amount=0.35 }
+}
+rect id="bg" x=(px)0 y=(px)0 w=(px)1080 h=(px)1080 fill=(token)"color.bg" filter=(token)"filter.grain"
 ```
 
-Keep it subtle so it never harms text contrast.
+Keep `amount` low so it never harms text contrast. See `examples/noise.zen` for fine vs coarse
+grain side by side.
 
 ## Recipe: drop shadow & outer glow
 

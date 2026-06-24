@@ -34,6 +34,7 @@ zenith validate examples/<name>.zen --json
 | Drop shadow | [`shadow.zen`](shadow.zen) | ![shadow](shadow.png) |
 | Blur | [`blur.zen`](blur.zen) | ![blur](blur.png) |
 | Filter | [`filter.zen`](filter.zen) | ![filter](filter.png) |
+| Noise / grain (filter) | [`noise.zen`](noise.zen) | ![noise](noise.png) |
 | Mask | [`mask.zen`](mask.zen) | ![mask](mask.png) |
 
 ## Text
