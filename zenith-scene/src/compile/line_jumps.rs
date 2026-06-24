@@ -18,6 +18,15 @@
 //! (e.g. two diagonals), the connector that appears LATER in document order
 //! hops. Crossings are PROPER only — a shared endpoint or a mere touch does not
 //! count.
+//!
+//! ROTATED CONNECTORS: crossings are computed in ON-PAGE (post-rotation)
+//! coordinates. A connector under exactly ONE `PushTransform` (a rotation) is
+//! mapped to its on-page route for detection, and any hop geometry built in
+//! on-page space is mapped back through the inverse rotation before being
+//! written into its local `points`. A connector under TWO OR MORE nested
+//! rotations is excluded (rare; kept simple). A depth-0 connector has the
+//! identity transform, which is a true no-op: its on-page points equal its raw
+//! points and the written-back points are byte-identical to the unrotated path.
 
 use crate::ir::SceneCommand;
 
@@ -36,9 +45,10 @@ const EPS: f64 = 1e-9;
 ///
 /// This records EVERY connector (top-level or nested) by its stroke index; it no
 /// longer inspects brackets. Whether a recorded connector actually participates
-/// in line-jumps is decided later in [`apply_line_jumps`], which filters out any
-/// connector sitting inside an active `PushTransform` (a rotation, whose raw
-/// `points` are not its on-page position). If the range has no `StrokePolyline`,
+/// in line-jumps is decided later in [`apply_line_jumps`], which resolves each
+/// connector's active rotation transform: depth-0 and single-rotation connectors
+/// participate (crossings computed in on-page space), while connectors under two
+/// or more nested rotations are excluded. If the range has no `StrokePolyline`,
 /// nothing is recorded.
 pub(in crate::compile) fn record_connector_stroke(
     commands: &[SceneCommand],
@@ -57,26 +67,82 @@ pub(in crate::compile) fn record_connector_stroke(
     }
 }
 
-/// Running `PushTransform` nesting depth at command index `idx`: scan
-/// `commands[0..idx]`, `+1` on each `PushTransform`, `-1` on each `PopTransform`.
-/// A depth of `0` means no rotation is active at that point, so the connector's
-/// raw `points` are its on-page position. `PushClip` / `PushLayer` / `BeginBlur`
-/// are deliberately NOT counted — they never move geometry, and the outermost
-/// media clip is always open. Saturating subtract guards a malformed stream.
-fn transform_depth_at(commands: &[SceneCommand], idx: usize) -> usize {
-    let mut depth: usize = 0;
-    let prefix = match commands.get(..idx) {
-        Some(p) => p,
-        None => return 0,
-    };
-    for cmd in prefix {
-        if matches!(cmd, SceneCommand::PushTransform { .. }) {
-            depth += 1;
-        } else if matches!(cmd, SceneCommand::PopTransform) {
-            depth = depth.saturating_sub(1);
+/// The rotation transform active over a connector at a given command index.
+///
+/// - [`Identity`](Transform::Identity) — no rotation active (depth 0). On-page
+///   points equal the raw `points`; mapping is a true no-op.
+/// - [`Rotate`](Transform::Rotate) — exactly one active `PushTransform`, a
+///   rotation by `angle_deg` about pivot `(cx, cy)`.
+#[derive(Clone, Copy)]
+enum Transform {
+    Identity,
+    Rotate { angle_deg: f64, cx: f64, cy: f64 },
+}
+
+impl Transform {
+    /// Map a LOCAL (pre-rotation) point to its ON-PAGE (post-rotation) position.
+    /// Identity returns the point untouched — no trig, so no float drift.
+    fn to_page(self, p: (f64, f64)) -> (f64, f64) {
+        match self {
+            Transform::Identity => p,
+            Transform::Rotate { angle_deg, cx, cy } => rotate_pt(p, angle_deg, (cx, cy)),
         }
     }
-    depth
+
+    /// Map an ON-PAGE point back to LOCAL (pre-rotation) space. The inverse of a
+    /// rotation by `angle_deg` is a rotation by `-angle_deg` about the same
+    /// pivot. Identity returns the point untouched — a true no-op.
+    fn to_local(self, p: (f64, f64)) -> (f64, f64) {
+        match self {
+            Transform::Identity => p,
+            Transform::Rotate { angle_deg, cx, cy } => rotate_pt(p, -angle_deg, (cx, cy)),
+        }
+    }
+}
+
+/// Rotate point `p` by `angle_deg` degrees about `pivot`.
+fn rotate_pt(p: (f64, f64), angle_deg: f64, pivot: (f64, f64)) -> (f64, f64) {
+    let (px, py) = p;
+    let (cx, cy) = pivot;
+    let rad = angle_deg.to_radians();
+    let (s, c) = (rad.sin(), rad.cos());
+    let dx = px - cx;
+    let dy = py - cy;
+    (cx + dx * c - dy * s, cy + dx * s + dy * c)
+}
+
+/// The active rotation transform for a connector whose `StrokePolyline` sits at
+/// command index `idx`: scan `commands[0..idx]`, pushing each `PushTransform`'s
+/// value onto a stack and popping on each `PopTransform`. At `idx`:
+///
+/// - empty stack → [`Transform::Identity`] (depth 0, unchanged behavior),
+/// - exactly one entry → that single [`Transform::Rotate`],
+/// - two or more → `None`, meaning the connector is EXCLUDED from line jumps.
+///
+/// `PushClip` / `PushLayer` / `BeginBlur` are deliberately ignored — they never
+/// move geometry, and the outermost media clip is always open.
+fn active_transform_at(commands: &[SceneCommand], idx: usize) -> Option<Transform> {
+    let mut stack: Vec<Transform> = Vec::new();
+    let prefix = match commands.get(..idx) {
+        Some(p) => p,
+        None => return Some(Transform::Identity),
+    };
+    for cmd in prefix {
+        if let SceneCommand::PushTransform { angle_deg, cx, cy } = cmd {
+            stack.push(Transform::Rotate {
+                angle_deg: *angle_deg,
+                cx: *cx,
+                cy: *cy,
+            });
+        } else if matches!(cmd, SceneCommand::PopTransform) {
+            stack.pop();
+        }
+    }
+    match stack.as_slice() {
+        [] => Some(Transform::Identity),
+        [single] => Some(*single),
+        _ => None,
+    }
 }
 
 /// A crossing of the hopping connector's segment by another connector's segment.
@@ -109,44 +175,44 @@ pub(in crate::compile) fn apply_line_jumps(
         return;
     }
 
-    // Filter to connectors whose on-page position equals their raw `points`:
-    // those at `PushTransform` depth 0. A connector inside an active rotation
-    // (its own rotate, or a rotated group/frame) has a transform depth > 0, so
-    // its raw points are NOT its rendered position — it must not hop. Clip /
-    // layer / blur brackets do not move geometry and are intentionally ignored.
-    // Computed on the ORIGINAL command stream before any arc/gap rewrite.
-    let filtered: Vec<usize> = connector_strokes
-        .iter()
-        .copied()
-        .filter(|&idx| transform_depth_at(commands, idx) == 0)
-        .collect();
-    let connector_strokes: &[usize] = &filtered;
-
-    // Snapshot every connector's points up front so all crossings are computed
-    // against the ORIGINAL routes, independent of how earlier connectors are
-    // mutated.
-    let mut snapshots: Vec<(usize, Vec<f64>)> = Vec::with_capacity(connector_strokes.len());
+    // Snapshot every PARTICIPATING connector up front so all crossings are
+    // computed against the ORIGINAL routes, independent of how earlier
+    // connectors are mutated. A connector participates when its active rotation
+    // transform is Identity (depth 0, on-page == raw) or a single Rotate
+    // (depth 1, on-page is the rotated route); a connector under two or more
+    // nested rotations is excluded. Computed on the ORIGINAL command stream
+    // before any arc/gap rewrite.
+    //
+    // Each snapshot carries the connector's `transform` and its `on_page` points
+    // (raw points mapped to on-page space). Crossing detection and hop geometry
+    // run entirely in on-page space; the transform maps results back to local.
+    // For Identity the mapping is a literal no-op, so depth-0 connectors take
+    // the exact same values as before — byte-identical.
+    let mut snapshots: Vec<Snapshot> = Vec::with_capacity(connector_strokes.len());
     for &idx in connector_strokes {
+        let Some(transform) = active_transform_at(commands, idx) else {
+            continue;
+        };
         if let Some(SceneCommand::StrokePolyline { points, .. }) = commands.get(idx) {
-            snapshots.push((idx, points.clone()));
+            let on_page = map_points(points, |p| transform.to_page(p));
+            snapshots.push(Snapshot {
+                idx,
+                transform,
+                on_page,
+            });
         }
     }
 
-    // For each connector (by its position in `connector_strokes`), collect the
-    // hops it must draw. Map order = position; the value is the list of hops.
+    // For each connector (by its position in `snapshots`), collect the hops it
+    // must draw. Index = position; the value is the list of hops, in on-page
+    // segment space.
     let mut hops_per_connector: Vec<Vec<Hop>> = vec![Vec::new(); snapshots.len()];
 
-    // Pair connectors by document order i < j.
-    let mut i = 0;
-    while i < snapshots.len() {
-        let mut j = i + 1;
-        while j < snapshots.len() {
-            let (_, ref a_pts) = snapshots[i];
-            let (_, ref b_pts) = snapshots[j];
-            collect_pair_hops(a_pts, b_pts, i, j, &mut hops_per_connector);
-            j += 1;
+    // Pair connectors by document order i < j, in ON-PAGE coordinates.
+    for (i, a) in snapshots.iter().enumerate() {
+        for (j, b) in snapshots.iter().enumerate().skip(i + 1) {
+            collect_pair_hops(&a.on_page, &b.on_page, i, j, &mut hops_per_connector);
         }
-        i += 1;
     }
 
     if mode == "arc" {
@@ -154,6 +220,31 @@ pub(in crate::compile) fn apply_line_jumps(
     } else {
         apply_gap(commands, &snapshots, &hops_per_connector);
     }
+}
+
+/// A participating connector's snapshot: where to write, its active rotation
+/// transform, and its route in ON-PAGE coordinates.
+struct Snapshot {
+    /// Absolute command index of this connector's `StrokePolyline`.
+    idx: usize,
+    /// Active rotation transform (identity for depth-0).
+    transform: Transform,
+    /// Raw `points` mapped to on-page space. For identity, equal to raw points.
+    on_page: Vec<f64>,
+}
+
+/// Map a flat `[x0, y0, x1, y1, …]` point list through `f`, returning a new flat
+/// list. A trailing lone coordinate (malformed) is dropped.
+fn map_points(pts: &[f64], f: impl Fn((f64, f64)) -> (f64, f64)) -> Vec<f64> {
+    let mut out = Vec::with_capacity(pts.len());
+    for pair in pts.chunks_exact(2) {
+        if let (Some(&x), Some(&y)) = (pair.first(), pair.get(1)) {
+            let (nx, ny) = f((x, y));
+            out.push(nx);
+            out.push(ny);
+        }
+    }
+    out
 }
 
 /// Find every proper crossing between connector `i`'s polyline (`a_pts`) and
@@ -289,10 +380,10 @@ fn sort_hops(hops: &mut [Hop]) {
 /// inserting a small semicircular bump at every crossing.
 fn apply_arc(
     commands: &mut [SceneCommand],
-    snapshots: &[(usize, Vec<f64>)],
+    snapshots: &[Snapshot],
     hops_per_connector: &[Vec<Hop>],
 ) {
-    for (pos, (idx, base_pts)) in snapshots.iter().enumerate() {
+    for (pos, snap) in snapshots.iter().enumerate() {
         let Some(hops) = hops_per_connector.get(pos) else {
             continue;
         };
@@ -301,8 +392,12 @@ fn apply_arc(
         }
         let mut ordered = hops.to_vec();
         sort_hops(&mut ordered);
-        let new_pts = rebuild_points_with_bumps(base_pts, &ordered);
-        if let Some(SceneCommand::StrokePolyline { points, .. }) = commands.get_mut(*idx) {
+        // Build the bumped route in ON-PAGE space, then map every point back to
+        // this connector's LOCAL space. For identity the map is a no-op, so the
+        // written points are byte-identical to the unrotated path.
+        let on_page_pts = rebuild_points_with_bumps(&snap.on_page, &ordered);
+        let new_pts = map_points(&on_page_pts, |p| snap.transform.to_local(p));
+        if let Some(SceneCommand::StrokePolyline { points, .. }) = commands.get_mut(snap.idx) {
             *points = new_pts;
         }
     }
@@ -404,20 +499,23 @@ fn push_bump(out: &mut Vec<f64>, seg: Seg, px: f64, py: f64) {
 /// copied verbatim in their original positions.
 fn apply_gap(
     commands: &mut Vec<SceneCommand>,
-    snapshots: &[(usize, Vec<f64>)],
+    snapshots: &[Snapshot],
     hops_per_connector: &[Vec<Hop>],
 ) {
     use std::collections::BTreeMap;
 
-    // Map: command index → ordered hops, only for connectors that actually hop.
-    let mut split_at: BTreeMap<usize, Vec<Hop>> = BTreeMap::new();
-    for (pos, (idx, _)) in snapshots.iter().enumerate() {
+    // Map: command index → (transform, on-page route, ordered hops), only for
+    // connectors that actually hop. The split is computed on the ON-PAGE route;
+    // each piece is mapped back to the connector's LOCAL space (a no-op for
+    // identity, so depth-0 pieces are byte-identical).
+    let mut split_at: BTreeMap<usize, (Transform, Vec<f64>, Vec<Hop>)> = BTreeMap::new();
+    for (pos, snap) in snapshots.iter().enumerate() {
         if let Some(hops) = hops_per_connector.get(pos)
             && !hops.is_empty()
         {
             let mut ordered = hops.to_vec();
             sort_hops(&mut ordered);
-            split_at.insert(*idx, ordered);
+            split_at.insert(snap.idx, (snap.transform, snap.on_page.clone(), ordered));
         }
     }
     if split_at.is_empty() {
@@ -428,19 +526,20 @@ fn apply_gap(
     let mut new_cmds: Vec<SceneCommand> = Vec::with_capacity(commands.len());
     for (idx, cmd) in commands.iter().enumerate() {
         match split_at.get(&idx) {
-            Some(hops) => {
+            Some((transform, on_page, hops)) => {
                 if let SceneCommand::StrokePolyline {
-                    points,
                     color,
                     stroke_width,
                     closed,
                     align,
                     fill_even_odd,
+                    ..
                 } = cmd
                 {
-                    for piece in split_polyline(points, hops) {
+                    for piece in split_polyline(on_page, hops) {
+                        let local = map_points(&piece, |p| transform.to_local(p));
                         new_cmds.push(SceneCommand::StrokePolyline {
-                            points: piece,
+                            points: local,
                             color: *color,
                             stroke_width: *stroke_width,
                             closed: *closed,
@@ -679,19 +778,20 @@ mod tests {
         assert_eq!(out, vec![0]);
     }
 
-    /// The transform-depth filter excludes a connector between a PushTransform and
-    /// its PopTransform, but includes one outside any PushTransform — even when a
-    /// lone PushClip (which never moves geometry) is open around it. Here the two
-    /// strokes cross at (50, 50): the included one would normally hop, the excluded
-    /// one (inside a rotation) must be left untouched.
+    /// `active_transform_at` classifies the rotation stack: depth 0 → Identity,
+    /// depth 1 → the single Rotate, depth 2+ → None (excluded). A lone PushClip
+    /// (which never moves geometry) does not count toward the stack.
     #[test]
-    fn depth_filter_excludes_inside_transform() {
+    fn active_transform_classifies_depth() {
         // idx 0: PushClip (open, never moves geometry)
-        // idx 1: horizontal stroke at depth 0 (clip only) → INCLUDED
+        // idx 1: stroke at depth 0 (clip only) → Identity
         // idx 2: PushTransform
-        // idx 3: vertical stroke at transform depth 1 → EXCLUDED
-        // idx 4: PopTransform
-        let mut cmds = vec![
+        // idx 3: stroke at transform depth 1 → Rotate
+        // idx 4: PushTransform (nested)
+        // idx 5: stroke at depth 2 → excluded (None)
+        // idx 6: PopTransform
+        // idx 7: PopTransform
+        let cmds = vec![
             SceneCommand::PushClip {
                 x: 0.0,
                 y: 0.0,
@@ -705,33 +805,167 @@ mod tests {
                 cy: 50.0,
             },
             stroke(vec![50.0, 0.0, 50.0, 100.0]),
+            SceneCommand::PushTransform {
+                angle_deg: 15.0,
+                cx: 10.0,
+                cy: 10.0,
+            },
+            stroke(vec![0.0, 0.0, 10.0, 10.0]),
+            SceneCommand::PopTransform,
             SceneCommand::PopTransform,
         ];
-        assert_eq!(
-            transform_depth_at(&cmds, 1),
-            0,
-            "stroke at idx 1 is depth 0"
+        assert!(
+            matches!(active_transform_at(&cmds, 1), Some(Transform::Identity)),
+            "stroke at idx 1 is identity (clip only)"
         );
-        assert_eq!(
-            transform_depth_at(&cmds, 3),
-            1,
-            "stroke at idx 3 is depth 1"
+        assert!(
+            matches!(
+                active_transform_at(&cmds, 3),
+                Some(Transform::Rotate {
+                    angle_deg: 30.0,
+                    ..
+                })
+            ),
+            "stroke at idx 3 is a single rotation"
         );
+        assert!(
+            active_transform_at(&cmds, 5).is_none(),
+            "stroke at idx 5 is under two rotations → excluded"
+        );
+    }
 
-        let before_h = polyline_points(&cmds[1]);
-        let before_v = polyline_points(&cmds[3]);
-        // Pass both recorded strokes; only the depth-0 one survives the filter, so
-        // with no surviving partner to cross, NOTHING hops.
+    /// `rotate_pt` and its inverse round-trip exactly enough, and a 90° rotation
+    /// about the origin maps (1, 0) → (0, 1).
+    #[test]
+    fn rotate_pt_inverse_round_trips() {
+        let p = (1.0, 0.0);
+        let r = rotate_pt(p, 90.0, (0.0, 0.0));
+        assert!(
+            (r.0 - 0.0).abs() < 1e-9 && (r.1 - 1.0).abs() < 1e-9,
+            "{r:?}"
+        );
+        let back = rotate_pt(r, -90.0, (0.0, 0.0));
+        assert!(
+            (back.0 - 1.0).abs() < 1e-9 && (back.1 - 0.0).abs() < 1e-9,
+            "{back:?}"
+        );
+    }
+
+    /// A depth-1 (single PushTransform) connector that crosses an unrotated
+    /// connector in ON-PAGE space now participates: the horizontal-over-vertical
+    /// rule applies on-page, and the chosen connector gains a hop, written in its
+    /// LOCAL (pre-rotation) space.
+    ///
+    /// The rotated connector is the vertical-on-page one: in local space it runs
+    /// horizontally (0,50)→(100,50), and a +90° rotation about (50,50) turns it
+    /// into the on-page vertical segment x=50, y=0..100. The plain connector is
+    /// on-page horizontal y=50, x=0..100. On-page, horizontal hops over vertical,
+    /// so the plain (idx 3) connector hops; the rotated one stays unchanged.
+    #[test]
+    fn arc_depth_one_connector_participates() {
+        // idx 0: PushTransform +90° about (50,50)
+        // idx 1: local-horizontal stroke → on-page vertical x=50
+        // idx 2: PopTransform
+        // idx 3: plain on-page horizontal stroke y=50
+        let mut cmds = vec![
+            SceneCommand::PushTransform {
+                angle_deg: 90.0,
+                cx: 50.0,
+                cy: 50.0,
+            },
+            stroke(vec![0.0, 50.0, 100.0, 50.0]),
+            SceneCommand::PopTransform,
+            stroke(vec![0.0, 50.0, 100.0, 50.0]),
+        ];
+        let before_rot = polyline_points(&cmds[1]);
+        let before_plain = polyline_points(&cmds[3]);
+
         apply_line_jumps(&mut cmds, &[1, 3], "arc");
+
+        let after_rot = polyline_points(&cmds[1]);
+        let after_plain = polyline_points(&cmds[3]);
+
         assert_eq!(
-            polyline_points(&cmds[1]),
-            before_h,
-            "depth-0 connector has no surviving partner to cross → unchanged"
+            after_rot, before_rot,
+            "rotated (on-page vertical) connector must be unchanged"
+        );
+        assert!(
+            after_plain.len() > before_plain.len(),
+            "plain on-page-horizontal connector should gain bump points: {after_plain:?}"
+        );
+    }
+
+    /// A connector under TWO nested PushTransforms is excluded: even though it
+    /// would cross a plain connector on-page, it does not participate and neither
+    /// connector hops (the plain one has no surviving partner).
+    #[test]
+    fn depth_two_connector_excluded() {
+        // idx 0: PushTransform
+        // idx 1: PushTransform (nested)
+        // idx 2: stroke at depth 2 → EXCLUDED
+        // idx 3: PopTransform
+        // idx 4: PopTransform
+        // idx 5: plain stroke (would cross in raw coords)
+        let mut cmds = vec![
+            SceneCommand::PushTransform {
+                angle_deg: 10.0,
+                cx: 50.0,
+                cy: 50.0,
+            },
+            SceneCommand::PushTransform {
+                angle_deg: 20.0,
+                cx: 50.0,
+                cy: 50.0,
+            },
+            stroke(vec![50.0, 0.0, 50.0, 100.0]),
+            SceneCommand::PopTransform,
+            SceneCommand::PopTransform,
+            stroke(vec![0.0, 50.0, 100.0, 50.0]),
+        ];
+        let before_inner = polyline_points(&cmds[2]);
+        let before_plain = polyline_points(&cmds[5]);
+        apply_line_jumps(&mut cmds, &[2, 5], "arc");
+        assert_eq!(
+            polyline_points(&cmds[2]),
+            before_inner,
+            "depth-2 connector is excluded → unchanged"
         );
         assert_eq!(
-            polyline_points(&cmds[3]),
-            before_v,
-            "depth-1 connector is excluded → unchanged"
+            polyline_points(&cmds[5]),
+            before_plain,
+            "plain connector has no surviving partner → unchanged"
         );
+    }
+
+    /// Byte-identity guard: two unrotated crossing connectors produce a fixed,
+    /// known hopped output. This is the literal value the pass emitted before the
+    /// on-page refactor; the identity transform must not perturb it.
+    #[test]
+    fn arc_depth_zero_byte_identical_known_values() {
+        let mut cmds = vec![
+            stroke(vec![0.0, 50.0, 100.0, 50.0]),
+            stroke(vec![50.0, 0.0, 50.0, 100.0]),
+        ];
+        apply_line_jumps(&mut cmds, &[0, 1], "arc");
+        let after_h = polyline_points(&cmds[0]);
+
+        // Reproduce the expected bumped route directly from the bump builder on
+        // the raw (identity-on-page) segment: this is exactly what depth-0 must
+        // still yield, with no rotation calls in the path.
+        let expected = rebuild_points_with_bumps(
+            &[0.0, 50.0, 100.0, 50.0],
+            &[Hop {
+                seg: 0,
+                px: 50.0,
+                py: 50.0,
+                dist_from_start: 50.0,
+            }],
+        );
+        assert_eq!(
+            after_h, expected,
+            "depth-0 arc output must be byte-identical to the un-rotated builder"
+        );
+        // The vertical connector is untouched.
+        assert_eq!(polyline_points(&cmds[1]), vec![50.0, 0.0, 50.0, 100.0]);
     }
 }
