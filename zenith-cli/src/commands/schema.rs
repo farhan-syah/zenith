@@ -10,7 +10,7 @@ use zenith_tx::schema as tx_schema;
 use crate::commands::serialize_pretty;
 use crate::json_types::{
     SchemaNodeDetail, SchemaNodeEntry, SchemaNodeOutput, SchemaNodesOutput, SchemaOpEntry,
-    SchemaOpOutput, SchemaOpsOutput, SchemaOverviewOutput,
+    SchemaOpOutput, SchemaOpsOutput, SchemaOverviewOutput, SchemaSurfaceOutput,
 };
 
 // ── Public entry points ───────────────────────────────────────────────────────
@@ -31,12 +31,15 @@ pub fn overview(json: bool) -> (String, u8) {
         (serialize_pretty(&out), 0)
     } else {
         let text = format!(
-            "Zenith schema — {node_count} node kinds, {op_count} tx ops\n\n\
+            "Zenith schema — {node_count} node kinds, {op_count} tx ops, 3 non-node surfaces\n\n\
              Drill in:\n  \
              zenith schema nodes              # list all node kinds\n  \
              zenith schema node <kind>        # attributes for one kind\n  \
              zenith schema ops                # list all tx ops\n  \
-             zenith schema op <name>          # summary for one op\n\n\
+             zenith schema op <name>          # summary for one op\n  \
+             zenith schema page               # page declaration attributes\n  \
+             zenith schema asset              # asset declaration attributes\n  \
+             zenith schema document           # document root attributes\n\n\
              Attribute types, required-ness, and valid values are enforced by \
              `zenith validate`."
         );
@@ -178,6 +181,77 @@ pub fn op_detail(name: &str, json: bool) -> (String, u8) {
     } else {
         let text = format!("{name}: {summary}");
         (text, 0)
+    }
+}
+
+// ── Non-node surface formatters ───────────────────────────────────────────────
+
+/// `zenith schema page`: summary + recognized attributes for a page declaration.
+///
+/// Returns `(stdout, exit_code)`.
+pub fn page(json: bool) -> (String, u8) {
+    surface_detail(
+        "page",
+        core_schema::page_summary(),
+        core_schema::page_attributes(),
+        json,
+    )
+}
+
+/// `zenith schema asset`: summary + recognized attributes for an asset declaration.
+///
+/// Returns `(stdout, exit_code)`.
+pub fn asset(json: bool) -> (String, u8) {
+    surface_detail(
+        "asset",
+        core_schema::asset_summary(),
+        core_schema::asset_attributes(),
+        json,
+    )
+}
+
+/// `zenith schema document`: summary + recognized attributes for the document root.
+///
+/// Returns `(stdout, exit_code)`.
+pub fn document(json: bool) -> (String, u8) {
+    surface_detail(
+        "document",
+        core_schema::document_summary(),
+        core_schema::document_attributes(),
+        json,
+    )
+}
+
+/// Shared formatter for non-node surfaces (page / asset / document).
+fn surface_detail(
+    surface: &'static str,
+    summary: &'static str,
+    attrs: Vec<&'static str>,
+    json: bool,
+) -> (String, u8) {
+    if json {
+        let out = SchemaSurfaceOutput {
+            schema: "zenith-schema-v1",
+            surface,
+            summary: summary.to_owned(),
+            attributes: attrs.iter().map(|&a| a.to_owned()).collect(),
+        };
+        (serialize_pretty(&out), 0)
+    } else {
+        let mut text = format!("{surface}: {summary}\n");
+        if attrs.is_empty() {
+            text.push_str("  (no fixed attribute list)\n");
+        } else {
+            text.push_str("Attributes:\n");
+            let line = attrs.join(", ");
+            text.push_str(&wrap_attr_line(&line, 2, 72));
+            text.push('\n');
+        }
+        text.push_str(
+            "\nNote: attribute types, required-ness, and valid values are\n\
+             enforced by `zenith validate` (the authoritative diagnostic loop).",
+        );
+        (text.trim_end().to_owned(), 0)
     }
 }
 
@@ -333,5 +407,81 @@ mod tests {
         assert_eq!(code, 1);
         assert!(text.contains("unknown op"), "must report unknown op");
         assert!(text.contains("valid ops"), "must list valid ops");
+    }
+
+    #[test]
+    fn overview_mentions_new_surfaces() {
+        let (text, code) = overview(false);
+        assert_eq!(code, 0);
+        assert!(text.contains("page"), "overview must mention page surface");
+        assert!(
+            text.contains("asset"),
+            "overview must mention asset surface"
+        );
+        assert!(
+            text.contains("document"),
+            "overview must mention document surface"
+        );
+    }
+
+    #[test]
+    fn page_human_contains_geometry_attrs() {
+        let (text, code) = page(false);
+        assert_eq!(code, 0);
+        assert!(text.contains("page"), "must name the surface");
+        assert!(text.contains("Attributes:"), "must list attributes");
+        assert!(text.contains("w"), "page must have w attribute");
+        assert!(text.contains("h"), "page must have h attribute");
+        assert!(
+            text.contains("zenith validate"),
+            "must mention zenith validate"
+        );
+    }
+
+    #[test]
+    fn page_json_schema_field() {
+        let (text, code) = page(true);
+        assert_eq!(code, 0);
+        assert!(text.contains("zenith-schema-v1"));
+        assert!(text.contains("\"surface\""));
+        assert!(text.contains("\"attributes\""));
+        assert!(text.contains("\"page\""));
+    }
+
+    #[test]
+    fn asset_human_contains_provenance_attrs() {
+        let (text, code) = asset(false);
+        assert_eq!(code, 0);
+        assert!(text.contains("asset"), "must name the surface");
+        assert!(text.contains("sha256"), "asset must include sha256");
+        assert!(text.contains("ai-prompt"), "asset must include ai-prompt");
+    }
+
+    #[test]
+    fn asset_json_schema_field() {
+        let (text, code) = asset(true);
+        assert_eq!(code, 0);
+        assert!(text.contains("zenith-schema-v1"));
+        assert!(text.contains("\"asset\""));
+    }
+
+    #[test]
+    fn document_human_contains_root_attrs() {
+        let (text, code) = document(false);
+        assert_eq!(code, 0);
+        assert!(text.contains("document"), "must name the surface");
+        assert!(
+            text.contains("colorspace"),
+            "document must include colorspace"
+        );
+        assert!(text.contains("doc-id"), "document must include doc-id");
+    }
+
+    #[test]
+    fn document_json_schema_field() {
+        let (text, code) = document(true);
+        assert_eq!(code, 0);
+        assert!(text.contains("zenith-schema-v1"));
+        assert!(text.contains("\"document\""));
     }
 }

@@ -233,6 +233,16 @@ pub struct SchemaOverviewOutput {
     pub tx_ops: usize,
 }
 
+/// Top-level JSON envelope for `schema page`, `schema asset`, `schema document`.
+#[derive(Debug, Serialize)]
+pub struct SchemaSurfaceOutput {
+    pub schema: &'static str,
+    /// Which non-node surface this describes: `"page"`, `"asset"`, or `"document"`.
+    pub surface: &'static str,
+    pub summary: String,
+    pub attributes: Vec<String>,
+}
+
 // ── Recipe inspect JSON types ─────────────────────────────────────────────────
 
 /// A single `param` entry within a [`RecipeInspectJson`].

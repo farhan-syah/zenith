@@ -131,16 +131,19 @@ pub enum Command {
     /// faster and cheaper on tokens than going through MCP.
     Mcp(McpArgs),
 
-    /// Describe the Zenith document schema (node kinds, attributes, tx ops).
+    /// Describe the Zenith document schema (node kinds, attributes, tx ops, and non-node surfaces).
     ///
     /// Self-describing source of truth for agents and tooling. Reports every
     /// authorable node kind with its one-line summary and recognized attribute
-    /// names, and every transaction op with its summary. Attribute types,
-    /// required-ness, and valid values are enforced at document-level by
-    /// `zenith validate` — run that command for the full diagnostic loop.
+    /// names, every transaction op with its summary, and the recognized
+    /// attributes for the non-node authorable surfaces (page, asset, document).
+    /// Attribute types, required-ness, and valid values are enforced at
+    /// document-level by `zenith validate` — run that command for the full
+    /// diagnostic loop.
     ///
     /// Subcommands: `nodes` (all kinds), `node <kind>` (one kind + its
-    /// attributes), `ops` (all tx ops), `op <name>` (one op summary).
+    /// attributes), `ops` (all tx ops), `op <name>` (one op summary),
+    /// `page`, `asset`, `document` (non-node surface attributes).
     /// Bare `zenith schema` prints a short overview with counts and drill-in hints.
     Schema(SchemaArgs),
 }
@@ -674,6 +677,9 @@ zenith schema nodes                 # list all node kinds with summaries\n  \
 zenith schema node pattern          # attributes for one node kind\n  \
 zenith schema ops                   # list all transaction ops\n  \
 zenith schema op set_fill           # summary for one op\n  \
+zenith schema page                  # attributes for a page declaration\n  \
+zenith schema asset                 # attributes for an asset declaration\n  \
+zenith schema document              # attributes for the document root\n  \
 zenith schema nodes --json          # machine-readable JSON")]
 pub struct SchemaArgs {
     #[command(subcommand)]
@@ -704,4 +710,25 @@ pub enum SchemaSub {
         /// The op name to look up (e.g. `set_fill`, `add_node`).
         name: String,
     },
+
+    /// Show the recognized attributes for a `page` declaration.
+    ///
+    /// Lists every attribute the parser recognises on a `page` node:
+    /// geometry (w, h), margins, bleed, baseline-grid, line-jumps, parity,
+    /// master, and workflow-metadata (workspace-role, candidate-status, …).
+    Page,
+
+    /// Show the recognized attributes for an `asset` declaration.
+    ///
+    /// Lists every attribute the parser recognises on an `asset` node inside
+    /// the `assets { … }` block: id, kind, src, sha256, and the full suite of
+    /// AI-provenance fields (ai-prompt, ai-model, ai-provider, …).
+    Asset,
+
+    /// Show the recognized attributes for the document root (`zenith` node).
+    ///
+    /// Lists every attribute the parser recognises on the top-level `zenith`
+    /// node and the `document { … }` child block: version, colorspace, doc-id,
+    /// mirror-margins, page-progression, spread-gutter, margin-*, and more.
+    Document,
 }
