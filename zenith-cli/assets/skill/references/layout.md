@@ -107,6 +107,9 @@ rect id="card" anchor-sibling="title" anchor-edge="below" anchor-gap=(px)8 ancho
   and any "nothing escapes this region" layout (`examples/frame.zen`).
 - `group id { … }` bundles nodes logically (no clip) so a whole motif moves/dims/deletes as a
   unit (`examples/group.zen`). Opacity and transforms cascade through groups/frames.
+- A group may declare `protected-region id x y w h` children — advisory, non-rendering text-safe
+  rectangles (the group-level analogue of a page `safe-zone`). They emit nothing; agents/external
+  tools consult them to avoid placing text over reserved areas (UI chrome, logos). Optional `label`.
 
 ## Dividers and rules
 

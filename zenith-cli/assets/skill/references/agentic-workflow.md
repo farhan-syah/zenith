@@ -57,6 +57,10 @@ zenith render doc.zen --all-pages preview/      # contact sheet: one PNG per pag
 - Then _look at_ the PNGs: is the headline legible over the motif? Is the product safe area
   clear? Is the texture too noisy? Revise the offending nodes (by id) and re-render.
 - Do not finalize while hard diagnostics remain.
+- For an audit trail, record each preview in the document-level `previews` block — a `preview`
+  entry per candidate captures its `candidate` page id, the `source-hash` it was rendered from, the
+  `output` path + `output-hash`, and the `parent-revision`. It is pure provenance (never affects
+  render); `zenith inspect` surfaces it.
 
 ## 5. Promote the chosen candidate into the final page
 
