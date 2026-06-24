@@ -58,7 +58,7 @@ pub use revspec::{resolve_revspec, resolve_revspec_for};
 pub use runs::{RunDiagnostic, RunRecord, RunStep, append_run, read_runs};
 pub use scratch::{
     CandidateEntry, CandidateMeta, CandidateStatus, NewCandidate, get_scratch_snapshot,
-    list_scratch, put_scratch,
+    list_scratch, put_scratch, set_candidate_status,
 };
 pub use session::{
     RecordOutcome, SessionState, clear_session, current_content, record_state, redo, undo,

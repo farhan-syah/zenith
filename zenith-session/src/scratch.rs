@@ -7,10 +7,12 @@
 //!
 //! # Append-only contract
 //!
-//! This module is **append-only**: [`put_scratch`] adds entries; it never
-//! mutates existing ones. Draft → Selected / Rejected transitions are handled
-//! by a superseding append in a later unit. Do not implement an update/mutate
-//! path here.
+//! This module is **append-only**: all writes are appends. [`put_scratch`] adds
+//! new candidates; [`set_candidate_status`] transitions an existing candidate's
+//! status by appending a superseding entry (same `id`/`page_id`/`snapshot_hash`,
+//! new status and timestamp). [`list_scratch`] resolves the latest status per
+//! `id` via **last-write-wins** deduplication, returning one entry per distinct
+//! candidate in first-appearance order. The raw file is fully auditable.
 
 use std::time::UNIX_EPOCH;
 
@@ -145,7 +147,11 @@ pub fn put_scratch(
     Ok(entry)
 }
 
-/// List all candidate entries for `doc_id` in append order.
+/// List candidate entries for `doc_id`, one per distinct candidate id.
+///
+/// Reads all appended records and deduplicates by `id`: for each distinct `id`,
+/// the **last** record in file order is kept (last-write-wins). Entries are
+/// returned in **first-appearance order** (the order each `id` was first seen).
 ///
 /// Returns an empty vec when no scratch index exists for the document.
 pub fn list_scratch(
@@ -153,7 +159,57 @@ pub fn list_scratch(
     paths: &StorePaths,
     doc_id: &str,
 ) -> Result<Vec<CandidateEntry>, SessionError> {
-    read_jsonl_records(fs, &paths.scratch_index(doc_id))
+    let raw = read_jsonl_records(fs, &paths.scratch_index(doc_id))?;
+    Ok(dedup_last_write_wins(raw))
+}
+
+/// Deduplicate `records` by `id`, keeping the last occurrence of each `id`
+/// and emitting entries in first-appearance order. Deterministic; uses only
+/// `Vec` and `BTreeMap`.
+fn dedup_last_write_wins(records: Vec<CandidateEntry>) -> Vec<CandidateEntry> {
+    let mut order: Vec<String> = Vec::new();
+    let mut map: std::collections::BTreeMap<String, CandidateEntry> =
+        std::collections::BTreeMap::new();
+    for entry in records {
+        if !map.contains_key(&entry.id) {
+            order.push(entry.id.clone());
+        }
+        map.insert(entry.id.clone(), entry);
+    }
+    order.iter().filter_map(|id| map.get(id).cloned()).collect()
+}
+
+/// Transition a candidate's lifecycle status by appending a superseding entry
+/// (same `id`/`page_id`/`snapshot_hash`, new `status` + fresh timestamp). The
+/// scratch index stays append-only and auditable; [`list_scratch`] resolves the
+/// latest status per `id` via last-write-wins.
+///
+/// Returns `SessionError` if `cand_id` does not match any known candidate.
+pub fn set_candidate_status(
+    fs: &impl Fs,
+    paths: &StorePaths,
+    clock: &impl Clock,
+    doc_id: &str,
+    cand_id: &str,
+    new_status: CandidateStatus,
+) -> Result<CandidateEntry, SessionError> {
+    let entries = list_scratch(fs, paths, doc_id)?;
+    let existing = entries
+        .iter()
+        .find(|e| e.id == cand_id)
+        .ok_or_else(|| SessionError::new(format!("candidate not found: {cand_id}")))?;
+    let timestamp_ms = clock
+        .now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_millis());
+    let updated = CandidateEntry {
+        status: new_status,
+        timestamp_ms,
+        ..existing.clone()
+    };
+    append_jsonl_record(fs, &paths.scratch_index(doc_id), &updated)?;
+    Ok(updated)
 }
 
 /// Recover the stored `.zen` snapshot bytes for a candidate entry.
@@ -342,5 +398,191 @@ mod tests {
         let (fs, paths) = setup();
         let entries = list_scratch(&fs, &paths, "no-such-doc").unwrap();
         assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn set_status_draft_to_selected() {
+        let (fs, paths) = setup();
+        let clk = clock();
+
+        put_scratch(
+            &fs,
+            &paths,
+            &clk,
+            "doc1",
+            NewCandidate {
+                page_id: "page-a",
+                snapshot: b"zen A",
+                status: CandidateStatus::Draft,
+                meta: CandidateMeta::default(),
+            },
+        )
+        .unwrap();
+
+        let updated = set_candidate_status(
+            &fs,
+            &paths,
+            &clk,
+            "doc1",
+            "cand0",
+            CandidateStatus::Selected,
+        )
+        .unwrap();
+        assert_eq!(updated.status, CandidateStatus::Selected);
+        assert_eq!(updated.id, "cand0");
+
+        let entries = list_scratch(&fs, &paths, "doc1").unwrap();
+        assert_eq!(entries.len(), 1, "dedup must yield exactly one entry");
+        assert_eq!(entries[0].status, CandidateStatus::Selected);
+    }
+
+    #[test]
+    fn set_status_draft_to_rejected() {
+        let (fs, paths) = setup();
+        let clk = clock();
+
+        put_scratch(
+            &fs,
+            &paths,
+            &clk,
+            "doc1",
+            NewCandidate {
+                page_id: "page-b",
+                snapshot: b"zen B",
+                status: CandidateStatus::Draft,
+                meta: CandidateMeta::default(),
+            },
+        )
+        .unwrap();
+
+        set_candidate_status(
+            &fs,
+            &paths,
+            &clk,
+            "doc1",
+            "cand0",
+            CandidateStatus::Rejected,
+        )
+        .unwrap();
+
+        let entries = list_scratch(&fs, &paths, "doc1").unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].status, CandidateStatus::Rejected);
+    }
+
+    #[test]
+    fn list_scratch_dedup_keeps_latest_and_order() {
+        let (fs, paths) = setup();
+        let clk = clock();
+
+        put_scratch(
+            &fs,
+            &paths,
+            &clk,
+            "doc1",
+            NewCandidate {
+                page_id: "page-a",
+                snapshot: b"zen A",
+                status: CandidateStatus::Draft,
+                meta: CandidateMeta::default(),
+            },
+        )
+        .unwrap();
+        put_scratch(
+            &fs,
+            &paths,
+            &clk,
+            "doc1",
+            NewCandidate {
+                page_id: "page-b",
+                snapshot: b"zen B",
+                status: CandidateStatus::Draft,
+                meta: CandidateMeta::default(),
+            },
+        )
+        .unwrap();
+        set_candidate_status(
+            &fs,
+            &paths,
+            &clk,
+            "doc1",
+            "cand0",
+            CandidateStatus::Selected,
+        )
+        .unwrap();
+
+        let entries = list_scratch(&fs, &paths, "doc1").unwrap();
+        assert_eq!(entries.len(), 2, "must have exactly 2 distinct candidates");
+        assert_eq!(entries[0].id, "cand0");
+        assert_eq!(entries[0].status, CandidateStatus::Selected);
+        assert_eq!(entries[1].id, "cand1");
+        assert_eq!(entries[1].status, CandidateStatus::Draft);
+    }
+
+    #[test]
+    fn set_status_unknown_candidate_errors() {
+        let (fs, paths) = setup();
+        let clk = clock();
+
+        let result = set_candidate_status(
+            &fs,
+            &paths,
+            &clk,
+            "doc1",
+            "cand99",
+            CandidateStatus::Selected,
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.message.contains("cand99"),
+            "error message should include the missing id"
+        );
+    }
+
+    #[test]
+    fn put_after_status_change_gets_correct_next_seq() {
+        let (fs, paths) = setup();
+        let clk = clock();
+
+        put_scratch(
+            &fs,
+            &paths,
+            &clk,
+            "doc1",
+            NewCandidate {
+                page_id: "page-a",
+                snapshot: b"zen A",
+                status: CandidateStatus::Draft,
+                meta: CandidateMeta::default(),
+            },
+        )
+        .unwrap();
+        set_candidate_status(
+            &fs,
+            &paths,
+            &clk,
+            "doc1",
+            "cand0",
+            CandidateStatus::Selected,
+        )
+        .unwrap();
+
+        let e1 = put_scratch(
+            &fs,
+            &paths,
+            &clk,
+            "doc1",
+            NewCandidate {
+                page_id: "page-b",
+                snapshot: b"zen B",
+                status: CandidateStatus::Draft,
+                meta: CandidateMeta::default(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(e1.seq, 1, "seq must be 1 (one distinct candidate existed)");
+        assert_eq!(e1.id, "cand1");
     }
 }
