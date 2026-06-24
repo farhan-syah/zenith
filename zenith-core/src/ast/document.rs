@@ -2,7 +2,6 @@
 
 use super::Span;
 use super::action::ActionDef;
-use super::agent_run::AgentRun;
 use super::asset::AssetBlock;
 use super::library::LibraryDef;
 use super::node::Node;
@@ -356,11 +355,6 @@ pub struct Document {
     /// `expanded` children). The engine round-trips and validates these records
     /// but does NOT act on them; expansion is a later unit.
     pub recipes: Vec<RecipeDef>,
-    /// Agent-run records; empty when the `agent-runs` block is absent. Each
-    /// entry documents one autonomous agent execution (`id`, optional `brief`,
-    /// `constraints`, `plan`, and ordered `step` children). The engine
-    /// round-trips and diffs these records but does NOT act on them.
-    pub agent_runs: Vec<AgentRun>,
     /// Preview/critique artifacts; empty when the `previews` block is absent.
     /// Each entry records a rendered preview for a candidate page (`candidate`,
     /// optional content-hash/output-path fields, and `critique` children). The
@@ -501,7 +495,6 @@ mod parity_tests {
             provenance: Vec::new(),
             variants: Vec::new(),
             recipes: Vec::new(),
-            agent_runs: Vec::new(),
             previews: Vec::new(),
             body: DocumentBody {
                 id: "body".to_owned(),

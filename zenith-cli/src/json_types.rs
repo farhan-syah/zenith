@@ -267,31 +267,6 @@ pub struct SchemaSurfaceOutput {
     pub attributes: Vec<SchemaAttr>,
 }
 
-// ── Agent-run inspect JSON types ──────────────────────────────────────────────
-
-/// A single step entry within an [`AgentRunInspectJson`].
-#[derive(Debug, Serialize)]
-pub struct AgentStepInspectJson {
-    pub id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent: Option<String>,
-    pub action: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub action_version: Option<String>,
-    pub affected_node_count: usize,
-    pub diagnostic_count: usize,
-}
-
-/// A single agent-run entry in the `agent_runs` array of [`crate::commands::inspect::InspectOutput`].
-#[derive(Debug, Serialize)]
-pub struct AgentRunInspectJson {
-    pub id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub brief: Option<String>,
-    pub step_count: usize,
-    pub steps: Vec<AgentStepInspectJson>,
-}
-
 // ── Preview inspect JSON types ────────────────────────────────────────────────
 
 /// A single critique entry within a [`PreviewInspectJson`].

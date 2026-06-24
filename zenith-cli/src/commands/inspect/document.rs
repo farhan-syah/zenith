@@ -11,9 +11,8 @@
 use zenith_core::{Dimension, FrameNode, GroupNode, KdlAdapter, KdlSource, Node, Page, Unit};
 
 use crate::commands::serialize_pretty;
-use crate::json_types::{AgentRunInspectJson, PreviewInspectJson, RecipeInspectJson};
+use crate::json_types::{PreviewInspectJson, RecipeInspectJson};
 
-use super::agent_runs;
 use super::previews;
 use super::recipes;
 
@@ -100,8 +99,6 @@ pub struct InspectOutput {
     pub pages: Vec<PageEntry>,
     /// Empty when the document has no `recipes` block.
     pub recipes: Vec<RecipeInspectJson>,
-    /// Empty when the document has no `agent-runs` block.
-    pub agent_runs: Vec<AgentRunInspectJson>,
     /// Empty when the document has no `previews` block.
     pub previews: Vec<PreviewInspectJson>,
 }
@@ -150,13 +147,11 @@ pub fn run(src: &str, node_id: Option<&str>, json: bool) -> Result<String, Inspe
 
         let out = if json {
             let recipe_entries = recipes::build_recipe_entries(&doc.recipes);
-            let agent_run_entries = agent_runs::build_agent_run_entries(&doc.agent_runs);
             let preview_entries = previews::build_preview_entries(&doc.previews);
             let output = InspectOutput {
                 schema: "zenith-inspect-v1",
                 pages,
                 recipes: recipe_entries,
-                agent_runs: agent_run_entries,
                 previews: preview_entries,
             };
             serialize_pretty(&output)
@@ -167,12 +162,6 @@ pub fn run(src: &str, node_id: Option<&str>, json: bool) -> Result<String, Inspe
                 text.push('\n');
                 text.push('\n');
                 text.push_str(&recipe_section);
-            }
-            let agent_run_section = agent_runs::render_agent_runs_human(&doc.agent_runs);
-            if !agent_run_section.is_empty() {
-                text.push('\n');
-                text.push('\n');
-                text.push_str(&agent_run_section);
             }
             let preview_section = previews::render_previews_human(&doc.previews);
             if !preview_section.is_empty() {

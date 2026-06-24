@@ -4,9 +4,9 @@
 //! candidate pages. Each `preview` entry captures a required `candidate` page
 //! id, optional content-hash and output-path fields, and a sequence of
 //! `critique` children that record visual-critique notes. It is a sibling of
-//! the `variants`/`recipes`/`agent-runs`/`document` blocks. The engine
-//! round-trips these records but does NOT act on them; auditability and
-//! diffability are the sole purpose.
+//! the `variants`/`recipes`/`document` blocks. The engine round-trips these
+//! records but does NOT act on them; auditability and diffability are the sole
+//! purpose.
 
 use std::collections::BTreeMap;
 
@@ -37,8 +37,7 @@ pub struct PreviewArtifact {
 }
 
 /// A single visual-critique note on a preview. Fixed-schema leaf (no
-/// unknown_props), mirroring the agent-run diagnostic record but kept as a
-/// separate domain type.
+/// unknown_props).
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreviewCritique {
     /// Severity string (e.g. `"warn"`, `"error"`). Required.

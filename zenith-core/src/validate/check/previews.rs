@@ -5,10 +5,9 @@
 //! 1. **`preview.unknown_candidate`** (Advisory) — a preview entry's `candidate`
 //!    page id is not present in the document's declared pages. Advisory because a
 //!    preview recorded against an older doc state may reference a since-removed
-//!    page; mirrors `agent_run.unknown_affected_node`.
+//!    page.
 //! 2. **`preview.invalid_critique_severity`** (Warning) — a critique entry's
-//!    `severity` is not one of `"error"`, `"warning"`, or `"advisory"`; mirrors
-//!    `agent_run.invalid_diagnostic_severity`.
+//!    `severity` is not one of `"error"`, `"warning"`, or `"advisory"`.
 
 use std::collections::BTreeSet;
 

@@ -1,7 +1,6 @@
 //! Integration tests for `zenith inspect` — previews block surfacing.
 //!
-//! Exercises the public [`zenith_cli::commands::inspect::run`] function directly
-//! (same pattern as `inspect_agent_runs.rs`).
+//! Exercises the public [`zenith_cli::commands::inspect::run`] function directly.
 
 use zenith_cli::commands::inspect::run;
 

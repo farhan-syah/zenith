@@ -13,7 +13,7 @@ use super::{
 
 /// Emit the `previews { … }` block.
 ///
-/// Stable position: after `agent-runs`, before `actions`. Emitted ONLY when at
+/// Stable position: after `recipes`, before `actions`. Emitted ONLY when at
 /// least one preview artifact is declared, so documents without previews keep
 /// their existing canonical form unchanged (byte-identity gate). Each preview
 /// emits:
@@ -26,8 +26,7 @@ use super::{
 ///
 /// Optional inline props are omitted when absent. The `output` path and
 /// critique `message` pass through [`escape_kdl_string`] (may contain
-/// backslashes and quotes); the other string fields emit unescaped. Mirrors
-/// [`write_agent_runs_block`](super::agent_runs::write_agent_runs_block).
+/// backslashes and quotes); the other string fields emit unescaped.
 pub(super) fn write_previews_block(out: &mut String, previews: &[PreviewArtifact], depth: usize) {
     if previews.is_empty() {
         return;

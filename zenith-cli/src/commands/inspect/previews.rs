@@ -4,7 +4,7 @@
 //! - [`build_preview_entries`] — converts `&[PreviewArtifact]` to
 //!   `Vec<PreviewInspectJson>` for the `--json` path.
 //! - [`render_previews_human`] — formats the same data as a human-readable
-//!   section string, mirroring the style used for the `agent_runs` output.
+//!   section string.
 
 use zenith_core::PreviewArtifact;
 
@@ -41,8 +41,7 @@ fn critique_to_json(c: &zenith_core::PreviewCritique) -> PreviewCritiqueInspectJ
 
 /// Render the `previews` section for human output.
 ///
-/// Returns an empty string when `previews` is empty (consistent with how the
-/// agent-runs section simply emits nothing when absent).
+/// Returns an empty string when `previews` is empty.
 pub fn render_previews_human(previews: &[PreviewArtifact]) -> String {
     if previews.is_empty() {
         return String::new();

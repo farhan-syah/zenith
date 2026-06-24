@@ -1,7 +1,6 @@
 //! AST type re-exports for zenith-core.
 
 pub mod action;
-pub mod agent_run;
 pub mod asset;
 pub mod document;
 pub mod library;
@@ -17,7 +16,6 @@ pub mod variant;
 
 // Flat re-exports used throughout the crate.
 pub use action::ActionDef;
-pub use agent_run::{AgentRun, AgentStep, AgentStepDiagnostic, AgentStepParam};
 pub use asset::{AssetBlock, AssetDecl, AssetKind};
 pub use document::{
     ComponentDef, Document, DocumentBody, Fold, MasterDef, Page, Project, SafeZone, SafeZoneType,

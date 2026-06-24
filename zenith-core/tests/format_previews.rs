@@ -1,7 +1,7 @@
 //! Integration tests for the `previews` block: parse, serialize, and
 //! round-trip.
 //!
-//! Mirrors the agent-runs round-trip tests in `format_agent_runs.rs`. Exercises:
+//! Exercises:
 //! - Full parse → field access → format → re-parse → AST equality (spans stripped).
 //! - Absent `previews` block → empty vec, no output, byte-identical to before.
 //! - Free-form string fields containing `"`, `\`, and newlines escape correctly.
@@ -17,8 +17,8 @@ use zenith_core::format::format_document;
 /// **Round-trip**: parse a doc with a `previews` block (two preview entries:
 /// one full entry with all optional fields + two critiques, one minimal entry
 /// with only `candidate`) → format → re-parse → AST equality (spans stripped).
-/// Also asserts canonical position (after `agent-runs`, before `document`) and
-/// that all fields emit correctly.
+/// Also asserts canonical position (before `document`) and that all fields emit
+/// correctly.
 #[test]
 fn test_previews_round_trip() {
     let src = r##"zenith version=1 {
@@ -26,9 +26,6 @@ fn test_previews_round_trip() {
   tokens format="zenith-token-v1" {
   }
   styles {
-  }
-  agent-runs {
-    run id="run.x" brief="demo"
   }
   previews {
     preview candidate="page.hero" source-hash="abc123" output="out/hero.png" output-hash="def456" parent-revision="rev.1" {
@@ -98,15 +95,12 @@ fn test_previews_round_trip() {
         "minimal preview must emit; got:\n{formatted_str}"
     );
 
-    // Canonical order: agent-runs, then previews, then document.
-    let agent_runs_at = formatted_str
-        .find("agent-runs {")
-        .expect("agent-runs block");
+    // Canonical order: previews before document.
     let previews_at = formatted_str.find("previews {").expect("previews block");
     let doc_at = formatted_str.find("document ").expect("document block");
     assert!(
-        agent_runs_at < previews_at && previews_at < doc_at,
-        "previews must be emitted after agent-runs and before document; got:\n{formatted_str}"
+        previews_at < doc_at,
+        "previews must be emitted before document; got:\n{formatted_str}"
     );
 
     let reparsed = adapter.parse(&formatted).expect("re-parse");

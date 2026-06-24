@@ -28,8 +28,7 @@ const PREVIEW_KNOWN_PROPS: &[&str] = &[
 /// Transform the document-level `previews { … }` block into a list of
 /// [`PreviewArtifact`]. Each `preview candidate="…" …` is a block node;
 /// non-`preview` children inside the block are silently ignored
-/// (forward-compat). Mirrors
-/// [`transform_agent_runs`](super::agent_run::transform_agent_runs).
+/// (forward-compat).
 pub(super) fn transform_previews(node: &KdlNode) -> Result<Vec<PreviewArtifact>, ParseError> {
     let mut defs: Vec<PreviewArtifact> = Vec::new();
     if let Some(children) = node.children() {

@@ -16,7 +16,6 @@ use crate::color::parse_rgb;
 use crate::diagnostics::Diagnostic;
 use crate::tokens::{ResolvedToken, ResolvedValue};
 
-use super::agent_runs::check_agent_runs;
 use super::contrast::check_text_contrast;
 use super::nodes::{WalkCtx, WalkPos, check_sibling_anchors, walk_node};
 use super::passes::{
@@ -417,11 +416,6 @@ pub fn validate(doc: &Document) -> ValidationReport {
         &token_type_map,
         &mut diagnostics,
     );
-
-    // ── Agent runs ────────────────────────────────────────────────────────
-    // Validate the top-level `agent-runs` block: duplicate run/step ids, empty
-    // actions, unresolved parent-step references, and unknown affected-node ids.
-    check_agent_runs(doc, &all_node_ids, &mut diagnostics);
 
     // ── Previews ──────────────────────────────────────────────────────────
     // Validate the top-level `previews` block: unknown candidate page ids and
