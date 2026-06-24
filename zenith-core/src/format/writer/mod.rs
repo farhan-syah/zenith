@@ -6,7 +6,7 @@
 //! Rules:
 //! - Two-space indentation per nesting level.
 //! - Root `zenith` node at column 0.
-//! - Child order under `zenith`: project, assets, libraries, tokens, styles, components, masters, sections, provenance, variants, recipes, agent-runs, previews, actions, document.
+//! - Child order under `zenith`: project, assets, libraries, tokens, styles, components, masters, sections, provenance, variants, recipes, actions, document.
 //! - Structural containers (`tokens`, `styles`, `document`, `page`) always emit
 //!   a brace block, even when empty.
 //! - Leaf nodes (`project`, a `rect` with no children) emit a single line.
@@ -21,13 +21,12 @@
 //!
 //! The implementation is split across focused submodules:
 //! - this module root holds the public entry point, the `zenith`/`project`/
-//!   `assets`/`libraries`/`components`/`masters`/`sections` orchestration, and
-//!   the shared low-level primitives;
+//!   `assets`/`libraries`/`components`/`masters`/`sections`/`provenance`/
+//!   `variants`/`recipes`/`actions` orchestration, and the shared low-level
+//!   primitives;
 //! - [`tokens`] writes the `tokens` block;
 //! - [`styles`] writes the `styles` block;
-//! - [`nodes`] writes the `document` body, pages, and every node kind;
-//! - [`agent_runs`] writes the `agent-runs` block;
-//! - [`previews`] writes the `previews` block.
+//! - [`nodes`] writes the `document` body, pages, and every node kind.
 
 use std::fmt::Write as _;
 
@@ -38,9 +37,7 @@ use crate::ast::{
 };
 use crate::error::FormatError;
 
-mod agent_runs;
 mod nodes;
-mod previews;
 mod styles;
 mod tokens;
 
@@ -285,7 +282,7 @@ fn write_document(doc: &Document, out: &mut String) {
     write_opt_str(out, "page-parity-start", &doc.page_parity_start);
     out.push_str(" {\n");
 
-    // Child order: project, assets, libraries, tokens, styles, components, masters, sections, provenance, variants, recipes, agent-runs, previews, actions, document.
+    // Child order: project, assets, libraries, tokens, styles, components, masters, sections, provenance, variants, recipes, actions, document.
     if let Some(proj) = &doc.project {
         write_project(proj, out, 1);
     }
@@ -299,8 +296,6 @@ fn write_document(doc: &Document, out: &mut String) {
     write_provenance_block(&doc.provenance, out, 1);
     write_variants_block(&doc.variants, out, 1);
     write_recipes_block(&doc.recipes, out, 1);
-    agent_runs::write_agent_runs_block(&doc.agent_runs, out, 1);
-    previews::write_previews_block(out, &doc.previews, 1);
     write_action_block(&doc.actions, out, 1);
     write_document_body(&doc.body, out, 1);
 

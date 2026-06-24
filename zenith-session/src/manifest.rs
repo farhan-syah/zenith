@@ -108,26 +108,28 @@ fn is_false(b: &bool) -> bool {
 
 // ── Manifest I/O ──────────────────────────────────────────────────────────────
 
-/// Append one record to the JSONL manifest at `path`, creating the file (and its
-/// parent directory) if needed. Each record is written as a single JSON line.
-pub fn append_record(
+/// Append one serde-serializable record as a JSON line to `path`, creating the
+/// file and its parent directory if needed.
+pub(crate) fn append_jsonl_record<T: serde::Serialize>(
     fs: &impl Fs,
     path: &Path,
-    record: &HistoryRecord,
+    record: &T,
 ) -> Result<(), SessionError> {
     if let Some(parent) = path.parent() {
         fs.create_dir_all(parent)?;
     }
     let mut line = serde_json::to_vec(record)
-        .map_err(|e| SessionError::new(format!("serialize history record: {e}")))?;
+        .map_err(|e| SessionError::new(format!("serialize record: {e}")))?;
     line.push(b'\n');
     fs.append(path, &line)
 }
 
-/// Read and parse every record from the JSONL manifest at `path`. Returns an
-/// empty vec if the manifest does not exist. Blank lines are skipped; a malformed
-/// line is a hard error (the manifest is corrupt).
-pub fn read_records(fs: &impl Fs, path: &Path) -> Result<Vec<HistoryRecord>, SessionError> {
+/// Read all JSON-line records of type `T` from `path`. Returns an empty vec if
+/// the file is absent. Blank lines are skipped; a malformed line is a hard error.
+pub(crate) fn read_jsonl_records<T: serde::de::DeserializeOwned>(
+    fs: &impl Fs,
+    path: &Path,
+) -> Result<Vec<T>, SessionError> {
     if !fs.exists(path) {
         return Ok(Vec::new());
     }
@@ -140,10 +142,27 @@ pub fn read_records(fs: &impl Fs, path: &Path) -> Result<Vec<HistoryRecord>, Ses
             continue;
         }
         let rec = serde_json::from_str(line)
-            .map_err(|e| SessionError::new(format!("parse history record: {e}")))?;
+            .map_err(|e| SessionError::new(format!("parse record: {e}")))?;
         out.push(rec);
     }
     Ok(out)
+}
+
+/// Append one record to the JSONL manifest at `path`, creating the file (and its
+/// parent directory) if needed. Each record is written as a single JSON line.
+pub fn append_record(
+    fs: &impl Fs,
+    path: &Path,
+    record: &HistoryRecord,
+) -> Result<(), SessionError> {
+    append_jsonl_record(fs, path, record)
+}
+
+/// Read and parse every record from the JSONL manifest at `path`. Returns an
+/// empty vec if the manifest does not exist. Blank lines are skipped; a malformed
+/// line is a hard error (the manifest is corrupt).
+pub fn read_records(fs: &impl Fs, path: &Path) -> Result<Vec<HistoryRecord>, SessionError> {
+    read_jsonl_records::<HistoryRecord>(fs, path)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

@@ -395,7 +395,6 @@ fn op_name(op: &zenith_tx::Op) -> String {
         zenith_tx::Op::ReplaceText { .. } => "replace_text",
         zenith_tx::Op::DuplicateNode { .. } => "duplicate_node",
         zenith_tx::Op::DuplicatePage { .. } => "duplicate_page",
-        zenith_tx::Op::PromoteCandidate { .. } => "promote_candidate",
         zenith_tx::Op::AddNode { .. } => "add_node",
         zenith_tx::Op::RemoveNode { .. } => "remove_node",
         zenith_tx::Op::Group { .. } => "group",
@@ -419,7 +418,6 @@ fn op_name(op: &zenith_tx::Op) -> String {
         zenith_tx::Op::CreateRecipe { .. } => "create_recipe",
         zenith_tx::Op::UpdateRecipe { .. } => "update_recipe",
         zenith_tx::Op::DeleteRecipe { .. } => "delete_recipe",
-        zenith_tx::Op::FinalizeRun { .. } => "finalize_run",
         zenith_tx::Op::DetachPattern { .. } => "detach_pattern",
     }
     .to_owned()

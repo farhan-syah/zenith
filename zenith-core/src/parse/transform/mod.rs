@@ -8,12 +8,11 @@
 //! - [`document`]: the top-level [`transform`] entry plus the document-level
 //!   structural blocks (project/assets/libraries/.../pages).
 //! - [`tokens`]: the `tokens { … }` and `styles { … }` blocks.
-//! - [`agent_run`]: the `agent-runs { … }` block.
-//! - [`preview`]: the `previews { … }` block.
 //! - [`node`]: the per-node-kind dispatch edge ([`node::transform_node`]).
+//! - [`page`]: `page { … }` block transform and `PAGE_KNOWN_PROPS`.
+//! - [`pattern`]: `pattern` node transform.
 //! - [`leaf`]/[`container`]/[`special`]: the renderable node transforms.
 
-mod agent_run;
 mod container;
 mod document;
 mod helpers;
@@ -21,7 +20,6 @@ mod leaf;
 mod node;
 mod page;
 mod pattern;
-mod preview;
 mod special;
 mod tokens;
 

@@ -84,12 +84,6 @@ pub fn op_example(name: &str) -> Option<&'static str> {
         }
         "delete_recipe" => Some(r#"{"op":"delete_recipe","id":"recipe.scatter"}"#),
         "detach_pattern" => Some(r#"{"op":"detach_pattern","node":"dots"}"#),
-        "promote_candidate" => Some(
-            r#"{"op":"promote_candidate","source_page":"page.scratch.hero.02","target_page":"page.hero","id_suffix":".final"}"#,
-        ),
-        "finalize_run" => Some(
-            r#"{"op":"finalize_run","run_pages":["page.scratch.hero.01","page.scratch.hero.02"]}"#,
-        ),
         _ => None,
     }
 }

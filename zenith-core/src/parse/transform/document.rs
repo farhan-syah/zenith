@@ -1,17 +1,15 @@
 //! Top-level `transform` entry point and the document-level structural blocks
 //! (project, assets, libraries, actions, masters, sections, provenance,
-//! components, agent-runs, document body, pages, folds, safe-zones).
+//! components, document body, pages, folds, safe-zones).
 
 use kdl::{KdlDocument, KdlNode, KdlValue};
 
 use crate::ast::{
     action::ActionDef,
-    agent_run::AgentRun,
     asset::{AssetBlock, AssetDecl, AssetKind},
     document::{ComponentDef, Document, DocumentBody, MasterDef, Page, Project, SectionDef},
     library::LibraryDef,
     node::Node,
-    preview::PreviewArtifact,
     provenance::ProvenanceDef,
     recipe::{RecipeDef, RecipeParam},
     style::StyleBlock,
@@ -20,7 +18,6 @@ use crate::ast::{
 };
 use crate::error::{ParseError, ParseErrorCode};
 
-use super::agent_run::transform_agent_runs;
 use super::helpers::{
     collect_unknown_props, entry_to_dimension, entry_to_property_value, node_span,
     optional_bool_prop, optional_dimension_prop, optional_i64_prop, optional_string_prop,
@@ -29,7 +26,6 @@ use super::helpers::{
 };
 use super::node::transform_node;
 use super::page::transform_page;
-use super::preview::transform_previews;
 use super::tokens::{transform_styles, transform_tokens};
 
 /// Canonical set of property names recognised on the document-level surface.
@@ -165,8 +161,6 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
     let mut provenance: Vec<ProvenanceDef> = Vec::new();
     let mut variants: Vec<VariantDef> = Vec::new();
     let mut recipes: Vec<RecipeDef> = Vec::new();
-    let mut agent_runs: Vec<AgentRun> = Vec::new();
-    let mut previews: Vec<PreviewArtifact> = Vec::new();
     let mut body: Option<DocumentBody> = None;
 
     for child in children_doc.nodes() {
@@ -206,12 +200,6 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
             }
             "recipes" => {
                 recipes = transform_recipes(child)?;
-            }
-            "agent-runs" => {
-                agent_runs = transform_agent_runs(child)?;
-            }
-            "previews" => {
-                previews = transform_previews(child)?;
             }
             "document" => {
                 body = Some(transform_document_body(child)?);
@@ -254,8 +242,6 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
         provenance,
         variants,
         recipes,
-        agent_runs,
-        previews,
         body,
     })
 }

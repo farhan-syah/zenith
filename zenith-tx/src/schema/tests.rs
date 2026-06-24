@@ -49,8 +49,6 @@ fn op_tag(op: &Op) -> &'static str {
         Op::UpdateRecipe { .. } => "update_recipe",
         Op::DeleteRecipe { .. } => "delete_recipe",
         Op::DetachPattern { .. } => "detach_pattern",
-        Op::PromoteCandidate { .. } => "promote_candidate",
-        Op::FinalizeRun { .. } => "finalize_run",
     }
 }
 
@@ -99,8 +97,6 @@ fn all_exhaustive_tags() -> BTreeSet<&'static str> {
         "update_recipe",
         "delete_recipe",
         "detach_pattern",
-        "promote_candidate",
-        "finalize_run",
     ])
 }
 
@@ -314,12 +310,6 @@ fn op_tag_strings_match_exhaustive_set() {
         Op::DetachPattern {
             node: String::new(),
         },
-        Op::PromoteCandidate {
-            source_page: String::new(),
-            target_page: String::new(),
-            id_suffix: String::new(),
-        },
-        Op::FinalizeRun { run_pages: vec![] },
     ];
 
     for op in samples {
@@ -664,20 +654,6 @@ fn op_fields_names_match_serde_keys() {
             "detach_pattern",
             Op::DetachPattern {
                 node: "dots".into(),
-            },
-        ),
-        (
-            "promote_candidate",
-            Op::PromoteCandidate {
-                source_page: "page.scratch.hero.02".into(),
-                target_page: "page.hero".into(),
-                id_suffix: ".final".into(),
-            },
-        ),
-        (
-            "finalize_run",
-            Op::FinalizeRun {
-                run_pages: vec!["page.scratch.hero.01".into()],
             },
         ),
     ];

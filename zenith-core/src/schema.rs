@@ -255,8 +255,6 @@ fn attribute_type_inner(name: &str, fallback: &'static str) -> &'static str {
         "parity" => "enum: left|right",
         "page-parity-start" => "enum: left|right",
         "page-progression" => "enum: ltr|rtl",
-        "candidate-status" => "string (enum)",
-        "cleanup-policy" => "string (enum)",
         "colorspace" => "enum: srgb|display-p3|rec2020",
         "direction" => "enum: ltr|rtl",
         "overflow-wrap" => "enum: normal|break-word",
@@ -295,9 +293,6 @@ fn attribute_type_inner(name: &str, fallback: &'static str) -> &'static str {
 
         // ── Page workflow metadata ────────────────────────────────────────
         "master" => "string",
-        "workspace-role" => "string",
-        "notes" => "string",
-        "promotion-target" => "node id",
 
         // ── Document root ─────────────────────────────────────────────────
         "version" => "string",
@@ -509,7 +504,7 @@ mod tests {
     fn page_attributes_anchor_check() {
         let attrs = page_attributes();
         assert!(!attrs.is_empty(), "page_attributes() must not be empty");
-        for anchor in &["w", "h", "line-jumps", "candidate-status"] {
+        for anchor in &["w", "h", "line-jumps"] {
             assert!(
                 attrs.contains(anchor),
                 "page_attributes() must contain \"{anchor}\"; got: {attrs:?}",

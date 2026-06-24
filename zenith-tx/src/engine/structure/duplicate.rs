@@ -243,7 +243,7 @@ pub(in crate::engine) fn apply_duplicate_node(
 /// read/written through the shared [`node_id_of`] reader and the
 /// [`node_set_id_any`] setter; leaf and container nodes alike get suffixed, and
 /// containers also recurse into their own children.
-pub(in crate::engine::structure) fn suffix_ids_in_children(children: &mut [Node], id_suffix: &str) {
+pub(crate) fn suffix_ids_in_children(children: &mut [Node], id_suffix: &str) {
     for child in children.iter_mut() {
         // Suffix this node's own id (if it has one), then recurse.
         if let Some(old_id) = node_id_of(child) {
@@ -283,8 +283,8 @@ pub(in crate::engine::structure) fn suffix_ids_in_children(children: &mut [Node]
 /// Append `id_suffix` to every safe-zone and fold id in a cloned page and clear
 /// their source spans. Page-metadata children (safe-zones, folds) carry ids in
 /// the same namespace as nodes, so a deep page copy must suffix them too to stay
-/// collision-free. Shared by `DuplicatePage` and `PromoteCandidate`.
-pub(in crate::engine::structure) fn suffix_zone_and_fold_ids(
+/// collision-free. Used by `DuplicatePage` and `merge_candidate_page`.
+pub(crate) fn suffix_zone_and_fold_ids(
     safe_zones: &mut [SafeZone],
     folds: &mut [Fold],
     id_suffix: &str,

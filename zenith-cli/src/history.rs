@@ -226,6 +226,15 @@ fn doc_id_at(doc_path: &Path) -> Result<String, String> {
     read_doc_with_id(doc_path).map(|(_, id)| id)
 }
 
+/// Public thin wrapper around [`doc_id_at`] for use by sibling command modules.
+///
+/// Returns a human-readable error if the file cannot be read, cannot be
+/// parsed, or has no `doc-id` attribute yet (meaning it has never been
+/// recorded through the history pipeline).
+pub fn read_doc_id(doc_path: &Path) -> Result<String, String> {
+    doc_id_at(doc_path)
+}
+
 // ── history_view ──────────────────────────────────────────────────────────────
 
 /// Build the history view for the document at `doc_path`.

@@ -16,10 +16,9 @@ use std::collections::BTreeMap;
 
 pub use zenith_core::ast::document::Fold;
 pub use zenith_core::{
-    ActionDef, AgentRun, AgentStep, AgentStepDiagnostic, AgentStepParam, AssetBlock, AssetDecl,
-    AssetKind, CodeNode, ConnectorNode, Dimension, Document, DocumentBody, EllipseNode, FieldNode,
-    FrameNode, GroupNode, ImageNode, LibraryDef, LineNode, MasterDef, Node, Page, Point,
-    PolygonNode, PolylineNode, PreviewArtifact, PreviewCritique, PropertyValue, ProtectedRegion,
+    ActionDef, AssetBlock, AssetDecl, AssetKind, CodeNode, ConnectorNode, Dimension, Document,
+    DocumentBody, EllipseNode, FieldNode, FrameNode, GroupNode, ImageNode, LibraryDef, LineNode,
+    MasterDef, Node, Page, Point, PolygonNode, PolylineNode, PropertyValue, ProtectedRegion,
     ProvenanceDef, RecipeDef, RecipeParam, RectNode, SafeZone, SafeZoneType, SectionDef, Severity,
     ShapeNode, Style, StyleBlock, TableCell, TableColumn, TableNode, TableRow, TextNode, TextSpan,
     TocNode, Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit, UnknownNode,
@@ -188,11 +187,6 @@ pub fn minimal_page(id: &str, children: Vec<Node>) -> Page {
         line_jumps: None,
         parity: None,
         master: None,
-        workspace_role: None,
-        candidate_status: None,
-        notes: None,
-        promotion_target: None,
-        cleanup_policy: None,
         safe_zones: Vec::new(),
         folds: Vec::new(),
         children,
@@ -229,8 +223,6 @@ pub fn doc_with(tokens: Vec<Token>, pages: Vec<Page>) -> Document {
         provenance: Vec::new(),
         variants: Vec::new(),
         recipes: Vec::new(),
-        agent_runs: Vec::new(),
-        previews: Vec::new(),
         body: DocumentBody {
             id: "doc.main".to_owned(),
             title: None,
@@ -275,11 +267,6 @@ pub fn bounded_page(id: &str, w: f64, h: f64, children: Vec<Node>) -> Page {
         line_jumps: None,
         parity: None,
         master: None,
-        workspace_role: None,
-        candidate_status: None,
-        notes: None,
-        promotion_target: None,
-        cleanup_policy: None,
         safe_zones: Vec::new(),
         folds: Vec::new(),
         children,
@@ -413,26 +400,6 @@ pub fn strip_spans(mut doc: Document) -> Document {
         recipe.source_span = None;
         for param in &mut recipe.params {
             param.source_span = None;
-        }
-    }
-    // Agent runs
-    for run in &mut doc.agent_runs {
-        run.source_span = None;
-        for step in &mut run.steps {
-            step.source_span = None;
-            for param in &mut step.params {
-                param.source_span = None;
-            }
-            for diag in &mut step.diagnostics {
-                diag.source_span = None;
-            }
-        }
-    }
-    // Previews
-    for preview in &mut doc.previews {
-        preview.source_span = None;
-        for critique in &mut preview.critiques {
-            critique.source_span = None;
         }
     }
     // Pages and nodes

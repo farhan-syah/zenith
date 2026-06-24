@@ -16,14 +16,12 @@ use crate::color::parse_rgb;
 use crate::diagnostics::Diagnostic;
 use crate::tokens::{ResolvedToken, ResolvedValue};
 
-use super::agent_runs::check_agent_runs;
 use super::contrast::check_text_contrast;
 use super::nodes::{WalkCtx, WalkPos, check_sibling_anchors, walk_node};
 use super::passes::{
     check_footnote_refs, collect_local_ids, register_id, validate_asset_decl,
     validate_library_decl, validate_provenance_def, validate_style_block,
 };
-use super::previews::check_previews;
 use super::recipes::check_recipes;
 use super::report::ValidationReport;
 use super::variants::check_variants;
@@ -418,16 +416,6 @@ pub fn validate(doc: &Document) -> ValidationReport {
         &mut diagnostics,
     );
 
-    // ── Agent runs ────────────────────────────────────────────────────────
-    // Validate the top-level `agent-runs` block: duplicate run/step ids, empty
-    // actions, unresolved parent-step references, and unknown affected-node ids.
-    check_agent_runs(doc, &all_node_ids, &mut diagnostics);
-
-    // ── Previews ──────────────────────────────────────────────────────────
-    // Validate the top-level `previews` block: unknown candidate page ids and
-    // invalid critique severity values.
-    check_previews(doc, &page_ids, &mut diagnostics);
-
     // ── Provenance records ────────────────────────────────────────────────
     // Each `origin` id participates in the GLOBAL id-uniqueness set. The record
     // cross-references a target (a document node id OR a declared token id OR a
@@ -511,28 +499,6 @@ pub fn validate(doc: &Document) -> ValidationReport {
                 format!(
                     "page '{}': line-jumps '{}' is not one of none/arc/gap",
                     page.id, lj
-                ),
-                page.source_span,
-                Some(page.id.clone()),
-            ));
-        }
-
-        // ── Per-page candidate-status validity ────────────────────────────
-        // `candidate-status` must be one of "draft", "selected", or "rejected";
-        // any other value is a Warning (forward-compatible — never a hard error).
-        // workspace-role, notes, promotion-target, and cleanup-policy are free-form
-        // and require no validation.
-        if let Some(cs) = &page.candidate_status
-            && cs != "draft"
-            && cs != "selected"
-            && cs != "rejected"
-        {
-            diagnostics.push(Diagnostic::warning(
-                "page.invalid_candidate_status",
-                format!(
-                    "page '{}': candidate-status '{}' is unrecognized; expected \
-                     \"draft\", \"selected\", or \"rejected\"",
-                    page.id, cs
                 ),
                 page.source_span,
                 Some(page.id.clone()),

@@ -17,6 +17,7 @@ pub mod tokens;
 pub mod tx;
 pub mod validate;
 pub mod variant;
+pub mod workspace;
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 

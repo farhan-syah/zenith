@@ -35,15 +35,6 @@ pub(crate) const PAGE_KNOWN_PROPS: &[&str] = &[
     "line_jumps",
     "parity",
     "master",
-    "workspace-role",
-    "workspace_role",
-    "candidate-status",
-    "candidate_status",
-    "notes",
-    "promotion-target",
-    "promotion_target",
-    "cleanup-policy",
-    "cleanup_policy",
 ];
 
 use crate::ast::document::{Fold, Page, SafeZone, SafeZoneType};
@@ -127,23 +118,6 @@ pub(super) fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
     // the validator (master.unknown_reference), never the parser.
     let master = optional_string_prop(node, "master").map(str::to_owned);
 
-    // Optional scratchpad/candidate workspace metadata. Value validity for
-    // `candidate-status` is checked by the validator; the others are open-ended
-    // or free-form. Both hyphen and underscore spellings accepted for forward-compat.
-    let workspace_role = optional_string_prop(node, "workspace-role")
-        .or_else(|| optional_string_prop(node, "workspace_role"))
-        .map(str::to_owned);
-    let candidate_status = optional_string_prop(node, "candidate-status")
-        .or_else(|| optional_string_prop(node, "candidate_status"))
-        .map(str::to_owned);
-    let notes = optional_string_prop(node, "notes").map(str::to_owned);
-    let promotion_target = optional_string_prop(node, "promotion-target")
-        .or_else(|| optional_string_prop(node, "promotion_target"))
-        .map(str::to_owned);
-    let cleanup_policy = optional_string_prop(node, "cleanup-policy")
-        .or_else(|| optional_string_prop(node, "cleanup_policy"))
-        .map(str::to_owned);
-
     let source_span = node_span(node);
 
     // A page's children block mixes `safe-zone` and `fold` declarations (page
@@ -178,11 +152,6 @@ pub(super) fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
         line_jumps,
         parity,
         master,
-        workspace_role,
-        candidate_status,
-        notes,
-        promotion_target,
-        cleanup_policy,
         safe_zones,
         folds,
         children,

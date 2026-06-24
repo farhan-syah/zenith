@@ -59,12 +59,6 @@ pub fn op_summary(name: &str) -> Option<&'static str> {
         "detach_pattern" => {
             Some("Materialize a pattern node into an editable group of native shapes.")
         }
-        "promote_candidate" => Some(
-            "Deep-copy a selected candidate page's content into a target export page with fresh node ids.",
-        ),
-        "finalize_run" => Some(
-            "Clean up rejected candidate pages at the end of a run by deleting or archiving them per their cleanup-policy.",
-        ),
         _ => None,
     }
 }

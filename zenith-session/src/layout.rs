@@ -13,6 +13,10 @@
 //!       objects/         ← immutable object blobs (future unit)
 //!       versions.jsonl   ← append-only version manifest (future unit)
 //!       session/         ← mutable local session state
+//!       runs.jsonl       ← append-only agent-runs log
+//!       previews.jsonl   ← append-only preview-artifacts log
+//!       scratch/
+//!         index.jsonl    ← scratch/candidate index
 //! ```
 
 use std::path::PathBuf;
@@ -72,6 +76,26 @@ impl StorePaths {
     pub fn meta_file(&self, doc_id: &str) -> PathBuf {
         self.doc_dir(doc_id).join("meta.json")
     }
+
+    /// Append-only agent-runs log: `<root>/docs/<doc_id>/runs.jsonl`.
+    pub fn runs_file(&self, doc_id: &str) -> PathBuf {
+        self.doc_dir(doc_id).join("runs.jsonl")
+    }
+
+    /// Append-only preview-artifacts log: `<root>/docs/<doc_id>/previews.jsonl`.
+    pub fn previews_file(&self, doc_id: &str) -> PathBuf {
+        self.doc_dir(doc_id).join("previews.jsonl")
+    }
+
+    /// Scratch/candidate directory: `<root>/docs/<doc_id>/scratch`.
+    pub fn scratch_dir(&self, doc_id: &str) -> PathBuf {
+        self.doc_dir(doc_id).join("scratch")
+    }
+
+    /// Scratch/candidate index: `<root>/docs/<doc_id>/scratch/index.jsonl`.
+    pub fn scratch_index(&self, doc_id: &str) -> PathBuf {
+        self.scratch_dir(doc_id).join("index.jsonl")
+    }
 }
 
 #[cfg(test)]
@@ -127,6 +151,38 @@ mod tests {
         assert_eq!(
             paths().meta_file("doc1"),
             PathBuf::from("/data/docs/doc1/meta.json")
+        );
+    }
+
+    #[test]
+    fn runs_file() {
+        assert_eq!(
+            paths().runs_file("doc1"),
+            PathBuf::from("/data/docs/doc1/runs.jsonl")
+        );
+    }
+
+    #[test]
+    fn previews_file() {
+        assert_eq!(
+            paths().previews_file("doc1"),
+            PathBuf::from("/data/docs/doc1/previews.jsonl")
+        );
+    }
+
+    #[test]
+    fn scratch_dir() {
+        assert_eq!(
+            paths().scratch_dir("doc1"),
+            PathBuf::from("/data/docs/doc1/scratch")
+        );
+    }
+
+    #[test]
+    fn scratch_index() {
+        assert_eq!(
+            paths().scratch_index("doc1"),
+            PathBuf::from("/data/docs/doc1/scratch/index.jsonl")
         );
     }
 }

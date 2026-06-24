@@ -2,11 +2,9 @@
 
 use super::Span;
 use super::action::ActionDef;
-use super::agent_run::AgentRun;
 use super::asset::AssetBlock;
 use super::library::LibraryDef;
 use super::node::Node;
-use super::preview::PreviewArtifact;
 use super::provenance::ProvenanceDef;
 use super::recipe::RecipeDef;
 use super::style::StyleBlock;
@@ -101,27 +99,6 @@ pub struct Page {
     /// index/parity. An unknown reference is a hard `master.unknown_reference`
     /// validation error. `None` → the page has no master (renders as before).
     pub master: Option<String>,
-    /// Optional scratchpad/candidate workspace role for this page. Open-ended
-    /// vocabulary — any string is accepted; no validation warning. Non-rendering
-    /// metadata only: never consulted by the render or compile path.
-    pub workspace_role: Option<String>,
-    /// Optional candidate lifecycle status. Recognized values: `"draft"`,
-    /// `"selected"`, `"rejected"`. Any other value is preserved verbatim and
-    /// surfaced as a validation warning (`page.invalid_candidate_status`).
-    /// Non-rendering metadata only.
-    pub candidate_status: Option<String>,
-    /// Optional free-form author notes for this page. May contain embedded
-    /// double-quotes and newlines; the writer escapes them. Non-rendering
-    /// metadata only.
-    pub notes: Option<String>,
-    /// Optional target page id or label this candidate should be promoted into.
-    /// Referential integrity is NOT validated (out of scope). Non-rendering
-    /// metadata only.
-    pub promotion_target: Option<String>,
-    /// Optional free-form cleanup policy memo for this page. May contain
-    /// embedded quotes and newlines; the writer escapes them. Non-rendering
-    /// metadata only.
-    pub cleanup_policy: Option<String>,
     /// Child content nodes in z-order (first = bottommost, last = topmost).
     pub children: Vec<Node>,
     /// Source declaration span, when available.
@@ -356,16 +333,6 @@ pub struct Document {
     /// `expanded` children). The engine round-trips and validates these records
     /// but does NOT act on them; expansion is a later unit.
     pub recipes: Vec<RecipeDef>,
-    /// Agent-run records; empty when the `agent-runs` block is absent. Each
-    /// entry documents one autonomous agent execution (`id`, optional `brief`,
-    /// `constraints`, `plan`, and ordered `step` children). The engine
-    /// round-trips and diffs these records but does NOT act on them.
-    pub agent_runs: Vec<AgentRun>,
-    /// Preview/critique artifacts; empty when the `previews` block is absent.
-    /// Each entry records a rendered preview for a candidate page (`candidate`,
-    /// optional content-hash/output-path fields, and `critique` children). The
-    /// engine round-trips and diffs these records but does NOT act on them.
-    pub previews: Vec<PreviewArtifact>,
     pub body: DocumentBody,
 }
 
@@ -463,11 +430,6 @@ mod parity_tests {
             line_jumps: None,
             parity: parity.map(str::to_owned),
             master: None,
-            workspace_role: None,
-            candidate_status: None,
-            notes: None,
-            promotion_target: None,
-            cleanup_policy: None,
             safe_zones: Vec::new(),
             folds: Vec::new(),
             children: Vec::new(),
@@ -501,8 +463,6 @@ mod parity_tests {
             provenance: Vec::new(),
             variants: Vec::new(),
             recipes: Vec::new(),
-            agent_runs: Vec::new(),
-            previews: Vec::new(),
             body: DocumentBody {
                 id: "body".to_owned(),
                 title: None,

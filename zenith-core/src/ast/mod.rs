@@ -1,12 +1,10 @@
 //! AST type re-exports for zenith-core.
 
 pub mod action;
-pub mod agent_run;
 pub mod asset;
 pub mod document;
 pub mod library;
 pub mod node;
-pub mod preview;
 pub mod provenance;
 pub mod recipe;
 pub mod span;
@@ -17,7 +15,6 @@ pub mod variant;
 
 // Flat re-exports used throughout the crate.
 pub use action::ActionDef;
-pub use agent_run::{AgentRun, AgentStep, AgentStepDiagnostic, AgentStepParam};
 pub use asset::{AssetBlock, AssetDecl, AssetKind};
 pub use document::{
     ComponentDef, Document, DocumentBody, Fold, MasterDef, Page, Project, SafeZone, SafeZoneType,
@@ -31,7 +28,6 @@ pub use node::{
     TableNode, TableRow, TextNode, TextSpan, TocNode, UnknownNode, UnknownProperty, UnknownValue,
     anchor_xy, parse_anchor, parse_anchor_edge,
 };
-pub use preview::{PreviewArtifact, PreviewCritique};
 pub use provenance::ProvenanceDef;
 pub use recipe::{RecipeDef, RecipeParam};
 pub use span::Span;
