@@ -89,6 +89,14 @@ pub enum Command {
     Library(LibraryArgs),
 
     /// List a document's version history.
+    ///
+    /// History is automatic: every `tx --apply` and edit is recorded in a durable
+    /// per-document version store kept beside the file (content-addressed; off the
+    /// render path). This lists those revisions with their version ids. The related
+    /// commands operate on that same store: `undo`/`redo` step the session, `version`
+    /// names the current state, `restore <rev>` rewinds to a past one, and `sync`
+    /// records an out-of-band external edit. Use the version ids shown here as the
+    /// `<rev>` argument to `restore`.
     History(HistoryArgs),
 
     /// Undo the last edit, rewriting the document in place.
@@ -101,6 +109,12 @@ pub enum Command {
     Version(VersionArgs),
 
     /// Restore the document to a past version.
+    ///
+    /// Rewinds the document to a past revision and rewrites it in place. The `<rev>`
+    /// argument accepts: a version id as listed by `zenith history` (e.g. `v2`);
+    /// `@head` or `@head~N` (the current head, or N steps back); `@latest:<name>`
+    /// (the most recent version saved under that name via `zenith version`); or a
+    /// bare version name. Run `zenith history` first to see the available revisions.
     Restore(RestoreArgs),
 
     /// Capture the document's current on-disk state into history as an external
