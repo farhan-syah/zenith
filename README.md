@@ -317,6 +317,36 @@ Every row renders independently and deterministically. `--name-by` names files b
 
 </details>
 
+## Connectors
+
+<details><summary>Semantic arrows whose endpoints are <em>derived</em> from their <code>from</code>/<code>to</code> nodes — auto-routing, arrowheads, self-loops, and line jumps.</summary>
+
+A `connector` is a semantic arrow between two nodes. It has **no authored geometry** — you give it a `from` and a `to` node id, and the engine derives both endpoints from those targets' resolved boxes at compile time. Move either box and the connector reroutes automatically; the same source always produces the same path. It is a stroke-only leaf (no fill, no children); a `stroke` color is required for it to render.
+
+- **Endpoint anchoring** — `from-anchor` / `to-anchor` pick where each end attaches on a **nine-point grid**: a horizontal band (`left` / `center` / `right`) optionally combined with a vertical band (`top` / `center` / `bottom`) via a hyphen, e.g. `top-left`, `bottom-center`, `center-right`. A bare token names that edge mid-point (`top` = `top-center`); `mid` / `middle` are synonyms for `center`. The default, `auto`, picks the edge facing the other box.
+- **Route modes** (`route=`) — `straight` (default) draws a direct line; `orthogonal` draws a right-angle elbow; `avoid` runs an obstacle-avoiding orthogonal router that bends the path around the other node boxes (falling back to a plain elbow when no clear path exists).
+- **Self-loops** — when `from` and `to` name the **same** node, the connector becomes a small loop off one edge (the side taken from the anchor, default `top`).
+- **Arrowheads** — `marker-start` / `marker-end` = `arrow` add a filled arrowhead in the stroke color (default `none`); heads orient along the actual routed segment, so they land axis-aligned.
+- **Line jumps** — a page-level `line-jumps="arc"` or `line-jumps="gap"` makes connectors hop where they cross: the crossing line gets a small semicircular bump (`arc`) or a broken gap (`gap`) so overlapping arrows read clearly. Deterministic — the horizontal line hops over the vertical one — and it applies to nested connectors too. Absent (`none` / default) renders byte-identically.
+- **Styling** — `stroke` (required), `stroke-width`, `opacity`, `rotate`, and a `style` ref, following the same property/style cascade as the other primitives.
+
+```kdl
+page id="pg" w=(px)640 h=(px)360 line-jumps="arc" {
+  shape id="n.start"  kind="process" x=(px)40  y=(px)150 w=(px)130 h=(px)60 fill=(token)"c.node" stroke=(token)"c.line" { span "Start" }
+  shape id="n.end"    kind="process" x=(px)470 y=(px)150 w=(px)130 h=(px)60 fill=(token)"c.node" stroke=(token)"c.line" { span "Finish" }
+  shape id="n.block"  kind="process" x=(px)290 y=(px)130 w=(px)70  h=(px)100 fill=(token)"c.block" stroke=(token)"c.blockline" { span "Block" }
+
+  // Auto-routed flow bends around the Block instead of crossing it…
+  connector id="e.flow"  from="n.start" to="n.end"    route="avoid" marker-end="arrow" stroke=(token)"c.flow"  stroke-width=(token)"cw"
+  // …and where a second connector crosses it, the page's line-jumps hops it.
+  connector id="e.cross" from="n.top"   to="n.bottom" marker-end="arrow"               stroke=(token)"c.cross" stroke-width=(token)"cw"
+}
+```
+
+See [`examples/connector-routing.zen`](./examples/connector-routing.zen) for a complete runnable document.
+
+</details>
+
 ## Command surface
 
 <details><summary>Author · render · edit · variants · library · theme · history · agent — every command takes <code>--json</code>.</summary>
