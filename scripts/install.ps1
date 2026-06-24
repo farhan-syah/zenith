@@ -5,9 +5,14 @@
 #
 # Install a specific version:
 #   $v="0.1.0"; irm https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/install.ps1 | iex
+#
+# Build and install from a local source checkout:
+#   .\scripts\install.ps1 -Local
 
 param(
-    [String]$Version = "latest"
+    [String]$Version = "latest",
+    [Switch]$Local,
+    [Switch]$NoModifyPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,6 +21,11 @@ $Repo = "farhan-syah/zenith"
 $BinName = "zenith.exe"
 
 function Install-Zenith {
+    if ($Local -and $Version -ne "latest") {
+        Write-Error "-Local cannot be combined with -Version."
+        return
+    }
+
     # Detect architecture
     $Arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
     switch ($Arch) {
@@ -32,6 +42,11 @@ function Install-Zenith {
         $env:ZENITH_INSTALL_DIR
     } else {
         Join-Path $env:USERPROFILE ".zenith\bin"
+    }
+
+    if ($Local) {
+        Install-ZenithLocal $InstallDir
+        return
     }
 
     # Resolve version
@@ -112,6 +127,57 @@ function Install-Zenith {
     Write-Host "  zenith render document.zen --png out.png"
 }
 
+function Install-ZenithLocal {
+    param([String]$InstallDir)
+
+    # Repo root is the parent of this script's directory (<root>\scripts).
+    $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
+
+    if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+        Write-Error "cargo not found. Install Rust from https://rustup.rs and try again."
+        return
+    }
+
+    $TargetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $Root "target" }
+    $BuiltBin = Join-Path $TargetDir "release\$BinName"
+
+    Write-Host "Building zenith from $Root (cargo build --release)..."
+    Push-Location $Root
+    try {
+        & cargo build --release --bin zenith
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "cargo build failed."
+            return
+        }
+    } finally {
+        Pop-Location
+    }
+
+    if (-not (Test-Path $BuiltBin)) {
+        Write-Error "Built binary not found at $BuiltBin"
+        return
+    }
+
+    # Install
+    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+    Copy-Item -Path $BuiltBin -Destination (Join-Path $InstallDir $BinName) -Force
+
+    # Verify
+    $InstalledBin = Join-Path $InstallDir $BinName
+    Write-Host ""
+    Write-Host "Installed zenith to $InstalledBin"
+    try { & $InstalledBin --version } catch {}
+
+    # Add to PATH if needed
+    Add-ToPath $InstallDir
+
+    Write-Host ""
+    Write-Host "Get started:"
+    Write-Host "  zenith --help"
+    Write-Host "  zenith validate document.zen"
+    Write-Host "  zenith render document.zen --png out.png"
+}
+
 function Get-LatestVersion {
     try {
         $Releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases?per_page=10" -UseBasicParsing
@@ -131,6 +197,13 @@ function Add-ToPath {
 
     $UserPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
     if ($UserPath -split ";" | Where-Object { $_ -eq $Dir }) {
+        return
+    }
+
+    if ($NoModifyPath) {
+        Write-Host ""
+        Write-Host "Note: -NoModifyPath set; $Dir was not added to PATH."
+        Write-Host "Add it yourself, or run: `$env:Path = `"$Dir;`$env:Path`""
         return
     }
 

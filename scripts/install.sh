@@ -11,6 +11,9 @@
 #   curl -fsSL https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/install.sh | sh -s -- --version v0.1.0
 #   curl -fsSL https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/install.sh | sh -s -- --version v0.1.0-beta.1
 #
+# Build and install from a local source checkout:
+#   ./scripts/install.sh --local
+#
 # Uninstall:
 #   curl -fsSL https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/install.sh | sh -s -- --uninstall
 #
@@ -27,19 +30,34 @@ main() {
     action="install"
     version="latest"
     channel="stable"
+    local_build="false"
+    modify_path="true"
 
     while [ $# -gt 0 ]; do
         case "$1" in
-            --help|-h)   usage; exit 0 ;;
-            --uninstall) action="uninstall"; shift ;;
-            --pre)       channel="pre"; shift ;;
-            --version)   version="$2"; channel="exact"; shift 2 ;;
-            *)           echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
+            --help|-h)        usage; exit 0 ;;
+            --uninstall)      action="uninstall"; shift ;;
+            --pre)            channel="pre"; shift ;;
+            --version)        version="$2"; channel="exact"; shift 2 ;;
+            --local)          local_build="true"; shift ;;
+            --no-modify-path) modify_path="false"; shift ;;
+            *)                echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
         esac
     done
 
+    if [ "$local_build" = "true" ] && [ "$channel" != "stable" ]; then
+        echo "Error: --local cannot be combined with --version or --pre." >&2
+        exit 1
+    fi
+
     case "$action" in
-        install)   do_install "$version" "$channel" ;;
+        install)
+            if [ "$local_build" = "true" ]; then
+                do_install_local
+            else
+                do_install "$version" "$channel"
+            fi
+            ;;
         uninstall) do_uninstall ;;
     esac
 }
@@ -54,6 +72,11 @@ Usage:
 Options:
   --pre              Install the latest prerelease version
   --version VERSION  Install a specific version (e.g., v0.1.0, v0.1.0-beta.1)
+  --local            Build from the current source checkout and install that
+                     binary (requires cargo; mutually exclusive with --version
+                     and --pre)
+  --no-modify-path   Install the binary but do not edit your shell profile to
+                     add the install directory to PATH
   --uninstall        Remove zenith from the install directory
   --help, -h         Show this help message
 
@@ -62,6 +85,8 @@ Examples:
   install.sh --pre                  Install latest prerelease
   install.sh --version v0.1.0       Switch to a specific stable version
   install.sh --version v0.2.0-rc.1  Switch to a specific prerelease
+  install.sh --local                Build from this checkout and install it
+  install.sh --local --no-modify-path   Build + install, leave PATH untouched
   install.sh --uninstall            Remove zenith
 
 Environment:
@@ -134,15 +159,7 @@ do_install() {
         exit 1
     fi
 
-    mkdir -p "$INSTALL_DIR" 2>/dev/null || true
-    if [ -w "$INSTALL_DIR" ]; then
-        mv "$tmpdir/$bin_name" "$INSTALL_DIR/$bin_name"
-        chmod +x "$INSTALL_DIR/$bin_name" 2>/dev/null || true
-    else
-        sudo mkdir -p "$INSTALL_DIR"
-        sudo mv "$tmpdir/$bin_name" "$INSTALL_DIR/$bin_name"
-        sudo chmod +x "$INSTALL_DIR/$bin_name" 2>/dev/null || true
-    fi
+    place_binary "$tmpdir/$bin_name" "$bin_name"
 
     echo ""
     echo "Installed zenith to $(display_path "$INSTALL_DIR/$bin_name")"
@@ -150,6 +167,78 @@ do_install() {
 
     setup_path
 
+    print_get_started
+}
+
+# Install from a local source checkout: build with cargo, then place the binary.
+do_install_local() {
+    root="$(repo_root)"
+    if [ -z "$root" ]; then
+        echo "Error: --local must be run from a Zenith source checkout (e.g. ./scripts/install.sh --local)" >&2
+        exit 1
+    fi
+
+    if ! command -v cargo > /dev/null 2>&1; then
+        echo "Error: cargo not found. Install Rust from https://rustup.rs and try again." >&2
+        exit 1
+    fi
+
+    bin_name="$BINARY"
+    if [ "$(detect_os)" = "windows" ]; then
+        bin_name="${BINARY}.exe"
+    fi
+
+    target_dir="${CARGO_TARGET_DIR:-$root/target}"
+    built_bin="$target_dir/release/$bin_name"
+
+    echo "Building zenith from $(display_path "$root") (cargo build --release)..."
+    ( cd "$root" && cargo build --release --bin "$BINARY" )
+
+    if [ ! -f "$built_bin" ]; then
+        echo "Error: built binary not found at $(display_path "$built_bin")" >&2
+        exit 1
+    fi
+
+    place_binary "$built_bin" "$bin_name"
+
+    echo ""
+    echo "Installed zenith to $(display_path "$INSTALL_DIR/$bin_name")"
+    "${INSTALL_DIR}/${bin_name}" --version 2>/dev/null || true
+
+    setup_path
+
+    print_get_started
+}
+
+# Resolve the repo root from this script's location (<root>/scripts/install.sh).
+# Prints nothing if the script path can't be resolved (e.g. piped via curl | sh).
+repo_root() {
+    case "$0" in
+        */*) script_dir="$(cd "$(dirname "$0")" 2>/dev/null && pwd)" ;;
+        *)   script_dir="" ;;
+    esac
+    if [ -z "$script_dir" ] || [ ! -f "$script_dir/install.sh" ]; then
+        return
+    fi
+    ( cd "$script_dir/.." 2>/dev/null && pwd )
+}
+
+# Place a binary at INSTALL_DIR with execute permission, using sudo if needed.
+place_binary() {
+    src="$1"
+    bin_name="$2"
+    mkdir -p "$INSTALL_DIR" 2>/dev/null || true
+    if [ -w "$INSTALL_DIR" ]; then
+        cp "$src" "$INSTALL_DIR/$bin_name"
+        chmod +x "$INSTALL_DIR/$bin_name" 2>/dev/null || true
+    else
+        sudo mkdir -p "$INSTALL_DIR"
+        sudo cp "$src" "$INSTALL_DIR/$bin_name"
+        sudo chmod +x "$INSTALL_DIR/$bin_name" 2>/dev/null || true
+    fi
+}
+
+print_get_started() {
     echo ""
     echo "Get started:"
     echo "  zenith --help"
@@ -197,6 +286,16 @@ check_prereqs() {
 }
 
 setup_path() {
+    if [ "$modify_path" = "false" ]; then
+        case ":${PATH}:" in
+            *":${INSTALL_DIR}:"*) ;;
+            *) echo ""
+               echo "Note: --no-modify-path set; ${INSTALL_DIR} was not added to PATH."
+               echo "Add it yourself, or run: export PATH=\"${INSTALL_DIR}:\$PATH\"" ;;
+        esac
+        return
+    fi
+
     case ":${PATH}:" in
         *":${INSTALL_DIR}:"*) return ;;
     esac

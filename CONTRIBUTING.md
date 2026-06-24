@@ -27,6 +27,13 @@ cargo test --workspace
 
 No C toolchain or system libraries are needed — the dependency graph is C-free.
 
+The build output is at `target/release/zenith`; run it directly, or install it onto your `PATH`:
+
+```bash
+cargo install --path zenith-cli   # installs `zenith` to ~/.cargo/bin (already on PATH)
+./scripts/install.sh --local      # builds from this checkout and installs to ~/.local/bin
+```
+
 ## The Development Loop
 
 Every change must leave the tree green. Before you commit:

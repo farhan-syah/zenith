@@ -51,6 +51,15 @@ cargo build --release            # builds the workspace, including the `zenith` 
 
 The release binary lands at `target/release/zenith`. No C toolchain or system libraries are required — the dependency graph is C-free and `unsafe` is forbidden workspace-wide.
 
+**Build from source / local install (contributors).** To put the binary on your `PATH` from a checkout:
+
+```bash
+cargo install --path zenith-cli   # builds and installs `zenith` to ~/.cargo/bin (already on PATH)
+./scripts/install.sh --local      # builds from this checkout and installs to ~/.local/bin
+```
+
+Or just run the build output directly at `target/release/zenith` after `cargo build --release`.
+
 <details><summary><strong>Released install channels</strong> — install script · cargo · prebuilt binaries · update (available once version tags are cut; see <a href="#status">Status</a>).</summary>
 
 ### Install script
