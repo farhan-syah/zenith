@@ -147,8 +147,9 @@ pub enum Command {
     /// diagnostic loop.
     ///
     /// Subcommands: `nodes` (all kinds), `node <kind>` (one kind + its
-    /// attributes), `ops` (all tx ops), `op <name>` (one op summary),
-    /// `page`, `asset`, `document` (non-node surface attributes).
+    /// attributes), `ops` (all tx ops), `op <name>` (one op: summary,
+    /// fields, and a working JSON example), `page`, `asset`, `document`
+    /// (non-node surface attributes).
     /// Bare `zenith schema` prints a short overview with counts and drill-in hints.
     Schema(SchemaArgs),
 }
@@ -581,9 +582,20 @@ pub struct TokensArgs {
 
 /// Arguments for `zenith tx`.
 #[derive(Debug, Args)]
-#[command(after_help = "EXAMPLE:\n  \
-zenith tx poster.zen edits.json            # preview the diff\n  \
-zenith tx poster.zen edits.json --apply    # write the change")]
+#[command(after_help = "TRANSACTION FILE FORMAT:\n  \
+A tx file is a JSON object with a single \"ops\" array; ops are applied in order:\n\n  \
+    {\"ops\":[\n      \
+{\"op\":\"set_text_align\",\"node\":\"text.hello\",\"align\":\"center\"},\n      \
+{\"op\":\"set_fill\",\"node\":\"hero\",\"fill\":\"color.brand\"}\n    \
+]}\n\n\
+DISCOVERING OPS:\n  \
+zenith schema op set_fill          # fields, types, and a working example\n  \
+zenith schema op add_node          # how to insert a new node from .zen source\n  \
+zenith schema ops                  # list all 40 available ops with summaries\n  \
+See examples/*.tx.json for runnable samples.\n\n\
+EXAMPLES:\n  \
+zenith tx poster.zen edits.json            # preview the diff (dry-run)\n  \
+zenith tx poster.zen edits.json --apply    # write the change to disk")]
 pub struct TxArgs {
     /// Path to the `.zen` document.
     pub path: PathBuf,
@@ -783,7 +795,7 @@ pub enum SchemaSub {
     /// List all transaction ops with their one-line summaries.
     Ops,
 
-    /// Show the summary for one transaction op.
+    /// Show the summary, JSON fields, and a working example for one transaction op.
     Op {
         /// The op name to look up (e.g. `set_fill`, `add_node`).
         name: String,

@@ -9,8 +9,9 @@ use zenith_tx::schema as tx_schema;
 
 use crate::commands::serialize_pretty;
 use crate::json_types::{
-    SchemaNodeDetail, SchemaNodeEntry, SchemaNodeOutput, SchemaNodesOutput, SchemaOpEntry,
-    SchemaOpOutput, SchemaOpsOutput, SchemaOverviewOutput, SchemaSurfaceOutput,
+    SchemaNodeDetail, SchemaNodeEntry, SchemaNodeOutput, SchemaNodesOutput, SchemaOpDetail,
+    SchemaOpEntry, SchemaOpFieldEntry, SchemaOpOutput, SchemaOpsOutput, SchemaOverviewOutput,
+    SchemaSurfaceOutput,
 };
 
 // ── Public entry points ───────────────────────────────────────────────────────
@@ -36,7 +37,7 @@ pub fn overview(json: bool) -> (String, u8) {
              zenith schema nodes              # list all node kinds\n  \
              zenith schema node <kind>        # attributes for one kind\n  \
              zenith schema ops                # list all tx ops\n  \
-             zenith schema op <name>          # summary for one op\n  \
+             zenith schema op <name>          # fields + example for one op\n  \
              zenith schema page               # page declaration attributes\n  \
              zenith schema asset              # asset declaration attributes\n  \
              zenith schema document           # document root attributes\n\n\
@@ -156,7 +157,7 @@ pub fn ops(json: bool) -> (String, u8) {
     }
 }
 
-/// `zenith schema op <name>`: summary for one tx op.
+/// `zenith schema op <name>`: full detail for one tx op (summary + fields + example).
 ///
 /// Returns `(stdout, exit_code)`. On unknown name, exit_code is 1.
 pub fn op_detail(name: &str, json: bool) -> (String, u8) {
@@ -169,17 +170,42 @@ pub fn op_detail(name: &str, json: bool) -> (String, u8) {
         }
     };
 
+    // op_fields and op_example are always Some when op_summary is Some
+    // (enforced by the drift-guard tests in zenith-tx).
+    let fields = tx_schema::op_fields(name).unwrap_or(&[]);
+    let example = tx_schema::op_example(name).unwrap_or("");
+
     if json {
+        let field_entries: Vec<SchemaOpFieldEntry> = fields
+            .iter()
+            .map(|f| SchemaOpFieldEntry {
+                name: f.name.to_owned(),
+                ty: f.ty.to_owned(),
+                required: f.required,
+            })
+            .collect();
         let out = SchemaOpOutput {
             schema: "zenith-schema-v1",
-            op: SchemaOpEntry {
+            op: SchemaOpDetail {
                 op: name.to_owned(),
                 summary: summary.to_owned(),
+                fields: field_entries,
+                example: example.to_owned(),
             },
         };
         (serialize_pretty(&out), 0)
     } else {
-        let text = format!("{name}: {summary}");
+        let mut text = format!("{name}: {summary}\n");
+        if fields.is_empty() {
+            text.push_str("\nFields: (none — this op carries no fields beyond the \"op\" tag)\n");
+        } else {
+            text.push_str("\nFields:\n");
+            for f in fields {
+                let req = if f.required { ", required" } else { "" };
+                text.push_str(&format!("  {:<20}  ({}{req})\n", f.name, f.ty));
+            }
+        }
+        text.push_str(&format!("\nExample:\n  {example}"));
         (text, 0)
     }
 }
@@ -389,8 +415,10 @@ mod tests {
     fn op_detail_known_op() {
         let (text, code) = op_detail("set_fill", false);
         assert_eq!(code, 0);
-        assert!(text.contains("set_fill"));
-        assert!(text.contains("fill"));
+        assert!(text.contains("set_fill"), "must name the op");
+        assert!(text.contains("fill"), "must mention the fill field");
+        assert!(text.contains("Fields:"), "must include Fields section");
+        assert!(text.contains("Example:"), "must include Example section");
     }
 
     #[test]
@@ -399,6 +427,37 @@ mod tests {
         assert_eq!(code, 0);
         assert!(text.contains("zenith-schema-v1"));
         assert!(text.contains("\"op\""));
+        assert!(
+            text.contains("\"fields\""),
+            "JSON must include fields array"
+        );
+        assert!(
+            text.contains("\"example\""),
+            "JSON must include example string"
+        );
+    }
+
+    #[test]
+    fn op_detail_detach_pattern_human() {
+        let (text, code) = op_detail("detach_pattern", false);
+        assert_eq!(code, 0);
+        assert!(text.contains("detach_pattern"));
+        assert!(text.contains("Fields:"));
+        assert!(text.contains("node"));
+        assert!(text.contains("Example:"));
+    }
+
+    #[test]
+    fn op_detail_set_fill_json_has_node_and_fill_fields() {
+        let (text, code) = op_detail("set_fill", true);
+        assert_eq!(code, 0);
+        assert!(text.contains("\"node\""), "fields must include node");
+        assert!(text.contains("\"fill\""), "fields must include fill");
+        assert!(text.contains("token ref"), "fill type must be token ref");
+        assert!(
+            text.contains("color.brand"),
+            "example must use realistic value"
+        );
     }
 
     #[test]

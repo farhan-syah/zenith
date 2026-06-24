@@ -19,7 +19,7 @@ use crate::TxError;
 /// A 2-D vertex used by [`Op::SetPoints`], expressed in pixels.
 ///
 /// JSON shape: `{"x": 50.0, "y": 80.0}`
-#[derive(serde::Deserialize, Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct OpPoint {
     /// X coordinate in document pixels.
     pub x: f64,
@@ -32,7 +32,7 @@ pub struct OpPoint {
 /// JSON shape: `{"text":"Hello","fill":"color.brand","italic":true}`.
 /// All fields except `text` are optional and default to `None`/absent.
 /// `fill` and `font_weight` are token ids (like [`Op::SetFill`]), not raw values.
-#[derive(serde::Deserialize, Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct OpSpan {
     /// The literal text content of this span.
     pub text: String,
@@ -63,7 +63,7 @@ pub struct OpSpan {
 ///
 /// JSON shapes: `{"at":"last"}`, `{"at":"first"}`, `{"at":"index","index":2}`,
 /// `{"at":"before","id":"sibling"}`, `{"at":"after","id":"sibling"}`.
-#[derive(serde::Deserialize, Debug, Clone, PartialEq, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Default)]
 #[serde(tag = "at", rename_all = "snake_case")]
 pub enum Position {
     /// Insert as the last child (topmost in z-order). Default.
@@ -85,7 +85,7 @@ pub enum Position {
 /// `{"permissions":{"allow_locked":false,"allow_raw_visual_literals":false}}`.
 /// Both flags default to `false`, so a transaction JSON that omits the
 /// `permissions` key still parses with all guards active.
-#[derive(serde::Deserialize, Debug, Clone, PartialEq, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct Permissions {
     /// When `true`, mutating ops are allowed to target locked nodes.
     /// When `false` (default), a guarded op against a locked node is rejected
@@ -98,7 +98,7 @@ pub struct Permissions {
 }
 
 /// A batch of operations to apply to a document in order.
-#[derive(serde::Deserialize, Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Transaction {
     pub ops: Vec<Op>,
     /// Permission flags relaxing per-op guards. Defaults to all-`false`
@@ -119,7 +119,7 @@ impl Transaction {
 /// A single operation within a [`Transaction`].
 ///
 /// The `op` field in JSON is the snake_case tag, e.g. `"set_text_align"`.
-#[derive(serde::Deserialize, Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum Op {
     /// Set the `align` property on a text node.

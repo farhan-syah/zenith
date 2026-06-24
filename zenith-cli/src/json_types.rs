@@ -197,6 +197,23 @@ pub struct SchemaOpEntry {
     pub summary: String,
 }
 
+/// A single op field entry in the `schema op <name>` JSON output.
+#[derive(Debug, Serialize)]
+pub struct SchemaOpFieldEntry {
+    pub name: String,
+    pub ty: String,
+    pub required: bool,
+}
+
+/// Full detail entry in the `schema op <name>` JSON output.
+#[derive(Debug, Serialize)]
+pub struct SchemaOpDetail {
+    pub op: String,
+    pub summary: String,
+    pub fields: Vec<SchemaOpFieldEntry>,
+    pub example: String,
+}
+
 /// Top-level JSON envelope for `schema nodes`.
 #[derive(Debug, Serialize)]
 pub struct SchemaNodesOutput {
@@ -222,7 +239,7 @@ pub struct SchemaOpsOutput {
 #[derive(Debug, Serialize)]
 pub struct SchemaOpOutput {
     pub schema: &'static str,
-    pub op: SchemaOpEntry,
+    pub op: SchemaOpDetail,
 }
 
 /// Top-level JSON envelope for bare `zenith schema` (overview).
