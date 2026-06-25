@@ -121,8 +121,13 @@ fn node_has_data_ref(node: &Node) -> bool {
         Node::Chart(n) => {
             any_prop(&chart_color_props(n))
                 || any_prop(&chart_dim_props(n))
+                || n.label_colors
+                    .iter()
+                    .any(|p| matches!(p, PropertyValue::DataRef(_)))
                 || n.series.iter().any(|s| {
-                    matches!(s.color, Some(PropertyValue::DataRef(_))) || s.data_ref.is_some()
+                    matches!(s.color, Some(PropertyValue::DataRef(_)))
+                        || matches!(&s.label_color, Some(PropertyValue::DataRef(_)))
+                        || s.data_ref.is_some()
                 })
         }
         Node::Frame(n) => n.children.iter().any(node_has_data_ref),
@@ -381,9 +386,20 @@ fn substitute_chart(n: &mut ChartNode, ctx: &DataContext, diagnostics: &mut Vec<
         "stroke-outer-width",
         diagnostics,
     );
-    // Series color props are token refs on ChartSeries; substitute them in place.
+    // label-colors: per-slice label color refs; substitute each entry in place.
+    for pv in &mut n.label_colors {
+        substitute_color_prop(pv, ctx, &id, "label-colors", diagnostics);
+    }
+    // Series color props and per-series label-color are token refs; substitute in place.
     for s in &mut n.series {
         substitute_color_prop_opt(&mut s.color, ctx, &id, "series.color", diagnostics);
+        substitute_color_prop_opt(
+            &mut s.label_color,
+            ctx,
+            &id,
+            "series.label-color",
+            diagnostics,
+        );
     }
 }
 

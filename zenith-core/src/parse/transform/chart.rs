@@ -1,20 +1,23 @@
 //! Transform for the `chart` node: the data-visualization primitive that
-//! carries one or more `series` data children and an optional `categories`
-//! child. The common visual/geometry props are read exactly like `pattern`;
-//! the chart-specific props (`kind`, `title`, `caption`, `legend`,
-//! `axis-min`, `axis-max`, `axis-style`, `bar-mode`, `point-placement`,
-//! `value-labels`, `value-color`) describe the chart presentation. Series and
-//! categories children are pure data (not renderable nodes).
+//! carries one or more `series` data children and optional `categories` and
+//! `label-colors` children. The common visual/geometry props are read exactly
+//! like `pattern`; the chart-specific props (`kind`, `title`, `caption`,
+//! `legend`, `axis-min`, `axis-max`, `axis-style`, `bar-mode`,
+//! `point-placement`, `value-labels`, `value-color`) describe the chart
+//! presentation. Series, categories, and label-colors children are pure data
+//! (not renderable nodes).
 
 use kdl::{KdlNode, KdlValue};
 
 use crate::ast::node::{ChartNode, ChartSeries};
+use crate::ast::value::PropertyValue;
 use crate::error::{ParseError, ParseErrorCode};
 
 use super::helpers::{
-    collect_unknown_props, node_span, optional_bool_prop, optional_dimension_prop,
-    optional_f64_prop, optional_property_value, optional_property_value_aliased,
-    optional_string_prop, optional_string_prop_aliased, required_string_prop,
+    collect_unknown_props, entry_to_property_value, node_span, optional_bool_prop,
+    optional_dimension_prop, optional_f64_prop, optional_property_value,
+    optional_property_value_aliased, optional_string_prop, optional_string_prop_aliased,
+    required_string_prop,
 };
 
 pub(crate) const CHART_KNOWN_PROPS: &[&str] = &[
@@ -145,11 +148,14 @@ pub(super) fn transform_chart(node: &KdlNode) -> Result<ChartNode, ParseError> {
         optional_string_prop_aliased(node, "value-labels", "value_labels").map(str::to_owned);
     let value_color = optional_property_value_aliased(node, "value-color", "value_color");
 
-    // Series and categories: each `series` child node becomes a ChartSeries;
-    // the single `categories` child carries string positional args as category labels.
-    // Both are pure data children — not renderable nodes.
+    // Series, categories, and label-colors: each `series` child node becomes a
+    // ChartSeries; the single `categories` child carries string positional args as
+    // category labels; the single `label-colors` child carries positional
+    // PropertyValue entries (e.g. `(token)"color.x"`) as per-slice label colors.
+    // All are pure data children — not renderable nodes.
     let mut series: Vec<ChartSeries> = Vec::new();
     let mut categories: Vec<String> = Vec::new();
+    let mut label_colors: Vec<PropertyValue> = Vec::new();
     if let Some(children_block) = node.children() {
         for child in children_block.nodes() {
             match child.name().value() {
@@ -177,6 +183,8 @@ pub(super) fn transform_chart(node: &KdlNode) -> Result<ChartNode, ParseError> {
 
                     let label = optional_string_prop(child, "label").map(str::to_owned);
                     let color = optional_property_value(child, "color");
+                    let label_color =
+                        optional_property_value_aliased(child, "label-color", "label_color");
                     let data_ref = optional_string_prop(child, "data-ref")
                         .or_else(|| optional_string_prop(child, "data_ref"))
                         .map(str::to_owned);
@@ -184,9 +192,22 @@ pub(super) fn transform_chart(node: &KdlNode) -> Result<ChartNode, ParseError> {
                     series.push(ChartSeries {
                         label,
                         color,
+                        label_color,
                         data_ref,
                         values,
                     });
+                }
+                "label-colors" => {
+                    // Collect positional PropertyValue entries as per-slice label colors.
+                    // Values may be token refs `(token)"id"`, data refs `(data)"path"`,
+                    // or bare literals. Named props on the node are skipped.
+                    for entry in child.entries() {
+                        if entry.name().is_some() {
+                            // Named props are not expected on a label-colors node; skip.
+                            continue;
+                        }
+                        label_colors.push(entry_to_property_value(entry)?);
+                    }
                 }
                 "categories" => {
                     // Collect positional string arguments as category labels.
@@ -280,6 +301,7 @@ pub(super) fn transform_chart(node: &KdlNode) -> Result<ChartNode, ParseError> {
         point_placement,
         value_labels,
         value_color,
+        label_colors,
         categories,
         series,
         source_span: node_span(node),

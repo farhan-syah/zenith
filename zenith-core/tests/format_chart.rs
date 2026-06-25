@@ -360,3 +360,133 @@ fn absent_chart_byte_identical() {
         "a document without a chart must not emit the keyword; got:\n{formatted_str}"
     );
 }
+
+/// **label-colors child + series label-color round-trip**: a pie chart with a
+/// `label-colors` child (two token refs) and a series with `label-color` parses
+/// correctly, formats those fields, and re-parses to an identical AST.
+#[test]
+fn chart_label_colors_and_series_label_color_round_trip() {
+    // NOTE: '#' in color hex requires r##...## quoting.
+    let src = r##"zenith version=1 {
+  project id="proj.lc" name="LabelColors"
+  tokens format="zenith-token-v1" {
+    token id="c.a" type="color" value="#ff0000"
+    token id="c.b" type="color" value="#00ff00"
+    token id="c.s" type="color" value="#0000ff"
+  }
+  styles {
+  }
+  document id="doc.lc" title="LabelColors" {
+    page id="page.lc" w=(px)800 h=(px)600 {
+      chart id="c.pie" kind="pie" x=(px)50 y=(px)50 w=(px)400 h=(px)400 {
+        label-colors (token)"c.a" (token)"c.b"
+        series label="Slice" label-color=(token)"c.s" 60.0 40.0
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+
+    let chart = match &doc.body.pages[0].children[0] {
+        Node::Chart(c) => c,
+        other => panic!("expected Chart node, got {other:?}"),
+    };
+    assert_eq!(chart.id, "c.pie");
+    assert_eq!(
+        chart.label_colors,
+        vec![token_ref("c.a"), token_ref("c.b")],
+        "label_colors must be parsed as two TokenRefs"
+    );
+    assert_eq!(chart.series.len(), 1);
+    assert_eq!(
+        chart.series[0].label_color,
+        Some(token_ref("c.s")),
+        "series label_color must be parsed as TokenRef"
+    );
+
+    let formatted = format_document(&doc).expect("format must succeed");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("formatted must be utf8");
+
+    assert!(
+        formatted_str.contains("label-colors (token)\"c.a\" (token)\"c.b\""),
+        "formatter must emit label-colors child; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains("label-color=(token)\"c.s\""),
+        "formatter must emit series label-color; got:\n{formatted_str}"
+    );
+
+    // label-colors must appear before the series line.
+    let lc_pos = formatted_str
+        .find("label-colors")
+        .expect("must emit label-colors");
+    let series_pos = formatted_str.find("series").expect("must emit series");
+    assert!(
+        lc_pos < series_pos,
+        "label-colors must be emitted before series; got:\n{formatted_str}"
+    );
+
+    // Round-trip: re-parse equals the first parse (spans stripped).
+    let reparsed = adapter.parse(&formatted).expect("re-parse after format");
+    assert_eq!(
+        strip_spans(doc),
+        strip_spans(reparsed),
+        "chart (with label-colors + series label-color) must round-trip identically"
+    );
+}
+
+/// **label-colors and series label-color absent = byte-identical**: a chart without
+/// those fields must not emit `label-colors` or `label-color` text, and must
+/// still round-trip.
+#[test]
+fn chart_without_label_colors_byte_identical() {
+    let src = r##"zenith version=1 {
+  project id="proj.nlc" name="NoLabelColors"
+  styles {
+  }
+  document id="doc.nlc" title="NoLabelColors" {
+    page id="page.nlc" w=(px)800 h=(px)600 {
+      chart id="c.nlc" kind="pie" x=(px)50 y=(px)50 w=(px)400 h=(px)400 {
+        series label="A" 60.0 40.0
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+
+    let chart = match &doc.body.pages[0].children[0] {
+        Node::Chart(c) => c,
+        other => panic!("expected Chart node, got {other:?}"),
+    };
+    assert!(
+        chart.label_colors.is_empty(),
+        "label_colors must be empty when absent"
+    );
+    assert_eq!(
+        chart.series[0].label_color, None,
+        "series label_color must be None when absent"
+    );
+
+    let formatted = format_document(&doc).expect("format must succeed");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("formatted must be utf8");
+
+    assert!(
+        !formatted_str.contains("label-colors"),
+        "absent label-colors must not be emitted; got:\n{formatted_str}"
+    );
+    assert!(
+        !formatted_str.contains("label-color"),
+        "absent series label-color must not be emitted; got:\n{formatted_str}"
+    );
+
+    let reparsed = adapter.parse(&formatted).expect("re-parse after format");
+    assert_eq!(
+        strip_spans(doc),
+        strip_spans(reparsed),
+        "chart without label-colors must round-trip identically"
+    );
+}

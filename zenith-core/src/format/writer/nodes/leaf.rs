@@ -9,8 +9,9 @@ use crate::ast::{
 };
 
 use crate::format::writer::{
-    escape_kdl_string, fmt_unknown_property, indent, write_opt_bool, write_opt_dimension,
-    write_opt_f64, write_opt_object_position, write_opt_property_value, write_opt_str,
+    escape_kdl_string, fmt_property_value, fmt_unknown_property, indent, write_opt_bool,
+    write_opt_dimension, write_opt_f64, write_opt_object_position, write_opt_property_value,
+    write_opt_str,
 };
 
 use super::helpers::{write_points, write_span};
@@ -595,7 +596,7 @@ pub(super) fn write_chart(c: &ChartNode, out: &mut String, depth: usize) {
     }
 
     // Child block: always emitted (even when empty) so parse → format → parse is byte-stable.
-    // Order: categories line first (when non-empty), then series lines.
+    // Order: categories line (when non-empty), then label-colors line (when non-empty), then series lines.
     out.push_str(" {\n");
 
     // Categories child: emitted only when non-empty (empty = absent, byte-identical).
@@ -610,18 +611,31 @@ pub(super) fn write_chart(c: &ChartNode, out: &mut String, depth: usize) {
         out.push('\n');
     }
 
+    // Label-colors child: emitted only when non-empty (empty = absent, byte-identical).
+    // Each entry is a positional PropertyValue (e.g. `(token)"color.x"`).
+    if !c.label_colors.is_empty() {
+        indent(out, depth + 1);
+        out.push_str("label-colors");
+        for pv in &c.label_colors {
+            out.push(' ');
+            out.push_str(&fmt_property_value(pv));
+        }
+        out.push('\n');
+    }
+
     // Series children: one `series` line per entry with data values as positional
-    // args and label/color/data-ref as named props.
+    // args and label/color/label-color/data-ref as named props.
     for s in &c.series {
         indent(out, depth + 1);
         out.push_str("series");
-        // Named props first (canonical order: label, color, data-ref).
+        // Named props first (canonical order: label, color, label-color, data-ref).
         if let Some(label) = &s.label {
             out.push_str(" label=\"");
             out.push_str(&escape_kdl_string(label));
             out.push('"');
         }
         write_opt_property_value(out, "color", &s.color);
+        write_opt_property_value(out, "label-color", &s.label_color);
         if let Some(dr) = &s.data_ref {
             out.push_str(" data-ref=\"");
             out.push_str(&escape_kdl_string(dr));

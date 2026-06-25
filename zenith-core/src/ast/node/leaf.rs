@@ -697,6 +697,9 @@ pub struct ChartSeries {
     /// Optional series color; a `(token)` color ref. When absent the renderer
     /// picks a palette color by series index.
     pub color: Option<PropertyValue>,
+    /// Per-series value-label color override; falls back to the chart
+    /// `value_color` then the default on-fill contrasting color.
+    pub label_color: Option<PropertyValue>,
     /// Optional binding to a whole series from a [`DataContext`] field.
     /// `None` means the values are inline in [`ChartSeries::values`].
     pub data_ref: Option<String>,
@@ -715,8 +718,8 @@ pub struct ChartSeries {
 ///
 /// The common visual/geometry fields mirror [`PatternNode`]; the chart-specific
 /// fields (`kind`, `title`, `caption`, `legend`, `axis_*`, `bar_mode`,
-/// `point_placement`, `value_labels`, `value_color`, `categories`, `series`)
-/// describe the chart content.
+/// `point_placement`, `value_labels`, `value_color`, `label_colors`, `categories`,
+/// `series`) describe the chart content.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChartNode {
     pub id: String,
@@ -813,6 +816,11 @@ pub struct ChartNode {
     /// Explicit color (token) for value labels; when absent the renderer
     /// auto-picks a contrasting color.
     pub value_color: Option<PropertyValue>,
+    /// Per-slice value-label colors for pie/donut (one per category, in order);
+    /// empty = use the chart `value_color` or the white on-fill default.
+    /// Populated from a `label-colors` child node whose positional arguments
+    /// are each a `PropertyValue` (e.g. `(token)"color.x"`).
+    pub label_colors: Vec<PropertyValue>,
     /// X-axis category labels (one per category slot); empty = derive index
     /// labels at render. Populated from a `categories` child node whose
     /// positional arguments are the label strings.

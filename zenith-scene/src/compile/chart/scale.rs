@@ -394,6 +394,7 @@ mod tests {
         ChartSeries {
             label: None,
             color: None,
+            label_color: None,
             data_ref: None,
             values,
         }

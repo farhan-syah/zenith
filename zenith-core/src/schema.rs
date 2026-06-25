@@ -182,13 +182,17 @@ pub fn node_content(kind: &str) -> Option<NodeContentDescriptor> {
         "chart" => Some(NodeContentDescriptor {
             description: "Optional `categories` child carries the X-axis category labels as \
                 positional string arguments (one per slot; absent = derive index labels at render). \
+                Optional `label-colors` child carries per-slice value-label colors as positional \
+                PropertyValue arguments (e.g. `(token)\"color.x\"`; one per category in order; \
+                absent = use the chart value-color or the white on-fill default). \
                 Zero or more `series` children carry the numeric data. \
                 Each series node takes its f64 data values as positional arguments \
-                and optional named props: label, color (token ref), data-ref. \
-                Emit `categories` before any `series` children.",
+                and optional named props: label, color (token ref), label-color (token ref), data-ref. \
+                Emit `categories` then `label-colors` before any `series` children.",
             example: concat!(
                 "categories \"Q1\" \"Q2\" \"Q3\" \"Q4\"\n",
-                "series label=\"Revenue\" color=(token)\"color.primary\" 120.0 200.0 150.0 310.0\n",
+                "label-colors (token)\"color.c1\" (token)\"color.c2\" (token)\"color.c3\" (token)\"color.c4\"\n",
+                "series label=\"Revenue\" color=(token)\"color.primary\" label-color=(token)\"color.lbl\" 120.0 200.0 150.0 310.0\n",
                 "series label=\"Costs\" color=(token)\"color.secondary\" 80.0 90.0 100.0 120.0",
             ),
         }),
@@ -417,6 +421,8 @@ fn attribute_type_for_kind_inner(kind: &str, name: &str, fallback: &'static str)
         ("chart", "point-placement") => "enum: edge|center",
         ("chart", "value-labels") => "enum: auto|none|top|center",
         ("chart", "value-color") => "token ref: color",
+        // label-color is a named prop on series children; surfaces here for type-hint purposes.
+        ("chart", "label-color") => "token ref: color",
         // Asset surface (non-node): kind="" is used by attribute_type() / the
         // completeness drift test for non-node attributes.
         ("", "kind") => "enum: image|svg|font",

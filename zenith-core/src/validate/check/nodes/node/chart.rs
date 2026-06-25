@@ -230,10 +230,20 @@ pub(in crate::validate::check) fn check_chart(
         if let Some(crate::ast::value::PropertyValue::TokenRef(token_id)) = &s.color {
             referenced_token_ids.insert(token_id.clone());
         }
+        // Per-series label-color token ref.
+        if let Some(crate::ast::value::PropertyValue::TokenRef(token_id)) = &s.label_color {
+            referenced_token_ids.insert(token_id.clone());
+        }
     }
     // value-color token ref — collect even though the series children are not walked.
     if let Some(crate::ast::value::PropertyValue::TokenRef(token_id)) = &c.value_color {
         referenced_token_ids.insert(token_id.clone());
+    }
+    // label-colors token refs — per-slice color refs from the label-colors child node.
+    for pv in &c.label_colors {
+        if let crate::ast::value::PropertyValue::TokenRef(token_id) = pv {
+            referenced_token_ids.insert(token_id.clone());
+        }
     }
 
     // Unknown properties.

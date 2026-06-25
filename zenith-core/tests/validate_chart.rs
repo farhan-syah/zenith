@@ -410,3 +410,44 @@ fn chart_missing_geometry_fires_geometry_diagnostic() {
         codes(&report)
     );
 }
+
+/// `label-colors` token refs are counted as referenced — they must NOT produce
+/// an "unused token" advisory when the tokens are declared. This mirrors the
+/// series-color and value-color token ref collection tests above.
+#[test]
+fn chart_label_colors_token_refs_are_collected() {
+    // NOTE: '#' in color hex requires r##...## quoting.
+    let src = r##"zenith version=1 {
+  project id="proj.lct" name="LabelColorTokens"
+  tokens format="zenith-token-v1" {
+    token id="c.a" type="color" value="#aa0000"
+    token id="c.b" type="color" value="#00aa00"
+    token id="c.s" type="color" value="#0000aa"
+  }
+  styles {
+  }
+  document id="doc.lct" title="LabelColorTokens" {
+    page id="page.lct" w=(px)800 h=(px)600 {
+      chart id="c.lct" kind="pie" x=(px)0 y=(px)0 w=(px)400 h=(px)400 {
+        label-colors (token)"c.a" (token)"c.b"
+        series label="S" label-color=(token)"c.s" 60.0 40.0
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let report = validate(&doc);
+    // All three token ids (c.a, c.b, c.s) must be referenced — no token.unused_token.
+    let unused_diags: Vec<&str> = codes(&report)
+        .into_iter()
+        .filter(|c| c.starts_with("token."))
+        .collect();
+    assert!(
+        unused_diags.is_empty(),
+        "label-colors and series label-color tokens must be counted as referenced \
+         (no token.* diagnostics); got: {:?}",
+        unused_diags
+    );
+}
