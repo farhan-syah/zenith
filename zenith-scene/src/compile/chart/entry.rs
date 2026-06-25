@@ -22,9 +22,10 @@ use super::super::util::{missing_geometry_diag, resolve_anchored_axis, unsupport
 use super::axis::{AxisColors, emit_axis_lines, emit_gridlines_and_labels};
 use super::bar::{BarMode, CatLabels, emit_bars, emit_category_labels, stacked_max};
 use super::frame::{PlotArea, plot_area};
+use super::legend::{LegendArea, emit_legend, measure_legend_width};
 use super::line::{emit_area_fill, emit_line_series, line_points};
 use super::palette::series_color;
-use super::pie::emit_pie;
+use super::pie::{emit_pie, slice_color};
 use super::scale::{LinearScale, data_range, nice_ticks};
 
 // ── Default colors ─────────────────────────────────────────────────────────────
@@ -150,7 +151,46 @@ pub(in crate::compile) fn compile_chart(
     // after geometry resolution, so x/y/w/h are available. Returns immediately.
     if matches!(chart.kind.as_str(), "pie" | "donut") {
         let is_donut = chart.kind.as_str() == "donut";
-        return emit_pie(chart, (x, y, w, h), is_donut, cx, commands, diagnostics);
+        let legend_on = chart.legend == Some(true);
+
+        let legend_w = if legend_on {
+            // One entry per category, colored by the slice palette.
+            let n = chart.series.first().map(|s| s.values.len()).unwrap_or(0);
+            let entries = pie_legend_entries(chart, n);
+            measure_legend_width(&entries, cx).min(w * 0.4)
+        } else {
+            0.0
+        };
+
+        // Render the pie into the left portion of the bbox (reduced by legend strip).
+        emit_pie(
+            chart,
+            (x, y, w - legend_w, h),
+            is_donut,
+            cx,
+            commands,
+            diagnostics,
+        );
+
+        // Legend strip to the right of the pie.
+        if legend_on && legend_w > 0.0 {
+            let n = chart.series.first().map(|s| s.values.len()).unwrap_or(0);
+            let entries = pie_legend_entries(chart, n);
+            emit_legend(
+                &entries,
+                LegendArea {
+                    x: x + w - legend_w,
+                    y,
+                    w: legend_w,
+                    h,
+                },
+                cx,
+                commands,
+                diagnostics,
+            );
+        }
+
+        return 0.0;
     }
 
     // ── Axis style "hidden" ──────────────────────────────────────────────────
@@ -159,10 +199,40 @@ pub(in crate::compile) fn compile_chart(
         return 0.0;
     }
 
+    // ── Legend (axis-bearing kinds) ──────────────────────────────────────────
+    // Build the series entries and measure the legend strip width before
+    // computing the plot area so the plot width is already reduced by the time
+    // `plot_area` is called. When `legend_on` is false `legend_w` is exactly
+    // `0.0` and `series_entries` is empty — the existing render path is
+    // byte-identical (same commands, same diagnostics).
+    let legend_on = chart.legend == Some(true);
+    let series_entries: Vec<(String, Color)> = if legend_on {
+        chart
+            .series
+            .iter()
+            .enumerate()
+            .map(|(s, sr)| {
+                let label = sr
+                    .label
+                    .clone()
+                    .unwrap_or_else(|| format!("Series {}", s + 1));
+                let color = series_color(sr, s, cx.resolved, diagnostics, &chart.id);
+                (label, color)
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let legend_w = if legend_on {
+        measure_legend_width(&series_entries, cx).min(w * 0.4)
+    } else {
+        0.0
+    };
+
     // ── Plot area ────────────────────────────────────────────────────────────
     let has_title = chart.title.is_some();
     let has_caption = chart.caption.is_some();
-    let plot = plot_area(x, y, w, h, has_title, has_caption);
+    let plot = plot_area(x, y, w - legend_w, h, has_title, has_caption);
 
     // ── Axis colors ──────────────────────────────────────────────────────────
     let axis_color = chart
@@ -313,6 +383,25 @@ pub(in crate::compile) fn compile_chart(
         _ => {}
     }
 
+    // ── Legend ───────────────────────────────────────────────────────────────
+    // The legend strip sits to the right of the plot area.  When `legend_on`
+    // is false `legend_w` is `0.0` and this block is skipped — no commands are
+    // emitted and the existing render path is byte-identical.
+    if legend_on && legend_w > 0.0 {
+        emit_legend(
+            &series_entries,
+            LegendArea {
+                x: x + w - legend_w,
+                y,
+                w: legend_w,
+                h,
+            },
+            cx,
+            commands,
+            diagnostics,
+        );
+    }
+
     // ── Title ────────────────────────────────────────────────────────────────
     if let Some(title) = &chart.title {
         emit_title(
@@ -440,4 +529,26 @@ pub(super) fn emit_title(
             }
         }
     }
+}
+
+// ── Legend entry builders ─────────────────────────────────────────────────────
+
+/// Build legend entries for a pie or donut chart.
+///
+/// One entry per category (indexed into `series[0].values`): the label comes
+/// from `chart.categories[i]` when available, falling back to the 1-based
+/// ordinal string `"1"`, `"2"`, … Slice colors follow the same deterministic
+/// palette as `emit_pie`.
+pub(super) fn pie_legend_entries(chart: &ChartNode, n: usize) -> Vec<(String, Color)> {
+    (0..n)
+        .map(|i| {
+            let label = chart
+                .categories
+                .get(i)
+                .cloned()
+                .unwrap_or_else(|| (i + 1).to_string());
+            let color = slice_color(i);
+            (label, color)
+        })
+        .collect()
 }

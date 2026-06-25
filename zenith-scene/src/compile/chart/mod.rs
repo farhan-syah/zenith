@@ -7,6 +7,7 @@ mod axis;
 mod bar;
 mod entry;
 mod frame;
+mod legend;
 mod line;
 mod palette;
 mod pie;

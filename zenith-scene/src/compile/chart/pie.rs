@@ -125,7 +125,7 @@ pub(super) fn wedge_polygon(geom: PieGeom, a_start: f64, a_end: f64) -> Vec<f64>
 // ── Slice color ───────────────────────────────────────────────────────────────
 
 /// Return the palette color for slice `idx` (cycles through `SERIES_PALETTE`).
-fn slice_color(idx: usize) -> Color {
+pub(super) fn slice_color(idx: usize) -> Color {
     SERIES_PALETTE
         .get(idx % SERIES_PALETTE.len())
         .copied()
