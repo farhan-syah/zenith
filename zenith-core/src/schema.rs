@@ -204,6 +204,9 @@ fn attribute_type_for_kind_inner(kind: &str, name: &str, fallback: &'static str)
     // These must be checked first, before the generic arm, because the correct
     // token type varies by node kind.  Each entry is verified against the
     // validator's `VisualExpect` at the cited source location.
+    //
+    // Also covers enum attributes whose value set differs by node kind (e.g.
+    // `kind` means different things on `shape` vs `pattern`).
     match (kind, name) {
         // fill: ColorOrGradient — rect (leaf.rs check_visual_props→shared.rs:804),
         //   ellipse (leaf.rs:218), polygon (special.rs:83), polyline (special.rs:213),
@@ -239,6 +242,23 @@ fn attribute_type_for_kind_inner(kind: &str, name: &str, fallback: &'static str)
         // contrast-bg (text): Color (text.rs:139).
         // header-fill (table): Color (container.rs:306→312).
         (_, "contrast-bg" | "header-fill") => "token ref: color",
+        // kind: the `kind` attribute means different things on different surfaces.
+        //   shape: process/decision/terminator/ellipse (validate/check/nodes/node/shape.rs:152).
+        //   pattern: grid/scatter (validate/check/nodes/node/pattern.rs:140).
+        //   asset surface (kind=""): image/svg/font (ast/asset.rs:29-33).
+        // The attribute name alone is insufficient — each surface has a distinct enum.
+        ("shape", "kind") => "enum: process|decision|terminator|ellipse",
+        ("pattern", "kind") => "enum: grid|scatter",
+        // Asset surface (non-node): kind="" is used by attribute_type() / the
+        // completeness drift test for non-node attributes.
+        ("", "kind") => "enum: image|svg|font",
+        // route: connector-only; values validated at shape.rs:309 as
+        //   straight/orthogonal/avoid (avoid is validated; maps to straight today).
+        ("connector", "route") => "enum: straight|orthogonal|avoid",
+        // layout: frame-only; AST documents absolute/flow/grid (container.rs:34-39).
+        //   Validator only enforces grid semantics (advisory) but all three values are
+        //   spec'd. Other values fall through to absolute-positioning.
+        ("frame", "layout") => "enum: absolute|flow|grid",
         // All other attributes fall through to the generic arm below.
         _ => attribute_type_generic(name, fallback),
     }
@@ -310,7 +330,6 @@ fn attribute_type_generic(name: &str, fallback: &'static str) -> &'static str {
             "enum: top-left|top-center|top-right|center-left|center|center-right|bottom-left|bottom-center|bottom-right"
         }
         "anchor-edge" => "enum: above|below|before|after",
-        "kind" => "enum: grid|scatter",
         "align" => "enum: left|center|right|justify",
         "overflow" => "enum: clip|visible|scroll",
         "blend-mode" => "string (enum)",
@@ -327,8 +346,6 @@ fn attribute_type_generic(name: &str, fallback: &'static str) -> &'static str {
         "overflow-wrap" => "enum: normal|break-word",
         "h-align" => "enum: left|center|right",
         "v-align" => "enum: top|middle|bottom",
-        "layout" => "string (enum)",
-        "route" => "string (enum)",
 
         // ── Connector-specific ────────────────────────────────────────────
         "from" | "to" => "node id",
@@ -1037,6 +1054,58 @@ mod tests {
                 "{attr} on rect must be color-only (validator uses VisualExpect::Color)",
             );
         }
+    }
+
+    // ── kind / route / layout node-aware accuracy tests ──────────────────────
+
+    /// `kind` must report node-specific enum strings per kind.
+    ///
+    /// shape.kind: process/decision/terminator/ellipse (shape.rs:152).
+    /// pattern.kind: grid/scatter (pattern.rs:140).
+    /// These must NOT cross-contaminate: the same attribute name, different enums.
+    #[test]
+    fn kind_type_hint_is_node_aware() {
+        assert_eq!(
+            attribute_type_for_kind("shape", "kind"),
+            "enum: process|decision|terminator|ellipse",
+            "shape.kind must enumerate the flowchart shape variants",
+        );
+        assert_eq!(
+            attribute_type_for_kind("pattern", "kind"),
+            "enum: grid|scatter",
+            "pattern.kind must enumerate the tiling mode variants",
+        );
+        // The two must differ — this is the root bug being fixed.
+        assert_ne!(
+            attribute_type_for_kind("shape", "kind"),
+            attribute_type_for_kind("pattern", "kind"),
+            "shape.kind and pattern.kind must NOT return the same hint (they are different enums)",
+        );
+    }
+
+    /// `route` on connector must enumerate straight/orthogonal/avoid.
+    ///
+    /// Validated at validate/check/nodes/node/shape.rs:309.
+    #[test]
+    fn route_type_hint_is_connector_specific() {
+        assert_eq!(
+            attribute_type_for_kind("connector", "route"),
+            "enum: straight|orthogonal|avoid",
+            "connector.route must enumerate all three routing modes",
+        );
+    }
+
+    /// `layout` on frame must enumerate absolute/flow/grid.
+    ///
+    /// Documented in ast/node/container.rs:34-39; grid semantics validated
+    /// at validate/check/nodes/node/container.rs:122.
+    #[test]
+    fn layout_type_hint_is_frame_specific() {
+        assert_eq!(
+            attribute_type_for_kind("frame", "layout"),
+            "enum: absolute|flow|grid",
+            "frame.layout must enumerate the three layout modes",
+        );
     }
 
     // ── Token type drift guards ───────────────────────────────────────────────
