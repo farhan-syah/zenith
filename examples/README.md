@@ -47,6 +47,7 @@ zenith validate examples/<name>.zen --json
 | Rich text (inline spans)                 | [`richtext.zen`](richtext.zen)       | ![richtext](richtext.png)       |
 | Decorations                              | [`decorations.zen`](decorations.zen) | ![decorations](decorations.png) |
 | Code (syntax highlighting, dark + light) | [`code.zen`](code.zen)               | ![code](code.png)               |
+| Inline markdown from an external file     | [`markdown.zen`](markdown.zen)       | ![markdown](markdown.png)       |
 
 ## Layout & composition
 

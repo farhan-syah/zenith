@@ -1,0 +1,1 @@
+Zenith now renders **inline markdown** straight from an external file, so a long article keeps the `.zen` lean. You can *emphasize* an idea, ==highlight a key result==, ~~strike a correction~~, mark a ++term++, show a `code snippet`, and link to the [full report](https://zenith.example/report) — all from plain text the editor can round-trip.

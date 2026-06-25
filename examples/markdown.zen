@@ -1,0 +1,20 @@
+zenith version=1 {
+  project id="proj.markdown" name="Markdown"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#ffffff"
+    token id="color.ink" type="color" value="#1f2937"
+    token id="color.title" type="color" value="#0b3d91"
+    token id="font.sans" type="fontFamily" value="Noto Sans"
+    token id="size.title" type="dimension" value=(px)34
+    token id="size.body" type="dimension" value=(px)24
+  }
+  styles {
+  }
+  document id="doc.markdown" title="Markdown" {
+    page id="page.markdown" w=(px)720 h=(px)360 background=(token)"color.bg" {
+      text id="title" x=(px)40 y=(px)36 w=(px)640 h=(px)48 fill=(token)"color.title" font-family=(token)"font.sans" font-size=(token)"size.title" { span "Lean prose, rich text" }
+      text id="body" x=(px)40 y=(px)104 w=(px)640 h=(px)220 fill=(token)"color.ink" font-family=(token)"font.sans" font-size=(token)"size.body" src="copy/feature.md" format="markdown" {
+      }
+    }
+  }
+}
