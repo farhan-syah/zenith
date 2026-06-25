@@ -287,6 +287,7 @@ mod tests {
             None,
             1,
             &crate::config::CliPolicyFlags::default(),
+            None,
         )
         .expect("compile ok");
         let scene: serde_json::Value =
@@ -443,6 +444,7 @@ mod tests {
             None,
             1,
             &crate::config::CliPolicyFlags::default(),
+            None,
         )
         .expect("compile ok");
         let scene: serde_json::Value =

@@ -26,6 +26,7 @@ fn assert_example_renders(name: &str) {
         1,
         false,
         &CliPolicyFlags::default(),
+        None,
     )
     .unwrap_or_else(|e| panic!("render failed (exit {}): {}", e.exit_code, e.message))
     .png;
@@ -52,6 +53,7 @@ fn assert_example_renders(name: &str) {
         1,
         false,
         &CliPolicyFlags::default(),
+        None,
     )
     .unwrap_or_else(|e| panic!("second render failed (exit {}): {}", e.exit_code, e.message))
     .png;
@@ -266,6 +268,7 @@ fn locked_correct_sha256_renders_ok() {
         1,
         true,
         &CliPolicyFlags::default(),
+        None,
     );
     assert!(
         result.is_ok(),
@@ -285,6 +288,7 @@ fn locked_wrong_sha256_errors_exit_2() {
         1,
         true,
         &CliPolicyFlags::default(),
+        None,
     )
     .expect_err("wrong sha256 in --locked mode must error");
     assert_eq!(err.exit_code, 2, "sha256 mismatch must exit with code 2");
@@ -299,6 +303,7 @@ fn locked_missing_sha256_errors_exit_2() {
         1,
         true,
         &CliPolicyFlags::default(),
+        None,
     )
     .expect_err("missing sha256 in --locked mode must error");
     assert_eq!(err.exit_code, 2, "missing sha256 must exit with code 2");
@@ -314,6 +319,7 @@ fn unlocked_wrong_sha256_renders_ok() {
         1,
         false,
         &CliPolicyFlags::default(),
+        None,
     );
     assert!(
         result.is_ok(),
@@ -359,6 +365,7 @@ fn render_missing_asset_yields_asset_missing_error_diagnostic() {
         1,
         false,
         &CliPolicyFlags::default(),
+        None,
     )
     .expect("render must not hard-fail; the missing asset is carried as a diagnostic");
     let has_missing = artifact

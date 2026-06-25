@@ -213,19 +213,19 @@ fn run_render(args: &Value) -> Result<Value, String> {
 
     let (bytes, ext, mime_diags): (Vec<u8>, &str, Vec<zenith_core::Diagnostic>) = match format {
         "png" => {
-            let art = commands::render::to_png_with_dir(&src, parent, page, locked, &flags)
+            let art = commands::render::to_png_with_dir(&src, parent, page, locked, &flags, None)
                 .map_err(|e| e.message)?;
             blocked(&art.diagnostics)?;
             (art.png, "png", art.diagnostics)
         }
         "pdf" => {
-            let art = commands::render::to_pdf_with_dir(&src, parent, page, locked, &flags)
+            let art = commands::render::to_pdf_with_dir(&src, parent, page, locked, &flags, None)
                 .map_err(|e| e.message)?;
             blocked(&art.diagnostics)?;
             (art.pdf, "pdf", art.diagnostics)
         }
         "scene" => {
-            let art = commands::render::to_scene_json(&src, parent, page, &flags)
+            let art = commands::render::to_scene_json(&src, parent, page, &flags, None)
                 .map_err(|e| e.message)?;
             blocked(&art.diagnostics)?;
             (art.json.into_bytes(), "json", art.diagnostics)

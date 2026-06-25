@@ -12,11 +12,13 @@
 //! for all filesystem I/O.
 //!
 //! This module is split across concern-grouped submodules:
-//! - [`entry`]    — the error type, render artifacts, and the public entry points.
-//! - [`assets`]   — font/asset provider construction and disk-based diagnostics.
-//! - [`pipeline`] — shared parse/validate/page-resolution/hash helpers.
+//! - [`entry`]      — the error type, render artifacts, and the public entry points.
+//! - [`assets`]     — font/asset provider construction and disk-based diagnostics.
+//! - [`pipeline`]   — shared parse/validate/page-resolution/hash helpers.
+//! - [`data_input`] — load a [`DataContext`] from a JSON or CSV file (`--data`).
 
 mod assets;
+pub mod data_input;
 mod entry;
 mod pipeline;
 
@@ -27,7 +29,8 @@ pub use assets::collect_image_dimension_diagnostics;
 pub(crate) use assets::{
     build_asset_provider, build_font_provider, collect_missing_asset_diagnostics,
 };
+pub use data_input::{DataInputError, load_data_context};
 pub use entry::{
-    PdfArtifact, PngArtifact, RenderCmdErr, SceneArtifact, to_pdf_with_dir, to_png,
-    to_png_all_pages, to_png_spread, to_png_with_dir, to_scene_json,
+    PdfArtifact, PngArtifact, RenderCmdErr, SceneArtifact, SpreadRenderOpts, to_pdf_with_dir,
+    to_png, to_png_all_pages, to_png_spread, to_png_with_dir, to_scene_json,
 };

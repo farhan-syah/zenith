@@ -2,6 +2,8 @@
 
 use std::process::ExitCode;
 
+use zenith_core::DataContext;
+
 use crate::cli::RenderArgs;
 use crate::cli_helpers::{
     count_hard_diagnostics, parse_spread_spec, print_diagnostics_stderr, read_file, write_bytes,
@@ -35,6 +37,21 @@ pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
         deny: args.deny,
     };
 
+    // --data ──────────────────────────────────────────────────────────
+    // Load the data context once (if requested) and pass a reference to each
+    // render entry function so `(data)"field"` refs resolve at compile time.
+    let data_ctx: Option<DataContext> = match &args.data {
+        Some(data_path) => match commands::render::load_data_context(data_path) {
+            Ok(ctx) => Some(ctx),
+            Err(e) => {
+                eprintln!("error: {}", e);
+                return ExitCode::from(2);
+            }
+        },
+        None => None,
+    };
+    let data: Option<&DataContext> = data_ctx.as_ref();
+
     // --spread ────────────────────────────────────────────────────────
     // When set, parse the "A-B" page pair up front and render a single
     // composited PNG to the --png target. --spread requires --png; it is
@@ -65,8 +82,11 @@ pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
             page_a,
             page_b,
             args.gutter,
-            args.locked,
-            &flags,
+            commands::render::SpreadRenderOpts {
+                locked: args.locked,
+                flags: &flags,
+                data,
+            },
         ) {
             Ok(artifact) => {
                 let n_hard = count_hard_diagnostics(&artifact.diagnostics);
@@ -99,7 +119,7 @@ pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
 
     // --scene ─────────────────────────────────────────────────────────
     if let Some(scene_out) = &args.scene {
-        match commands::render::to_scene_json(&src, args.path.parent(), args.page, &flags) {
+        match commands::render::to_scene_json(&src, args.path.parent(), args.page, &flags, data) {
             Ok(artifact) => {
                 // Block on hard (Error-severity) compile diagnostics.
                 let n_hard = count_hard_diagnostics(&artifact.diagnostics);
@@ -142,6 +162,7 @@ pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
             args.page,
             args.locked,
             &flags,
+            data,
         ) {
             Ok(artifact) => {
                 // Block on hard (Error-severity) compile diagnostics.
@@ -181,6 +202,7 @@ pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
             args.page,
             args.locked,
             &flags,
+            data,
         ) {
             Ok(artifact) => {
                 // Block on hard (Error-severity) compile diagnostics.
@@ -218,7 +240,13 @@ pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
             eprintln!("error creating directory '{}': {}", dir.display(), e);
             return ExitCode::from(2);
         }
-        match commands::render::to_png_all_pages(&src, args.path.parent(), args.locked, &flags) {
+        match commands::render::to_png_all_pages(
+            &src,
+            args.path.parent(),
+            args.locked,
+            &flags,
+            data,
+        ) {
             Ok(artifacts) => {
                 // Collect all diagnostics first; block if any are hard errors
                 // before writing any page to disk.

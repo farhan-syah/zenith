@@ -47,7 +47,7 @@ fn with_id() -> String {
 fn doc_id_is_render_ignored() {
     let with = with_id();
 
-    let png_without = to_png_with_dir(WITHOUT_ID, None, 1, false, &CliPolicyFlags::default())
+    let png_without = to_png_with_dir(WITHOUT_ID, None, 1, false, &CliPolicyFlags::default(), None)
         .unwrap_or_else(|e| {
             panic!(
                 "render WITHOUT doc-id failed (exit {}): {}",
@@ -56,7 +56,7 @@ fn doc_id_is_render_ignored() {
         })
         .png;
 
-    let png_with = to_png_with_dir(&with, None, 1, false, &CliPolicyFlags::default())
+    let png_with = to_png_with_dir(&with, None, 1, false, &CliPolicyFlags::default(), None)
         .unwrap_or_else(|e| {
             panic!(
                 "render WITH doc-id failed (exit {}): {}",
@@ -78,11 +78,11 @@ fn doc_id_is_render_ignored() {
 fn render_with_doc_id_is_deterministic() {
     let with = with_id();
 
-    let first = to_png_with_dir(&with, None, 1, false, &CliPolicyFlags::default())
+    let first = to_png_with_dir(&with, None, 1, false, &CliPolicyFlags::default(), None)
         .unwrap_or_else(|e| panic!("first render failed (exit {}): {}", e.exit_code, e.message))
         .png;
 
-    let second = to_png_with_dir(&with, None, 1, false, &CliPolicyFlags::default())
+    let second = to_png_with_dir(&with, None, 1, false, &CliPolicyFlags::default(), None)
         .unwrap_or_else(|e| panic!("second render failed (exit {}): {}", e.exit_code, e.message))
         .png;
 

@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use zenith_core::{BytesAssetProvider, Diagnostic, dim_to_px};
+use zenith_core::{BytesAssetProvider, DataContext, Diagnostic, dim_to_px};
 use zenith_render::{render_pdf, render_png, render_spread_png};
 use zenith_scene::compile_page;
 
@@ -73,6 +73,10 @@ pub struct PdfArtifact {
 /// actual face rather than falling back to the bundled Noto fonts. When
 /// `None`, only the bundled fonts are available.
 ///
+/// `data` is an optional data context for resolving `(data)"field"` property
+/// references at compile time. When `None`, data refs produce
+/// `data.missing_field` / `data.no_context` advisories (non-fatal).
+///
 /// `flags` carries the `--allow`/`--warn`/`--deny` CLI overrides; pass
 /// `&CliPolicyFlags::default()` when no flags are available (e.g. MCP).
 ///
@@ -87,11 +91,12 @@ pub fn to_scene_json(
     project_dir: Option<&Path>,
     page: usize,
     flags: &CliPolicyFlags,
+    data: Option<&DataContext>,
 ) -> Result<SceneArtifact, RenderCmdErr> {
     let (doc, policy) = parse_validate(src, project_dir, flags)?;
     let fonts = build_font_provider(&doc, project_dir, false)?;
     let page_index = resolve_page_index(&doc, page)?;
-    let compile_result = compile_page(&doc, &fonts, page_index, None);
+    let compile_result = compile_page(&doc, &fonts, page_index, data);
     let json = compile_result
         .scene
         .to_json()
@@ -113,6 +118,7 @@ pub fn to_scene_json(
 ///
 /// `page` is the 1-based page number to render. No CLI policy flags are
 /// applied; config files are still resolved (global only, no `start_dir`).
+/// No data context is supplied; data refs produce non-fatal advisories.
 ///
 /// Returns `Err` when:
 /// - A config file cannot be read (exit code 2).
@@ -121,7 +127,7 @@ pub fn to_scene_json(
 /// - The `page` is out of range (exit code 2).
 /// - Rendering fails (exit code 2).
 pub fn to_png(src: &str, page: usize) -> Result<PngArtifact, RenderCmdErr> {
-    to_png_with_dir(src, None, page, false, &CliPolicyFlags::default())
+    to_png_with_dir(src, None, page, false, &CliPolicyFlags::default(), None)
 }
 
 /// Like [`to_png`], but sources image and SVG asset bytes from `project_dir`
@@ -141,6 +147,10 @@ pub fn to_png(src: &str, page: usize) -> Result<PngArtifact, RenderCmdErr> {
 ///
 /// `page` is the 1-based page number to render.
 ///
+/// `data` is an optional data context for resolving `(data)"field"` property
+/// references at compile time. When `None`, data refs produce non-fatal
+/// advisories.
+///
 /// `flags` carries the `--allow`/`--warn`/`--deny` CLI overrides; pass
 /// `&CliPolicyFlags::default()` when no flags are available (e.g. MCP).
 pub fn to_png_with_dir(
@@ -149,6 +159,7 @@ pub fn to_png_with_dir(
     page: usize,
     locked: bool,
     flags: &CliPolicyFlags,
+    data: Option<&DataContext>,
 ) -> Result<PngArtifact, RenderCmdErr> {
     let (doc, policy) = parse_validate(src, project_dir, flags)?;
     let fonts = build_font_provider(&doc, project_dir, locked)?;
@@ -157,7 +168,7 @@ pub fn to_png_with_dir(
         Some(dir) => build_asset_provider(&doc, dir, locked)?,
         None => BytesAssetProvider::new(),
     };
-    let compile_result = compile_page(&doc, &fonts, page_index, None);
+    let compile_result = compile_page(&doc, &fonts, page_index, data);
     let png = render_png(&compile_result.scene, &fonts, &assets)
         .map_err(|e| RenderCmdErr::new(format!("render error: {e}"), 2))?;
     let mut diagnostics = disk_diagnostics(&doc, project_dir);
@@ -176,6 +187,10 @@ pub fn to_png_with_dir(
 /// CropBox) and native DeviceCMYK for CMYK-origin colors. Output is
 /// deterministic. `page` is the 1-based page number.
 ///
+/// `data` is an optional data context for resolving `(data)"field"` property
+/// references at compile time. When `None`, data refs produce non-fatal
+/// advisories.
+///
 /// `flags` carries the `--allow`/`--warn`/`--deny` CLI overrides; pass
 /// `&CliPolicyFlags::default()` when no flags are available (e.g. MCP).
 pub fn to_pdf_with_dir(
@@ -184,6 +199,7 @@ pub fn to_pdf_with_dir(
     page: usize,
     locked: bool,
     flags: &CliPolicyFlags,
+    data: Option<&DataContext>,
 ) -> Result<PdfArtifact, RenderCmdErr> {
     let (doc, policy) = parse_validate(src, project_dir, flags)?;
     let fonts = build_font_provider(&doc, project_dir, locked)?;
@@ -192,7 +208,7 @@ pub fn to_pdf_with_dir(
         Some(dir) => build_asset_provider(&doc, dir, locked)?,
         None => BytesAssetProvider::new(),
     };
-    let compile_result = compile_page(&doc, &fonts, page_index, None);
+    let compile_result = compile_page(&doc, &fonts, page_index, data);
     let pdf = render_pdf(&compile_result.scene, &fonts, &assets);
     let mut diagnostics = disk_diagnostics(&doc, project_dir);
     diagnostics.extend(govern_compile_diagnostics(
@@ -212,6 +228,10 @@ pub fn to_pdf_with_dir(
 /// When `locked` is set, image and SVG asset bytes are verified against their
 /// declared `sha256` (exit 2 on any mismatch/missing hash/read failure).
 ///
+/// `data` is an optional data context for resolving `(data)"field"` property
+/// references at compile time (applied to every page). When `None`, data refs
+/// produce non-fatal advisories.
+///
 /// `flags` carries the `--allow`/`--warn`/`--deny` CLI overrides; pass
 /// `&CliPolicyFlags::default()` when no flags are available (e.g. MCP).
 pub fn to_png_all_pages(
@@ -219,6 +239,7 @@ pub fn to_png_all_pages(
     project_dir: Option<&Path>,
     locked: bool,
     flags: &CliPolicyFlags,
+    data: Option<&DataContext>,
 ) -> Result<Vec<PngArtifact>, RenderCmdErr> {
     let (doc, policy) = parse_validate(src, project_dir, flags)?;
     let fonts = build_font_provider(&doc, project_dir, locked)?;
@@ -233,7 +254,7 @@ pub fn to_png_all_pages(
     let disk_diagnostics = disk_diagnostics(&doc, project_dir);
     let mut artifacts = Vec::with_capacity(page_count);
     for page_index in 0..page_count {
-        let compile_result = compile_page(&doc, &fonts, page_index, None);
+        let compile_result = compile_page(&doc, &fonts, page_index, data);
         let png = render_png(&compile_result.scene, &fonts, &assets)
             .map_err(|e| RenderCmdErr::new(format!("render error on page {page_index}: {e}"), 2))?;
         let mut diagnostics = disk_diagnostics.clone();
@@ -244,6 +265,19 @@ pub fn to_png_all_pages(
         artifacts.push(PngArtifact { png, diagnostics });
     }
     Ok(artifacts)
+}
+
+/// Bundled render options for [`to_png_spread`], keeping its argument count
+/// within the lint limit (the spread path also takes two page indices and a
+/// gutter override). `Copy` so it cascades cheaply.
+#[derive(Clone, Copy)]
+pub struct SpreadRenderOpts<'a> {
+    /// Verify asset sha256 and fail on mismatch.
+    pub locked: bool,
+    /// Diagnostic-policy CLI flags.
+    pub flags: &'a CliPolicyFlags,
+    /// Optional data context for `(data)` references.
+    pub data: Option<&'a DataContext>,
 }
 
 /// Parse `src`, validate it with the merged diagnostic policy, compile pages
@@ -257,6 +291,10 @@ pub fn to_png_all_pages(
 /// many fully-transparent columns between the two pages. Image/SVG/font asset
 /// bytes are sourced from `project_dir` (shared across both pages) exactly like
 /// [`to_png_with_dir`].
+///
+/// `data` is an optional data context for resolving `(data)"field"` property
+/// references at compile time (applied to both pages). When `None`, data refs
+/// produce non-fatal advisories.
 ///
 /// `flags` carries the `--allow`/`--warn`/`--deny` CLI overrides; pass
 /// `&CliPolicyFlags::default()` when no flags are available (e.g. MCP).
@@ -273,9 +311,13 @@ pub fn to_png_spread(
     page_a: usize,
     page_b: usize,
     gutter_override: Option<u32>,
-    locked: bool,
-    flags: &CliPolicyFlags,
+    opts: SpreadRenderOpts<'_>,
 ) -> Result<PngArtifact, RenderCmdErr> {
+    let SpreadRenderOpts {
+        locked,
+        flags,
+        data,
+    } = opts;
     let (doc, policy) = parse_validate(src, project_dir, flags)?;
     let fonts = build_font_provider(&doc, project_dir, locked)?;
     let index_a = resolve_page_index(&doc, page_a)?;
@@ -292,8 +334,8 @@ pub fn to_png_spread(
             .map(|px| px.max(0.0) as u32)
             .unwrap_or(0)
     });
-    let compile_a = compile_page(&doc, &fonts, index_a, None);
-    let compile_b = compile_page(&doc, &fonts, index_b, None);
+    let compile_a = compile_page(&doc, &fonts, index_a, data);
+    let compile_b = compile_page(&doc, &fonts, index_b, data);
     let png = render_spread_png(
         &compile_a.scene,
         &compile_b.scene,

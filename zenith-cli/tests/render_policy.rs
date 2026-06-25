@@ -64,6 +64,7 @@ fn render_succeeds_without_flags() {
         1,
         false,
         &CliPolicyFlags::default(),
+        None,
     );
     assert!(
         result.is_ok(),
@@ -80,7 +81,7 @@ fn deny_flag_turns_advisory_into_render_failure() {
         deny: vec!["token.unused".to_owned()],
         ..Default::default()
     };
-    let result = to_png_with_dir(DOC_WITH_UNUSED_TOKEN, None, 1, false, &flags);
+    let result = to_png_with_dir(DOC_WITH_UNUSED_TOKEN, None, 1, false, &flags, None);
     assert!(
         result.is_err(),
         "render must fail when advisory is --deny'd; got Ok"
@@ -121,6 +122,7 @@ fn local_config_deny_blocks_render() {
         1,
         false,
         &CliPolicyFlags::default(),
+        None,
     );
     assert!(
         result.is_err(),
@@ -155,6 +157,7 @@ fn local_config_allow_keeps_render_clean() {
         1,
         false,
         &CliPolicyFlags::default(),
+        None,
     );
     assert!(
         result.is_ok(),
@@ -172,7 +175,7 @@ fn allow_flag_on_advisory_is_transparent() {
         allow: vec!["token.unused".to_owned()],
         ..Default::default()
     };
-    let result = to_png_with_dir(DOC_WITH_UNUSED_TOKEN, None, 1, false, &flags);
+    let result = to_png_with_dir(DOC_WITH_UNUSED_TOKEN, None, 1, false, &flags, None);
     assert!(
         result.is_ok(),
         "render must still succeed when an advisory code is --allow'd; got: {:?}",
@@ -186,6 +189,7 @@ fn allow_flag_on_advisory_is_transparent() {
         1,
         false,
         &CliPolicyFlags::default(),
+        None,
     )
     .expect("baseline render must succeed")
     .png;
@@ -208,6 +212,7 @@ fn unresolved_font_advisory_shown_and_render_succeeds() {
         1,
         false,
         &CliPolicyFlags::default(),
+        None,
     );
     let artifact = result.expect("render must succeed with the font advisory present");
     assert!(
@@ -230,7 +235,7 @@ fn deny_unresolved_font_elevates_to_error_severity() {
         deny: vec!["font.unresolved".to_owned()],
         ..Default::default()
     };
-    let artifact = to_png_with_dir(DOC_WITH_UNAVAILABLE_FONT, None, 1, false, &flags)
+    let artifact = to_png_with_dir(DOC_WITH_UNAVAILABLE_FONT, None, 1, false, &flags, None)
         .expect("entry must return Ok; dispatch decides the exit code");
     let diag = artifact
         .diagnostics
@@ -253,7 +258,7 @@ fn allow_unresolved_font_suppresses_advisory() {
         allow: vec!["font.unresolved".to_owned()],
         ..Default::default()
     };
-    let result = to_png_with_dir(DOC_WITH_UNAVAILABLE_FONT, None, 1, false, &flags);
+    let result = to_png_with_dir(DOC_WITH_UNAVAILABLE_FONT, None, 1, false, &flags, None);
     let artifact = result.expect("render must succeed when the advisory is allowed");
     assert!(
         !artifact
@@ -279,6 +284,7 @@ fn malformed_local_config_causes_render_error_exit_2() {
         1,
         false,
         &CliPolicyFlags::default(),
+        None,
     );
     assert!(
         result.is_err(),

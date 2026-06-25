@@ -74,4 +74,11 @@ pub struct RenderArgs {
     /// global/local config policy for this code.
     #[arg(long = "deny", value_name = "CODE", action = clap::ArgAction::Append)]
     pub deny: Vec<String>,
+
+    /// Path to a JSON object/array or CSV file supplying values for
+    /// `(data)"field.path"` references. JSON nested keys flatten to dot-paths
+    /// (`{"a":{"b":1}}` → `"a.b"`); a JSON array uses the first element. CSV
+    /// header row gives field names; the first data row supplies values.
+    #[arg(long, value_name = "FILE")]
+    pub data: Option<PathBuf>,
 }
