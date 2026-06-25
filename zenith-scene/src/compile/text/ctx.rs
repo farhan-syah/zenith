@@ -8,13 +8,14 @@
 
 use std::collections::BTreeMap;
 
-use zenith_core::{FontProvider, ResolvedToken, Style};
+use zenith_core::{BlockStyle, FontProvider, ResolvedToken, Style};
 use zenith_layout::{RustybuzzEngine, TextDirection};
 
 use crate::ir::Color;
 
 use super::super::anchor::AnchorMap;
 use super::super::chain::ChainAssignments;
+use super::super::markdown_resolve::MdBlockMap;
 use super::WordMetrics;
 
 /// The shaping engine + font provider, borrowed for one shape/measure call.
@@ -65,6 +66,25 @@ pub(in crate::compile) struct TextCompileEnv<'a> {
     pub(in crate::compile) footnote_markers: &'a BTreeMap<String, String>,
     pub(in crate::compile) node_boxes: &'a BTreeMap<String, (f64, f64, f64, f64)>,
     pub(in crate::compile) anchors: &'a AnchorMap,
+    /// Parsed block-level markdown keyed by `text` node id. A node present here
+    /// AND not chained takes the block-layout path; everything else is empty
+    /// (byte-identical). Synthetic-text callers (fields, footnotes, labels) pass
+    /// the shared empty map so they never activate block layout.
+    pub(in crate::compile) md_blocks: &'a MdBlockMap,
+    /// Page-scope block-role style declarations (cascade tier 2).
+    pub(in crate::compile) page_block_styles: &'a [BlockStyle],
+    /// Document-scope block-role style declarations (cascade tier 3).
+    pub(in crate::compile) doc_block_styles: &'a [BlockStyle],
+}
+
+/// A process-wide empty [`MdBlockMap`] for synthetic-text compile sites (fields,
+/// footnotes, shape/connector labels) that never carry markdown blocks. Lets
+/// those sites populate [`TextCompileEnv::md_blocks`] without threading the real
+/// map; a synthesized node id is never present, so block layout never activates.
+pub(in crate::compile) fn empty_md_blocks() -> &'static MdBlockMap {
+    use std::sync::OnceLock;
+    static EMPTY: OnceLock<MdBlockMap> = OnceLock::new();
+    EMPTY.get_or_init(MdBlockMap::new)
 }
 
 /// Placement geometry + style for a chain member's emit (see

@@ -7,12 +7,16 @@
 //! 3. Additive byte-identity: a document with NO `block` decls formats
 //!    identically via KdlAdapter parse → format (the existing format parity
 //!    tests cover this path; here we add an explicit regression guard).
+//! 4. Validation: token referenced only via a `block` decl is NOT flagged
+//!    `token.unused`.
+//! 5. Validation: a `block` decl referencing a missing token yields
+//!    `token.unknown_reference`.
 
 mod common;
 use common::*;
 
 use zenith_core::format::format_document;
-use zenith_core::{KdlAdapter, KdlSource};
+use zenith_core::{KdlAdapter, KdlSource, validate};
 
 // ── 1. Parse at all three scopes ─────────────────────────────────────────────
 
@@ -209,5 +213,69 @@ fn no_block_decls_byte_identical() {
     assert!(
         !out.contains("\n  block ") && !out.contains("    block "),
         "output must not contain any block lines when no block decls are declared; got:\n{out}"
+    );
+}
+
+// ── 4. Token referenced ONLY via a `block` decl is NOT flagged `token.unused` ─
+
+#[test]
+fn block_decl_token_ref_not_flagged_unused() {
+    // The token "color.accent" is declared but referenced ONLY via a document-scope
+    // `block` decl. Without the validator traversing block_styles this would produce
+    // a false `token.unused` advisory.
+    let src = r##"zenith version=1 {
+  assets {}
+  tokens format="zenith-token-v1" {
+    color id="color.accent" "#FF5500"
+  }
+  styles {}
+  document id="doc.main" {
+    block role="h1" fill=(token)"color.accent"
+    page id="pg.one" w=(px)1280 h=(px)720 {
+      text id="t1" x=(px)0 y=(px)0 w=(px)640 h=(px)480 {
+      }
+    }
+  }
+}
+"##;
+
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("should parse");
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "token.unused"),
+        "token referenced only via a block decl must not be flagged token.unused; \
+         got diagnostics: {:?}",
+        codes(&report)
+    );
+}
+
+// ── 5. `block` decl referencing a missing token yields `token.unknown_reference` ─
+
+#[test]
+fn block_decl_missing_token_yields_unknown_reference() {
+    // "color.missing" is referenced in a page-scope block decl but never declared.
+    let src = r##"zenith version=1 {
+  assets {}
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.main" {
+    page id="pg.one" w=(px)1280 h=(px)720 {
+      block role="p" fill=(token)"color.missing"
+      text id="t1" x=(px)0 y=(px)0 w=(px)640 h=(px)480 {
+      }
+    }
+  }
+}
+"##;
+
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("should parse");
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "token.unknown_reference"),
+        "block decl referencing a missing token must yield token.unknown_reference; \
+         got diagnostics: {:?}",
+        codes(&report)
     );
 }

@@ -50,8 +50,6 @@ pub struct BlockStyle {
     pub align: Option<String>,
     /// Override italic rendering.
     pub italic: Option<bool>,
-    /// Override line height (token ref, pixel literal, or dimension ref).
-    pub line_height: Option<PropertyValue>,
     /// Extra space inserted above the block (resolved at compile time).
     pub space_before: Option<Dimension>,
     /// Extra space inserted below the block (resolved at compile time).

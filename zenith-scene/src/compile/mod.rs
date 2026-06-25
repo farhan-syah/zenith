@@ -66,7 +66,7 @@ use paint::{resolve_property_color, resolve_property_gradient};
 use pattern::compile_pattern;
 use table::{TableEmitCtx, compile_table};
 use table_flow::resolve_table_flows;
-use text::{TextCompileEnv, compile_code, compile_text};
+use text::{TextCompileEnv, compile_code, compile_text, empty_md_blocks};
 use toc::resolve_toc_to_text;
 
 /// Compile-time lookup of component definitions by id. Threaded through the
@@ -224,16 +224,18 @@ pub fn compile_page(
     // - `data = None`: NEVER clone. A read-only scan emits a single
     //   `data.no_context` advisory iff any ref exists, then the original `doc`
     //   compiles by reference — byte-identical to the no-data-binding path.
+    let mut md_blocks: markdown_resolve::MdBlockMap = markdown_resolve::MdBlockMap::new();
     let owned_doc: Option<Document> = match data {
         Some(ctx) => {
             let mut cloned = doc.clone();
             substitute_data_refs(&mut cloned, ctx, &mut diagnostics);
             // ── Step 0b: markdown-resolution pass ────────────────────────
             // For each `text` node with `format="markdown"`, concatenate the
-            // (now data-substituted) span texts and replace spans with the
-            // parsed styled spans from `parse_inline_markdown`. Nodes without
+            // (now data-substituted) span texts, replace spans with the parsed
+            // inline styled spans, and record the parsed BLOCK list in
+            // `md_blocks` (consumed by the block-layout path). Nodes without
             // `format="markdown"` are skipped (byte-identical).
-            resolve_markdown(&mut cloned);
+            md_blocks = resolve_markdown(&mut cloned);
             Some(cloned)
         }
         None => {
@@ -254,7 +256,7 @@ pub fn compile_page(
             // exists; otherwise skip entirely (byte-identical to before).
             if scan_for_markdown_text(doc) {
                 let mut cloned = doc.clone();
-                resolve_markdown(&mut cloned);
+                md_blocks = resolve_markdown(&mut cloned);
                 Some(cloned)
             } else {
                 None
@@ -521,6 +523,9 @@ pub fn compile_page(
         flows: &flows,
         anchors: &anchors,
         field_ctx: &field_ctx,
+        md_blocks: &md_blocks,
+        page_block_styles: &page.block_styles,
+        doc_block_styles: &doc.body.block_styles,
     };
 
     // ── Resolve the page baseline grid ───────────────────────────────────
@@ -713,6 +718,9 @@ pub(in crate::compile) fn compile_node(
         flows,
         anchors,
         field_ctx,
+        md_blocks,
+        page_block_styles,
+        doc_block_styles,
     } = cx;
 
     match node {
@@ -755,6 +763,9 @@ pub(in crate::compile) fn compile_node(
                 footnote_markers: field_ctx.footnote_markers,
                 node_boxes: field_ctx.node_boxes,
                 anchors,
+                md_blocks,
+                page_block_styles,
+                doc_block_styles,
             },
             commands,
             diagnostics,
@@ -793,6 +804,9 @@ pub(in crate::compile) fn compile_node(
                         footnote_markers: field_ctx.footnote_markers,
                         node_boxes: field_ctx.node_boxes,
                         anchors,
+                        md_blocks: empty_md_blocks(),
+                        page_block_styles: &[],
+                        doc_block_styles: &[],
                     },
                     commands,
                     diagnostics,
@@ -820,6 +834,9 @@ pub(in crate::compile) fn compile_node(
                         footnote_markers: field_ctx.footnote_markers,
                         node_boxes: field_ctx.node_boxes,
                         anchors,
+                        md_blocks: empty_md_blocks(),
+                        page_block_styles: &[],
+                        doc_block_styles: &[],
                     },
                     commands,
                     diagnostics,
@@ -851,6 +868,9 @@ pub(in crate::compile) fn compile_node(
                 footnote_markers: field_ctx.footnote_markers,
                 node_boxes: field_ctx.node_boxes,
                 anchors,
+                md_blocks: empty_md_blocks(),
+                page_block_styles: &[],
+                doc_block_styles: &[],
             },
             commands,
             diagnostics,

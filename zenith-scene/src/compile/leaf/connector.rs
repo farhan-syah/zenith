@@ -15,7 +15,8 @@ use super::super::chain::ChainAssignments;
 use super::super::paint::resolve_property_color;
 use super::super::style_prop;
 use super::super::text::{
-    MeasureEnv, TextCompileEnv, compile_text, measure_text_wrapped_height, resolve_text_families,
+    MeasureEnv, TextCompileEnv, compile_text, empty_md_blocks, measure_text_wrapped_height,
+    resolve_text_families,
 };
 use super::super::util::{px, resolve_property_dimension_px, rotation_degrees};
 use super::poly::flat_points_centroid_center;
@@ -482,6 +483,9 @@ fn emit_connector_label(
             footnote_markers,
             node_boxes,
             anchors,
+            md_blocks: empty_md_blocks(),
+            page_block_styles: &[],
+            doc_block_styles: &[],
         },
         commands,
         diagnostics,

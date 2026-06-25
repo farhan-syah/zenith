@@ -12,7 +12,7 @@ use crate::format::writer::{
 
 /// Emit a single `block role="…" …` declaration line (no child block — leaf
 /// decl like `fold`). Canonical property order: role, font-family, font-size,
-/// font-weight, fill, align, italic, line-height, space-before, space-after.
+/// font-weight, fill, align, italic, space-before, space-after.
 /// Fields absent from the declaration are silently skipped.
 pub(super) fn write_block_style(bs: &BlockStyle, out: &mut String, depth: usize) {
     indent(out, depth);
@@ -25,7 +25,6 @@ pub(super) fn write_block_style(bs: &BlockStyle, out: &mut String, depth: usize)
     write_opt_property_value(out, "fill", &bs.fill);
     write_opt_str(out, "align", &bs.align);
     write_opt_bool(out, "italic", &bs.italic);
-    write_opt_property_value(out, "line-height", &bs.line_height);
     write_opt_dimension(out, "space-before", &bs.space_before);
     write_opt_dimension(out, "space-after", &bs.space_after);
     out.push('\n');

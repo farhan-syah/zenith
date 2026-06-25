@@ -40,7 +40,7 @@ use super::chain::ChainAssignments;
 use super::field::FieldCtx;
 use super::paint::resolve_property_color;
 use super::style_prop;
-use super::text::{TextCompileEnv, compile_text};
+use super::text::{TextCompileEnv, compile_text, empty_md_blocks};
 use super::util::{px, resolve_property_dimension_px};
 
 /// The gap (px) between stacked footnotes in the zone.
@@ -277,6 +277,9 @@ pub(in crate::compile) fn compile_footnote_zone(
         footnote_markers: markers,
         node_boxes: &empty_node_boxes,
         anchors,
+        md_blocks: empty_md_blocks(),
+        page_block_styles: &[],
+        doc_block_styles: &[],
     };
     let mut heights: Vec<f64> = Vec::with_capacity(footnotes.len());
     for fnote in &footnotes {

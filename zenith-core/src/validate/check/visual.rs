@@ -8,6 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::ast::block_style::BlockStyle;
 use crate::ast::token::TokenType;
 use crate::ast::value::PropertyValue;
 use crate::diagnostics::Diagnostic;
@@ -169,6 +170,61 @@ pub(super) fn check_visual_prop(
         // emitted here — scene-side resolution emits `data.missing_field` or
         // `data.no_context` advisories at compile time when needed.
         PropertyValue::DataRef(_) => {}
+    }
+}
+
+/// Check all token-referencing properties in a slice of `block role="…"` decls.
+///
+/// Called at the three block-style scopes (document body, page, text node) so
+/// that tokens referenced ONLY via a `block` decl are recorded as used and any
+/// missing or wrong-type token reference is diagnosed. Non-token fields
+/// (`align`, `italic`, `space_before`, `space_after`) carry no token ref —
+/// they are skipped.
+pub(super) fn check_block_styles(
+    scope_id: &str,
+    block_styles: &[BlockStyle],
+    referenced_token_ids: &mut BTreeSet<String>,
+    resolved_tokens: &BTreeMap<String, ResolvedToken>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for bs in block_styles {
+        let label = format!("{scope_id}[block role=\"{}\"]", bs.role);
+        check_visual_prop(
+            &label,
+            "font-family",
+            bs.font_family.as_ref(),
+            VisualExpect::FontFamily,
+            referenced_token_ids,
+            resolved_tokens,
+            diagnostics,
+        );
+        check_visual_prop(
+            &label,
+            "font-size",
+            bs.font_size.as_ref(),
+            VisualExpect::Dimension,
+            referenced_token_ids,
+            resolved_tokens,
+            diagnostics,
+        );
+        check_visual_prop(
+            &label,
+            "font-weight",
+            bs.font_weight.as_ref(),
+            VisualExpect::FontWeight,
+            referenced_token_ids,
+            resolved_tokens,
+            diagnostics,
+        );
+        check_visual_prop(
+            &label,
+            "fill",
+            bs.fill.as_ref(),
+            VisualExpect::Color,
+            referenced_token_ids,
+            resolved_tokens,
+            diagnostics,
+        );
     }
 }
 

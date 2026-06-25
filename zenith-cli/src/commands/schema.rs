@@ -710,10 +710,6 @@ pub fn block(json: bool) -> (String, u8) {
         ),
         ("italic", "#true / #false — override italic rendering"),
         (
-            "line-height",
-            "token ref, (px) literal, or dimension — override line height",
-        ),
-        (
             "space-before",
             "(px) or other dimension — extra space above the block",
         ),

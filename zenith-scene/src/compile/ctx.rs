@@ -14,13 +14,14 @@
 
 use std::collections::BTreeMap;
 
-use zenith_core::{FontProvider, ResolvedToken, Style};
+use zenith_core::{BlockStyle, FontProvider, ResolvedToken, Style};
 use zenith_layout::RustybuzzEngine;
 
 use super::ComponentMap;
 use super::anchor::AnchorMap;
 use super::chain::ChainAssignments;
 use super::field::FieldCtx;
+use super::markdown_resolve::MdBlockMap;
 use super::table_flow::TableFlowAssignments;
 
 /// Immutable, shared borrows threaded through every node compiler.
@@ -49,4 +50,11 @@ pub(in crate::compile) struct NodeCtx<'a> {
     pub(in crate::compile) anchors: &'a AnchorMap,
     /// Per-page field context (page index, live area, footnote markers, …).
     pub(in crate::compile) field_ctx: &'a FieldCtx<'a>,
+    /// Parsed block-level markdown, keyed by `text` node id. Empty when the
+    /// document has no `format="markdown"` text nodes (byte-identical path).
+    pub(in crate::compile) md_blocks: &'a MdBlockMap,
+    /// Page-scope `block role="…"` style declarations (cascade tier 2).
+    pub(in crate::compile) page_block_styles: &'a [BlockStyle],
+    /// Document-body-scope `block role="…"` style declarations (cascade tier 3).
+    pub(in crate::compile) doc_block_styles: &'a [BlockStyle],
 }

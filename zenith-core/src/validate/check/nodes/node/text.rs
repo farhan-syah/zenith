@@ -13,7 +13,7 @@ use super::shared::{
 use super::suggest::check_unknown_props;
 use crate::validate::check::nodes::WalkCtx;
 use crate::validate::check::register_id;
-use crate::validate::check::visual::{VisualExpect, check_visual_prop};
+use crate::validate::check::visual::{VisualExpect, check_block_styles, check_visual_prop};
 
 pub(in crate::validate::check) fn check_text(
     t: &TextNode,
@@ -215,6 +215,17 @@ pub(in crate::validate::check) fn check_text(
             Some(t.id.clone()),
         ));
     }
+
+    // Per-block-role style decls: record every token reference so tokens
+    // referenced ONLY via a `block` decl are not falsely flagged unused,
+    // and check for missing or wrong-type token refs.
+    check_block_styles(
+        &t.id,
+        &t.block_styles,
+        referenced_token_ids,
+        resolved_tokens,
+        diagnostics,
+    );
 
     // Per-span visual properties. Spans inherit the node id as their
     // subject so token refs in `span ... fill=(token)".." font-weight=..`

@@ -29,7 +29,7 @@ use super::policy::{apply_policy, check_policy_entries};
 use super::recipes::check_recipes;
 use super::report::ValidationReport;
 use super::variants::check_variants;
-use super::visual::{VisualExpect, check_visual_prop};
+use super::visual::{VisualExpect, check_block_styles, check_visual_prop};
 use super::{fold, margin, safezone};
 
 /// Run the full document validation pass against the document's own in-file
@@ -472,6 +472,13 @@ pub fn validate_with_policy(
 
     // ── Document body id ──────────────────────────────────────────────────
     register_id(&doc.body.id, &mut seen_ids, &mut diagnostics);
+    check_block_styles(
+        &doc.body.id,
+        &doc.body.block_styles,
+        &mut referenced_token_ids,
+        resolved_tokens,
+        &mut diagnostics,
+    );
 
     // ── Pages and their children ──────────────────────────────────────────
     // The page index is 1-based (recto = odd, verso = even) and threaded into
@@ -496,6 +503,13 @@ pub fn validate_with_policy(
     for (page_idx0, page) in doc.body.pages.iter().enumerate() {
         let page_index_1based = page_idx0 + 1;
         register_id(&page.id, &mut seen_ids, &mut diagnostics);
+        check_block_styles(
+            &page.id,
+            &page.block_styles,
+            &mut referenced_token_ids,
+            resolved_tokens,
+            &mut diagnostics,
+        );
 
         // ── Per-page parity override validity ─────────────────────────────
         // `parity` forces this page's recto/verso. Only "recto"/"verso"

@@ -28,7 +28,6 @@ pub(super) fn transform_block_style(node: &KdlNode) -> Result<BlockStyle, ParseE
     let fill = optional_property_value(node, "fill");
     let align = optional_string_prop(node, "align").map(str::to_owned);
     let italic = optional_bool_prop(node, "italic");
-    let line_height = optional_property_value_aliased(node, "line-height", "line_height");
     let space_before = optional_dimension_prop(node, "space-before")
         .or_else(|| optional_dimension_prop(node, "space_before"));
     let space_after = optional_dimension_prop(node, "space-after")
@@ -42,7 +41,6 @@ pub(super) fn transform_block_style(node: &KdlNode) -> Result<BlockStyle, ParseE
         fill,
         align,
         italic,
-        line_height,
         space_before,
         space_after,
     })

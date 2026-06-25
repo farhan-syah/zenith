@@ -16,7 +16,7 @@ use super::super::chain::ChainAssignments;
 use super::super::field::FieldCtx;
 use super::super::paint::resolve_property_color;
 use super::super::table_flow::TableFlowAssignments;
-use super::super::text::{MeasureEnv, measure_text_wrapped_height};
+use super::super::text::{MeasureEnv, empty_md_blocks, measure_text_wrapped_height};
 use super::super::util::resolve_property_dimension_px;
 use super::super::{ComponentMap, NodeCtx, RenderCtx, compile_node};
 
@@ -78,6 +78,11 @@ impl<'a> TableEmitCtx<'a> {
             flows: self.flows,
             anchors: self.anchors,
             field_ctx: self.field_ctx,
+            // Table-cell markdown block layout is out of scope for this unit; a
+            // cell's markdown text node keeps the inline path (no regression).
+            md_blocks: empty_md_blocks(),
+            page_block_styles: &[],
+            doc_block_styles: &[],
         }
     }
 }

@@ -26,6 +26,7 @@ mod ctx;
 mod dropcap;
 mod emit;
 mod hyphen;
+mod markdown_block;
 mod measure;
 mod pack;
 mod shape;
@@ -36,7 +37,7 @@ mod wrap;
 // ── Public surface re-exported for sibling `compile` modules ────────────────
 
 pub(in crate::compile) use code_node::compile_code;
-pub(in crate::compile) use ctx::{NodeShape, ShapeEnv, TextCompileEnv};
+pub(in crate::compile) use ctx::{NodeShape, ShapeEnv, TextCompileEnv, empty_md_blocks};
 pub(in crate::compile) use hyphen::{
     HyphenationContext, en_us_hyphenator, flatten_lines_to_tokens,
 };

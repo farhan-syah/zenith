@@ -297,6 +297,27 @@ pub(in crate::compile) fn compile_text_sized(
         );
     }
 
+    // ── Markdown block-layout branch ─────────────────────────────────────
+    // A NON-CHAINED `text` node whose id is present in the parsed-markdown
+    // side-channel renders as vertically stacked, individually-styled blocks
+    // (headings, paragraphs, lists, code blocks, rules) instead of one flat
+    // wrapped run. Placed AFTER the chain early-exit so chained markdown nodes
+    // keep their current single-run behavior untouched. A node absent from the
+    // map (every non-markdown node, and synthetic-text callers) falls straight
+    // through to the historical path below — byte-identical.
+    if text.chain.is_none()
+        && let Some(blocks) = env.md_blocks.get(&text.id)
+    {
+        return super::markdown_block::compile_markdown_blocks(
+            text,
+            blocks,
+            env,
+            commands,
+            diagnostics,
+            ctx,
+        );
+    }
+
     // Skip silently if every span is empty (nothing to draw).
     if text.spans.iter().all(|s| s.text.is_empty()) {
         return 0.0;

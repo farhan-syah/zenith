@@ -19,7 +19,18 @@
 //! Pure transform: iterates pages and nodes in document order, no HashMap, no
 //! time, no randomness. Same input → same output.
 
-use zenith_core::{Document, Node, TextNode, parse_inline_markdown};
+use std::collections::BTreeMap;
+
+use zenith_core::{Document, MdBlock, Node, TextNode, parse_block_markdown, parse_inline_markdown};
+
+/// Side-channel map from `text` node id to its parsed block-level markdown.
+///
+/// Populated by [`resolve_markdown`] for every `text` node with
+/// `content_format == Some("markdown")`. Keyed by node id and ordered
+/// ([`BTreeMap`]) for determinism. The block-layout path in the text compiler
+/// (`compile_markdown_blocks`) reads this map; a node absent from it falls
+/// through to the historical inline path (byte-identical).
+pub(super) type MdBlockMap = BTreeMap<String, Vec<MdBlock>>;
 
 /// Whether `doc` contains any `text` node with `content_format == Some("markdown")`,
 /// anywhere in the page tree. Used by the `data = None` compile path to decide
@@ -68,15 +79,24 @@ fn node_has_markdown_text(node: &Node) -> bool {
 
 /// Apply the markdown-resolution pass to every page in `doc` in document order.
 ///
-/// For each `text` node with `content_format == Some("markdown")`, the span
-/// texts are concatenated and re-parsed as inline markdown. The node's spans
-/// are replaced with the parsed result. All other nodes are left untouched.
-pub(super) fn resolve_markdown(doc: &mut Document) {
+/// For each `text` node with `content_format == Some("markdown")`:
+/// - the span texts are concatenated and re-parsed as INLINE markdown, and the
+///   node's spans are replaced with the parsed result (kept so the chain path
+///   and the single-paragraph fallback render unchanged);
+/// - the SAME concatenated text is parsed as BLOCK-level markdown and the
+///   resulting `Vec<MdBlock>` is stored in the returned [`MdBlockMap`], keyed by
+///   node id. The block-layout path in the text compiler consumes this map.
+///
+/// All other nodes are left untouched. When no markdown node exists the returned
+/// map is empty and the document is unmodified (byte-identity).
+pub(super) fn resolve_markdown(doc: &mut Document) -> MdBlockMap {
+    let mut blocks: MdBlockMap = MdBlockMap::new();
     for page in &mut doc.body.pages {
         for node in &mut page.children {
-            resolve_node(node);
+            resolve_node(node, &mut blocks);
         }
     }
+    blocks
 }
 
 /// Recursively walk a node, applying markdown resolution to any `text` node
@@ -84,31 +104,31 @@ pub(super) fn resolve_markdown(doc: &mut Document) {
 ///
 /// EXHAUSTIVE over the [`Node`] enum so a new node kind forces a compile error
 /// here (the coverage guarantee, mirroring `data_resolve`).
-fn resolve_node(node: &mut Node) {
+fn resolve_node(node: &mut Node, blocks: &mut MdBlockMap) {
     match node {
-        Node::Text(n) => resolve_text(n),
+        Node::Text(n) => resolve_text(n, blocks),
         Node::Frame(n) => {
             for child in &mut n.children {
-                resolve_node(child);
+                resolve_node(child, blocks);
             }
         }
         Node::Group(n) => {
             for child in &mut n.children {
-                resolve_node(child);
+                resolve_node(child, blocks);
             }
         }
         Node::Table(n) => {
             for row in &mut n.rows {
                 for cell in &mut row.cells {
                     for child in &mut cell.children {
-                        resolve_node(child);
+                        resolve_node(child, blocks);
                     }
                 }
             }
         }
         Node::Unknown(n) => {
             for child in &mut n.children {
-                resolve_node(child);
+                resolve_node(child, blocks);
             }
         }
         // Leaf nodes that are not `text` carry no spans to markdown-parse.
@@ -138,7 +158,7 @@ fn resolve_node(node: &mut Node) {
 ///
 /// When `content_format` is `None`, `Some("plain")`, or any other value,
 /// the node's spans are left untouched (byte-identical).
-fn resolve_text(node: &mut TextNode) {
+fn resolve_text(node: &mut TextNode, blocks: &mut MdBlockMap) {
     if node.content_format.as_deref() != Some("markdown") {
         return;
     }
@@ -146,6 +166,13 @@ fn resolve_text(node: &mut TextNode) {
     // data-binding pre-pass, each span's text has already been resolved
     // from any `data-ref` binding. `span.text` is the authoritative content.
     let content: String = node.spans.iter().map(|s| s.text.as_str()).collect();
-    // Parse the concatenated string as inline markdown and replace spans.
+    // Parse the concatenated string as BLOCK-level markdown and record it in the
+    // side-channel keyed by node id (consumed by the block-layout path). The
+    // node id may be empty; the block-layout activation is gated on a non-empty
+    // match, so an id-less node simply falls through to the inline path below.
+    blocks.insert(node.id.clone(), parse_block_markdown(&content));
+    // Parse the concatenated string as inline markdown and replace spans. This
+    // is preserved so chained markdown nodes and the single-paragraph fallback
+    // render byte-identically to before.
     node.spans = parse_inline_markdown(&content);
 }
