@@ -95,7 +95,11 @@ pub(super) fn bar_rects(
         return Vec::new();
     }
 
-    let baseline_px = y_scale.map(0.0);
+    // Snap the value baseline to a whole device pixel. Bar segment edges are
+    // rounded to integers (below) so abutting stacked segments share an exact
+    // pixel boundary — without this, two fills meeting at a fractional y leave a
+    // 1px anti-aliased seam (background hairline) between them.
+    let baseline_px = y_scale.map(0.0).round();
     let slot_w = plot.w / n_categories as f64;
     let usable_w = slot_w * (1.0 - CATEGORY_PAD_FRAC);
     let left_pad = (slot_w - usable_w) / 2.0;
@@ -128,7 +132,7 @@ pub(super) fn bar_rects(
                             },
                             Some(&value) => {
                                 let bar_x = plot.x + c as f64 * slot_w + left_pad + s as f64 * step;
-                                let top = y_scale.map(value);
+                                let top = y_scale.map(value).round();
                                 let h = (baseline_px - top).abs();
                                 let y = top.min(baseline_px);
                                 BarRect {
@@ -167,8 +171,8 @@ pub(super) fn bar_rects(
                                 if let Some(slot) = cumulative.get_mut(c) {
                                     *slot = upper;
                                 }
-                                let top = y_scale.map(upper);
-                                let bottom = y_scale.map(lower);
+                                let top = y_scale.map(upper).round();
+                                let bottom = y_scale.map(lower).round();
                                 let y = top.min(bottom);
                                 let h = (bottom - top).abs();
                                 BarRect {
