@@ -17,14 +17,16 @@ pub(super) fn write_span(span: &TextSpan, out: &mut String, depth: usize) {
     out.push('"');
 
     // Inline props: fill, font-weight, italic, underline, strikethrough,
-    // vertical-align, highlight. `highlight` is emitted only when present so a
-    // span without it is byte-identical to before.
+    // highlight, code, link. Each is emitted only when present so a span
+    // without any of them is byte-identical to before.
     write_opt_property_value(out, "fill", &span.fill);
     write_opt_property_value(out, "font-weight", &span.font_weight);
     write_opt_bool(out, "italic", &span.italic);
     write_opt_bool(out, "underline", &span.underline);
     write_opt_bool(out, "strikethrough", &span.strikethrough);
     write_opt_property_value(out, "highlight", &span.highlight);
+    write_opt_bool(out, "code", &span.code);
+    write_opt_str(out, "link", &span.link);
     write_opt_str(out, "vertical-align", &span.vertical_align);
     write_opt_str(out, "footnote-ref", &span.footnote_ref);
 

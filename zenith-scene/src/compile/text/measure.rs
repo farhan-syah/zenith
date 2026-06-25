@@ -139,6 +139,11 @@ fn build_resolved_spans(
             // present for the shared `shape_words` signature; `None` is safe
             // because measurement only accumulates advances.
             highlight: None,
+            // `code` IS propagated so the measure path uses the mono family
+            // for code spans — ensuring the measured advance matches the
+            // rendered advance (mono glyphs differ from sans glyphs).
+            code: span.code == Some(true),
+            link: None,
             weight,
             style,
             font_size: span_font_size,

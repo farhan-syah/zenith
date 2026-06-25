@@ -572,6 +572,8 @@ fn op_spans_to_text_spans(spans: &[OpSpan]) -> Vec<TextSpan> {
             data_ref: None,
             data_format: None,
             highlight: None,
+            code: None,
+            link: None,
         })
         .collect()
 }

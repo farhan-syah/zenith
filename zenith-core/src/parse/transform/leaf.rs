@@ -928,6 +928,15 @@ pub(super) fn transform_span(node: &KdlNode) -> Result<TextSpan, ParseError> {
         .entry("highlight")
         .and_then(|e| entry_to_property_value(e).ok());
 
+    // Inline code mark: `code=#true` shapes this span in monospace + emits a
+    // subtle background rect. Absent → `None` (byte-identical).
+    let code = optional_bool_prop(node, "code");
+
+    // Hyperlink URL: `link="https://…"` renders the span underlined in the
+    // internal link color (unless `fill` is set) and retains the URL for
+    // future PDF annotation. Absent → `None` (byte-identical).
+    let link = optional_string_prop(node, "link").map(str::to_owned);
+
     Ok(TextSpan {
         text,
         fill,
@@ -940,6 +949,8 @@ pub(super) fn transform_span(node: &KdlNode) -> Result<TextSpan, ParseError> {
         data_ref,
         data_format,
         highlight,
+        code,
+        link,
     })
 }
 

@@ -99,6 +99,8 @@ fn synth_footnote_text(fnote: &FootnoteNode, marker: &str, x: f64, y: f64, w: f6
         data_ref: None,
         data_format: None,
         highlight: None,
+        code: None,
+        link: None,
     });
     spans.extend(fnote.spans.iter().cloned());
 

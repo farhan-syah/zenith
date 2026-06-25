@@ -780,6 +780,8 @@ fn minimal_shape(id: &str, kind: Option<&str>, h_align: Option<&str>) -> Node {
             data_ref: None,
             data_format: None,
             highlight: None,
+            code: None,
+            link: None,
         }],
         style: None,
         opacity: None,

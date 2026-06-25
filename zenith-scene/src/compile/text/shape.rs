@@ -14,6 +14,17 @@ use crate::ir::{Color, SceneGlyph};
 
 use super::ctx::{NodeShape, ShapeEnv};
 
+/// The bundled monospace family used for `code` spans and the `code` node.
+pub(in crate::compile) const CODE_MONO_FAMILY: &str = "Noto Sans Mono";
+
+/// Default background color for inline `code` spans: a light neutral gray
+/// (#F0F0F0). Internal only — no author token required.
+pub(in crate::compile) const CODE_BG: Color = Color::srgb(240, 240, 240, 255);
+
+/// Default color for `link` spans: conventional link blue (#0066CC). Applied
+/// only when the span has no explicit `fill`. Internal only.
+pub(in crate::compile) const LINK_COLOR: Color = Color::srgb(0, 102, 204, 255);
+
 /// A re-shaped word plus the visual attributes inherited from its source span.
 ///
 /// A word may shape to multiple font-runs (per-glyph fallback), so `runs` is a
@@ -28,6 +39,13 @@ pub(in crate::compile) struct WordToken {
     /// to a span without it); `Some(c)` causes a background FillRect to be
     /// emitted behind the glyph run by the emit path.
     pub(in crate::compile) highlight: Option<Color>,
+    /// `true` when this word was shaped from a `code=#true` span. Causes a
+    /// `CODE_BG` background FillRect to be emitted behind the glyph run.
+    pub(in crate::compile) code: bool,
+    /// Retained hyperlink URL from a `link="…"` span. `None` = no link.
+    /// Carried for future PDF annotation / GUI use; not rendered beyond the
+    /// color + underline treatment applied during resolution.
+    pub(in crate::compile) link: Option<String>,
     /// Super/subscript baseline shift in pixels (negative = up; 0 = baseline).
     /// Applied per-glyph-run by [`super::emit::emit_lines`] on top of the line
     /// baseline.
@@ -77,6 +95,13 @@ pub(in crate::compile) struct ResolvedSpan {
     pub(in crate::compile) strikethrough: bool,
     /// Per-span highlight background color (`None` = no highlight).
     pub(in crate::compile) highlight: Option<Color>,
+    /// `true` when this span was authored with `code=#true`. The shaper
+    /// switches the family to [`CODE_MONO_FAMILY`] and the emit path emits
+    /// a [`CODE_BG`] background rect (like highlight but fixed color).
+    pub(in crate::compile) code: bool,
+    /// Retained hyperlink URL (`None` = no link). Carried through to
+    /// [`WordToken`] for future PDF annotation use.
+    pub(in crate::compile) link: Option<String>,
     pub(in crate::compile) weight: u16,
     pub(in crate::compile) style: FontStyle,
     /// The span's OWN font size (reduced for super/subscript). When equal to the
@@ -153,6 +178,15 @@ pub(in crate::compile) fn shape_words(
         // captured ONLY from a full-size word so the line grid stays uniform.
         let is_vertical_align = shaped.baseline_dy != 0.0;
         let word_font_size = shaped.font_size;
+        // `code` spans override the node family with the bundled mono face.
+        // All other spans use the node-level `families` slice unchanged.
+        let code_families_buf: Vec<String>;
+        let span_families: &[String] = if shaped.code {
+            code_families_buf = vec![CODE_MONO_FAMILY.to_owned()];
+            &code_families_buf
+        } else {
+            families
+        };
         // Split the span text into paragraphs on `\n`; each segment after the
         // first increments the running paragraph index. `split('\n')` always
         // yields ≥1 segment, so a span without a newline keeps `paragraph`.
@@ -163,7 +197,7 @@ pub(in crate::compile) fn shape_words(
             for word in segment.split_whitespace() {
                 let req = ShapeRequest {
                     text: word,
-                    families,
+                    families: span_families,
                     weight: shaped.weight,
                     style: shaped.style,
                     font_size: word_font_size,
@@ -195,6 +229,8 @@ pub(in crate::compile) fn shape_words(
                             underline: shaped.underline,
                             strikethrough: shaped.strikethrough,
                             highlight: shaped.highlight,
+                            code: shaped.code,
+                            link: shaped.link.clone(),
                             baseline_dy: shaped.baseline_dy,
                             runs: result.runs,
                             src: WordSource {

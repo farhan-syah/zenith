@@ -26,8 +26,8 @@ use super::measure::{
     MeasureEnv, font_size_px, measure_text_wrapped_height, resolve_text_families,
 };
 use super::shape::{
-    ResolvedSpan, emit_glyph_missing, resolve_font_weight, resolve_vertical_align,
-    run_to_scene_glyphs,
+    CODE_BG, CODE_MONO_FAMILY, LINK_COLOR, ResolvedSpan, emit_glyph_missing, resolve_font_weight,
+    resolve_vertical_align, run_to_scene_glyphs,
 };
 use super::tableader::compile_tab_leader;
 use super::wrap::{WrapEnv, WrapGeom, emit_wrap_path};
@@ -329,6 +329,8 @@ pub(in crate::compile) fn compile_text_sized(
                         data_ref: None,
                         data_format: None,
                         highlight: None,
+                        code: None,
+                        link: None,
                     }),
                     None => diagnostics.push(Diagnostic::advisory(
                         "footnote.unresolved_ref",
@@ -517,6 +519,10 @@ pub(in crate::compile) fn compile_text_sized(
         strikethrough: bool,
         /// Per-span highlight background color (`None` = no highlight).
         highlight: Option<Color>,
+        /// `true` when this span was authored with `code=#true`.
+        code: bool,
+        /// Retained hyperlink URL from `link="…"`. `None` = no link.
+        link: Option<String>,
         text: String,
         weight: u16,
         style: FontStyle,
@@ -550,11 +556,23 @@ pub(in crate::compile) fn compile_text_sized(
             continue;
         }
 
-        // Per-span fill: span.fill overrides node fill; default black.
-        let fill_prop = span.fill.as_ref().or(node_fill_prop);
-        let mut color = fill_prop
+        // Per-span fill precedence: a span-level `fill` wins; then a `link` span
+        // uses the internal LINK_COLOR; then the inherited node fill; then black.
+        // A link's conventional color thus overrides an inherited node fill but
+        // not a fill the author set directly on the span. Non-link spans keep the
+        // prior `span.fill else node.fill else black` resolution (byte-identical).
+        let is_link = span.link.is_some();
+        let raw_color = span
+            .fill
+            .as_ref()
             .and_then(|fp| resolve_property_color(fp, resolved, diagnostics, &text.id))
+            .or(is_link.then_some(LINK_COLOR))
+            .or_else(|| {
+                node_fill_prop
+                    .and_then(|fp| resolve_property_color(fp, resolved, diagnostics, &text.id))
+            })
             .unwrap_or(Color::srgb(0, 0, 0, 255));
+        let mut color = raw_color;
         color.a = (color.a as f64 * color_opacity).round() as u8;
 
         // Per-span highlight background color. Absent → `None` (no highlight,
@@ -563,6 +581,10 @@ pub(in crate::compile) fn compile_text_sized(
             .highlight
             .as_ref()
             .and_then(|hp| resolve_property_color(hp, resolved, diagnostics, &text.id));
+
+        // `code` and `link` flags for this span.
+        let code = span.code == Some(true);
+        let link = span.link.clone();
 
         // Per-span weight: span.font_weight overrides node weight; 400.
         let weight_prop = span.font_weight.as_ref().or(node_weight_prop);
@@ -581,9 +603,19 @@ pub(in crate::compile) fn compile_text_sized(
             resolve_vertical_align(span.vertical_align.as_deref(), font_size);
         let is_vertical_align = baseline_dy != 0.0;
 
+        // `code` spans use the bundled mono family instead of the node family.
+        // Allocate the override slice only when needed; non-code spans are
+        // byte-identical (they reuse the node-level `families` slice directly).
+        let mono_families_buf = if code {
+            vec![CODE_MONO_FAMILY.to_owned()]
+        } else {
+            vec![]
+        };
+        let span_families: &[String] = if code { &mono_families_buf } else { &families };
+
         let req = ShapeRequest {
             text: &span.text,
-            families: &families,
+            families: span_families,
             weight,
             style,
             font_size: span_font_size,
@@ -629,9 +661,14 @@ pub(in crate::compile) fn compile_text_sized(
                     shaped_spans.push(ShapedSpan {
                         run,
                         color,
-                        underline: span.underline == Some(true),
+                        // `link` spans are underlined by default (in addition to
+                        // any explicit underline). Explicit `underline=#true` is
+                        // already honored; here we OR-in the link-driven underline.
+                        underline: span.underline == Some(true) || is_link,
                         strikethrough: span.strikethrough == Some(true),
                         highlight,
+                        code,
+                        link: link.clone(),
                         text: run_text,
                         weight,
                         style,
@@ -809,10 +846,9 @@ pub(in crate::compile) fn compile_text_sized(
             };
             let glyphs = run_to_scene_glyphs(&shaped.run);
 
-            // Per-span highlight: a filled background rect covering the full
-            // ascent-to-descent band behind the span's glyphs and decorations.
-            // Emitted FIRST so that underline, strikethrough, and glyphs all
-            // paint on top of it. Absent (`None`) → no rect, byte-identical.
+            // Per-span background rects: highlight (author-chosen color) and/or
+            // code (internal CODE_BG). Emitted FIRST so glyphs and decorations
+            // paint on top. Absent → no rect, byte-identical.
             if let Some(hl_color) = shaped.highlight {
                 let hl_y = baseline_y - shaped.run.ascent as f64;
                 let hl_h = (shaped.run.ascent + shaped.run.descent) as f64;
@@ -822,6 +858,17 @@ pub(in crate::compile) fn compile_text_sized(
                     w: run_advance,
                     h: hl_h,
                     paint: Paint::solid(hl_color),
+                });
+            }
+            if shaped.code {
+                let bg_y = baseline_y - shaped.run.ascent as f64;
+                let bg_h = (shaped.run.ascent + shaped.run.descent) as f64;
+                commands.push(SceneCommand::FillRect {
+                    x: x_cursor,
+                    y: bg_y,
+                    w: run_advance,
+                    h: bg_h,
+                    paint: Paint::solid(CODE_BG),
                 });
             }
 
@@ -877,6 +924,8 @@ pub(in crate::compile) fn compile_text_sized(
                 underline: s.underline,
                 strikethrough: s.strikethrough,
                 highlight: s.highlight,
+                code: s.code,
+                link: s.link.clone(),
                 weight: s.weight,
                 style: s.style,
                 font_size: s.font_size,

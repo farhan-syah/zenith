@@ -796,6 +796,8 @@ mod indent_tests {
             underline: false,
             strikethrough: false,
             highlight: None,
+            code: false,
+            link: None,
             baseline_dy: 0.0,
             src: WordSource {
                 text: String::new(),

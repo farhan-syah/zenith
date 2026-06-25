@@ -10,7 +10,7 @@ use crate::ir::{Color, Paint, SceneCommand};
 
 use super::ctx::{EmitStyle, UniformGeom};
 use super::pack::Line;
-use super::shape::{WordToken, run_to_scene_glyphs};
+use super::shape::{CODE_BG, WordToken, run_to_scene_glyphs};
 
 /// Emit decoration FillRects + DrawGlyphRun commands for a sequence of packed
 /// lines, stacked by `line_height`, with per-line horizontal `align`.
@@ -145,10 +145,10 @@ pub(in crate::compile) fn emit_lines_profiled<F>(
             }
         }
 
-        // Highlight background rects FIRST (painted before decorations and
-        // glyphs so everything sits on top). One FillRect per highlighted word
-        // covering the full ascent-to-descent band of that word's run.
-        // Words without a highlight color emit nothing (byte-identical).
+        // Background rects FIRST (painted before decorations and glyphs so
+        // everything sits on top). One FillRect per word for each active
+        // background: `highlight` (author color) and/or `code` (CODE_BG).
+        // Words without either emit nothing (byte-identical).
         for (wi, word) in visual.iter().enumerate() {
             if let Some(hl_color) = word.highlight {
                 let wx = word_x.get(wi).copied().unwrap_or(base_x);
@@ -164,6 +164,20 @@ pub(in crate::compile) fn emit_lines_profiled<F>(
                         w: word.advance,
                         h: hl_h,
                         paint: Paint::solid(hl_color),
+                    });
+                }
+            }
+            if word.code {
+                let wx = word_x.get(wi).copied().unwrap_or(base_x);
+                if let Some(first_run) = word.runs.first() {
+                    let bg_y = baseline_y - first_run.ascent as f64;
+                    let bg_h = (first_run.ascent + first_run.descent) as f64;
+                    commands.push(SceneCommand::FillRect {
+                        x: wx,
+                        y: bg_y,
+                        w: word.advance,
+                        h: bg_h,
+                        paint: Paint::solid(CODE_BG),
                     });
                 }
             }
@@ -260,6 +274,8 @@ mod rtl_tests {
             underline: false,
             strikethrough: false,
             highlight: None,
+            code: false,
+            link: None,
             baseline_dy: 0.0,
             src: WordSource {
                 text: String::new(),

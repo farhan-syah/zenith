@@ -57,9 +57,9 @@ use crate::ir::Color;
 use super::paint::resolve_property_color;
 use super::style_prop;
 use super::text::{
-    HyphenationContext, Line, NodeShape, ResolvedSpan, ShapeEnv, WordMetrics, en_us_hyphenator,
-    flatten_lines_to_tokens, pack_lines, resolve_family_with_fallback, resolve_font_family_name,
-    resolve_font_weight, resolve_vertical_align, shape_words,
+    HyphenationContext, LINK_COLOR, Line, NodeShape, ResolvedSpan, ShapeEnv, WordMetrics,
+    en_us_hyphenator, flatten_lines_to_tokens, pack_lines, resolve_family_with_fallback,
+    resolve_font_family_name, resolve_font_weight, resolve_vertical_align, shape_words,
 };
 use super::util::resolve_property_dimension_px;
 
@@ -227,10 +227,20 @@ fn resolve_chain_style(
         if span.text.is_empty() {
             continue;
         }
-        // Per-span fill: span.fill overrides node fill; default black.
-        let fill_prop = span.fill.as_ref().or(node_fill_prop);
-        let color = fill_prop
+        // Per-span fill precedence: span-level `fill` > `link` color > inherited
+        // node fill > black. A link's conventional color overrides an inherited
+        // node fill but not a fill set directly on the span. Non-link spans keep
+        // the prior `span.fill else node.fill else black` resolution (byte-identical).
+        let is_link = span.link.is_some();
+        let color = span
+            .fill
+            .as_ref()
             .and_then(|fp| resolve_property_color(fp, resolved, diagnostics, &source.id))
+            .or(is_link.then_some(LINK_COLOR))
+            .or_else(|| {
+                node_fill_prop
+                    .and_then(|fp| resolve_property_color(fp, resolved, diagnostics, &source.id))
+            })
             .unwrap_or(Color::srgb(0, 0, 0, 255));
         // Per-span highlight background color (token ref or raw color string).
         // Absent → `None` (no highlight, byte-identical to a span without it).
@@ -238,6 +248,10 @@ fn resolve_chain_style(
             .highlight
             .as_ref()
             .and_then(|hp| resolve_property_color(hp, resolved, diagnostics, &source.id));
+        // `code` span: bool flag that drives mono-family shaping + bg rect.
+        let code = span.code == Some(true);
+        // `link` span: URL retained for future annotation use.
+        let link = span.link.clone();
         let weight_prop = span.font_weight.as_ref().or(node_weight_prop);
         let weight = resolve_font_weight(weight_prop, resolved, 400);
         let style = if span.italic == Some(true) {
@@ -252,9 +266,12 @@ fn resolve_chain_style(
         spans.push(ResolvedSpan {
             text: span.text.clone(),
             color,
-            underline: span.underline == Some(true),
+            // `link` spans are underlined by default; explicit underline OR-ed in.
+            underline: span.underline == Some(true) || is_link,
             strikethrough: span.strikethrough == Some(true),
             highlight,
+            code,
+            link,
             weight,
             style,
             font_size: span_font_size,

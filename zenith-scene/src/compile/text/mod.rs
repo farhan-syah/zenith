@@ -45,7 +45,7 @@ pub(in crate::compile) use measure::{
 };
 pub(in crate::compile) use pack::{Line, pack_lines};
 pub(in crate::compile) use shape::{
-    ResolvedSpan, WordMetrics, resolve_family_with_fallback, resolve_font_family_name,
+    LINK_COLOR, ResolvedSpan, WordMetrics, resolve_family_with_fallback, resolve_font_family_name,
     resolve_font_weight, resolve_vertical_align, run_to_scene_glyphs, shape_words,
 };
 pub(in crate::compile) use text_node::compile_text;

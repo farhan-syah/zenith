@@ -92,6 +92,19 @@ pub struct TextSpan {
     /// ascent-to-descent band so the text reads like a marker-pen highlight.
     /// KDL: `span highlight=(token)"color.mark" "text"`.
     pub highlight: Option<PropertyValue>,
+    /// Inline code mark: when `Some(true)`, the span is rendered in the bundled
+    /// monospace family ("Noto Sans Mono") with a subtle background rect behind
+    /// it (the internal `CODE_BG` default color). `None` or `Some(false)` keeps
+    /// the node's own font family (byte-identical to a span without it).
+    /// KDL: `span "text" code=#true`.
+    pub code: Option<bool>,
+    /// Hyperlink URL carried on the span. `None` = no link (byte-identical to a
+    /// span without it). When `Some(url)`, the span is rendered with an underline
+    /// and the internal `LINK_COLOR` default color when the span has no explicit
+    /// `fill`; a span that already has a `fill` keeps its author color. The URL
+    /// is retained on the span for future PDF annotation / GUI use; no annotation
+    /// is emitted now. KDL: `span "text" link="https://example.com"`.
+    pub link: Option<String>,
 }
 
 /// How an `image` node aligns its content within the declared box when the

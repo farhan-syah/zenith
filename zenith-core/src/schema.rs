@@ -110,9 +110,14 @@ pub fn node_content(kind: &str) -> Option<NodeContentDescriptor> {
         "text" => Some(NodeContentDescriptor {
             description: "One or more `span` children carry the text runs. \
                 Each span takes a string argument and optional inline style props: \
-                fill, font-weight, italic, underline, strikethrough, highlight, vertical-align, footnote-ref. \
+                fill, font-weight, italic, underline, strikethrough, highlight, code, link, \
+                vertical-align, footnote-ref. \
                 `highlight` is a per-span background color (token ref or raw color string) \
-                rendered behind the glyph run like a marker-pen highlight.",
+                rendered behind the glyph run like a marker-pen highlight. \
+                `code=#true` renders the span in the bundled monospace family with a subtle \
+                background, suitable for inline code. \
+                `link=\"url\"` renders the span underlined in the default link color (unless \
+                `fill` is set) and retains the URL for future PDF annotation / GUI use.",
             example: concat!(
                 "span \"Hello \"\n",
                 "span \"world\" font-weight=(token)\"weight.bold\" italic=#true",

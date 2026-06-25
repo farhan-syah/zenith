@@ -86,6 +86,8 @@ fn reshape_fragment(
         underline: donor.underline,
         strikethrough: donor.strikethrough,
         highlight: donor.highlight,
+        code: donor.code,
+        link: donor.link.clone(),
         baseline_dy: donor.baseline_dy,
         src: WordSource {
             text: text.to_owned(),
@@ -279,6 +281,8 @@ mod break_word_tests {
             underline: false,
             strikethrough: false,
             highlight: None,
+            code: false,
+            link: None,
             weight: 400,
             style: FontStyle::Normal,
             font_size: 16.0,
