@@ -153,7 +153,7 @@ zenith version=1 {
 }
 ```
 
-See [`examples/`](./examples) for runnable `.zen` files covering shapes, rich text, code blocks, images, frames/groups, multi-page documents and styles, plus the richer features — `gradient`, `shadow`, `blur`, `filter`, `mask`, `table`, `flowchart` (shapes + connectors), charts (bar/line/area/pie/donut/sparkline, with legends, value labels, and data binding), and `anchors`.
+See [`examples/`](./examples) for runnable `.zen` files covering shapes, rich text, inline `markdown` (loaded from an external file), code blocks, images, frames/groups, multi-page documents and styles, plus the richer features — `gradient`, `shadow`, `blur`, `filter`, `mask`, `table`, `flowchart` (shapes + connectors), charts (bar/line/area/pie/donut/sparkline, with legends, value labels, and data binding), and `anchors`.
 
 ## Why
 
@@ -236,7 +236,8 @@ Everything that touches the render path is **deterministic and C-free**: no time
 - **Plain-text `.zen` format** — KDL v2 source with `project` / `tokens` / `styles` / `document` / `page` structure; every node carries a stable id.
 - **Design tokens** — `color` (sRGB **and** native CMYK), `dimension`, `number`, `fontFamily`, `fontWeight`, `gradient` (linear/radial), `shadow`, `filter`, and `mask`, with alias chains and cycle detection.
 - **A full node set** — `rect`, `ellipse`, `line`, `polygon`, `polyline`, `text`, `code`, `image`, `frame`, `group`, `pattern`, `shape`, `connector`, `chart`, `instance`, `field`, `footnote`, `toc`, and `table`, plus lossless pass-through of unknown nodes for forward compatibility.
-- **Real typography** — `rustybuzz` shaping with bundled Noto Sans / Noto Sans Mono, font fallback, Knuth–Liang hyphenation, rich inline spans, threaded text flow (chains), drop-caps, tab-leaders, text runaround, and a `font.glyph_missing` diagnostic when a glyph is unavailable.
+- **Real typography** — `rustybuzz` shaping with bundled Noto Sans / Noto Sans Mono, font fallback, Knuth–Liang hyphenation, rich inline spans (bold/italic/underline/strikethrough/highlight/inline-code/link), threaded text flow (chains), drop-caps, tab-leaders, text runaround, and a `font.glyph_missing` diagnostic when a glyph is unavailable.
+- **Lean long-form text** — keep the `.zen` small by sourcing body copy from an external `.md`/`.txt` file (`text src="copy/article.md"`) or a data field, and opt into inline **markdown** (`format="markdown"`: `**bold**`, `*italic*`, `==highlight==`, `++underline++`, `~~strike~~`, `` `code` ``, `[label](url)`) that compiles to styled spans — the external text stays the editable source of truth.
 - **Visual effects** — linear & radial gradients, layered shadows, Gaussian blur, feathered masks, 12 Porter-Duff blend modes, opacity cascade, per-corner radius, and image fit / clip-shape / object-position.
 - **Anchors** — 9-point placement relative to the page, a safe-zone, the parent container, or a sibling node (precedence: zone > sibling > parent > page), all materializing to explicit, deterministic geometry (absent anchor = byte-identical to hand-placed coordinates).
 - **Procedural recipes** — a `recipes` provenance block records how a generated motif was made (kind, seed, generator, params, palette tokens, expanded node ids), inspectable and editable via typed recipe transactions, so procedural visuals stay reproducible and re-tunable.
@@ -247,7 +248,7 @@ Everything that touches the render path is **deterministic and C-free**: no time
 - **Library subsystem** — embedded preset packs (`@zenith/flowchart`, `@zenith/filters`, `@zenith/masks`, `@zenith/brand-kit`); `library add` materializes an item into a self-contained document with `libraries` + `provenance` tracking. Inspect any item with `zenith library show <pkg>#<item>`.
 - **AI-asset provenance** — when an image/illustration from an image model is composed in as an `asset`, Zenith records how it was made: `ai-prompt`, `ai-model`, `ai-provider`, `ai-seed`, `ai-license`, `ai-source-rights`, `ai-safety-status`, `ai-reuse-policy` (alongside the `sha256` content lock). Run `zenith schema asset` for the full field list.
 - **Variable-data merge** — `role="data.<column>"` bindings drive CSV mail-merge across text and image columns and multi-page templates, with a per-row JSON report and a byte-reproducible manifest.
-- **Self-describing CLI** — `zenith schema` emits the authorable surface (every node kind + its attributes, the transaction op set, and the `page`/`asset`/`document` attributes) as human text or `--json`, so an agent discovers what it can author from the CLI itself rather than guessing — paired with `zenith validate`'s actionable diagnostics for the fix loop.
+- **Self-describing CLI** — `zenith schema` emits the authorable surface (every node kind + its attributes, the transaction op set, token types, and the `page`/`asset`/`document`/`variant`/`diagnostics`/`brand` surfaces) as human text or `--json`, so an agent discovers what it can author from the CLI itself rather than guessing — paired with `zenith validate`'s actionable diagnostics for the fix loop.
 
 </details>
 
