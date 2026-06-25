@@ -11,6 +11,7 @@ use zenith_layout::{ShapeRequest, TextDirection, TextLayoutEngine};
 use crate::ir::{Color, Paint, SceneCommand};
 
 use super::super::NodeCtx;
+use super::super::paint::resolve_property_color;
 use super::super::text::run_to_scene_glyphs;
 use super::axis::format_tick_label;
 use super::frame::PlotArea;
@@ -213,10 +214,56 @@ pub(super) fn stacked_max(chart: &ChartNode) -> f64 {
     max
 }
 
+// ── Value-label placement ──────────────────────────────────────────────────────
+
+/// Where (and whether) per-bar value labels are drawn.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(super) enum ValueLabelMode {
+    /// No value labels.
+    Off,
+    /// Above each bar (good for grouped/single; stacked lower segments hide).
+    Top,
+    /// Centered inside each bar/segment (every stacked segment stays visible).
+    Center,
+}
+
+impl ValueLabelMode {
+    /// Resolve the mode from the optional `value-labels` property.
+    ///
+    /// `"none"` → Off, `"top"` → Top, `"center"` → Center. `"auto"`, `None`, and
+    /// any unrecognised value resolve to the smart default: stacked bars center
+    /// (so each segment shows its own value), everything else labels on top.
+    pub(super) fn resolve(value_labels: Option<&str>, is_stacked: bool) -> ValueLabelMode {
+        match value_labels {
+            Some("none") => ValueLabelMode::Off,
+            Some("top") => ValueLabelMode::Top,
+            Some("center") => ValueLabelMode::Center,
+            _ => {
+                if is_stacked {
+                    ValueLabelMode::Center
+                } else {
+                    ValueLabelMode::Top
+                }
+            }
+        }
+    }
+}
+
+/// Pick a readable label color for text drawn ON `fill`: dark text on light
+/// fills, light text on dark fills. Uses the perceptual luminance weighting.
+fn contrast_color(fill: Color) -> Color {
+    let lum = (0.299 * fill.r as f64 + 0.587 * fill.g as f64 + 0.114 * fill.b as f64) / 255.0;
+    if lum > 0.55 {
+        Color::srgb(20, 20, 20, 255)
+    } else {
+        Color::srgb(255, 255, 255, 255)
+    }
+}
+
 // ── emit_bars ─────────────────────────────────────────────────────────────────
 
 /// Resolve series colors and emit `FillRect` commands for every bar, followed
-/// by a value label floated just above (or inside) each bar.
+/// by a value label placed per the chart's `value-labels` mode.
 ///
 /// Bars with `w <= 0` or `h < 0.5` are skipped. An empty series list or an
 /// empty series produces no commands.
@@ -235,6 +282,15 @@ pub(super) fn emit_bars(
     if rects.is_empty() {
         return;
     }
+
+    // Value-label mode + optional explicit color override (a (token) ref);
+    // when absent the color is derived per-bar (contrast inside / dark on top).
+    let label_mode =
+        ValueLabelMode::resolve(chart.value_labels.as_deref(), mode == BarMode::Stacked);
+    let explicit_label_color = chart
+        .value_color
+        .as_ref()
+        .and_then(|p| resolve_property_color(p, cx.resolved, diagnostics, &chart.id));
 
     // Hoisted outside the per-series/per-bar loops: one allocation for all
     // value-label shape requests in this chart.
@@ -265,6 +321,10 @@ pub(super) fn emit_bars(
                     paint: paint.clone(),
                 });
 
+                if label_mode == ValueLabelMode::Off {
+                    continue;
+                }
+
                 // Value label: the raw data value for this bar.
                 let value = match chart.series.get(s).and_then(|sr| sr.values.get(c)) {
                     Some(v) => *v,
@@ -274,10 +334,13 @@ pub(super) fn emit_bars(
                 emit_value_label(
                     value,
                     *rect,
+                    color,
                     LabelCtx {
                         plot,
                         families: &value_label_families,
                         chart_id: &chart.id,
+                        placement: label_mode,
+                        explicit: explicit_label_color,
                     },
                     cx,
                     commands,
@@ -298,26 +361,39 @@ struct LabelCtx<'a> {
     plot: &'a PlotArea,
     families: &'a [String],
     chart_id: &'a str,
+    placement: ValueLabelMode,
+    /// Explicit `value-color` override; when `None` the color is derived from
+    /// the final placement (contrast on a fill, dark on the plot background).
+    explicit: Option<Color>,
 }
 
-/// Shape and emit a numeric value label above (or inside) a bar.
+/// Shape and emit a numeric value label for one bar, given the bar's `fill`.
 ///
-/// The label is centered horizontally over the bar. Normally placed 3 px above
-/// the bar top; if that would clip above the plot area the label is drawn 12 px
-/// below the bar top (inside the bar).
+/// Placement follows `lc.placement`:
+/// - `Top`: 3 px above the bar; if that clips the plot top it falls inside.
+/// - `Center`: vertically centered inside the bar/segment. Segments shorter than
+///   the label height are skipped so text never overflows its segment.
 ///
-/// `lc` bundles the per-chart context shared across every bar (plot rect, the
-/// hoisted font-family list, and the chart id) so the allocation stays out of
-/// the per-bar loop and the argument list stays within bounds.
+/// Color: `lc.explicit` wins if set; otherwise a label that ends up ON the bar
+/// fill (centered, or a top label that fell inside) uses a contrasting color
+/// against `fill`, while a label above the bar uses the dark plot-background color.
+///
+/// `lc` bundles the per-chart context shared across every bar so the allocation
+/// stays out of the per-bar loop and the argument list stays bounded.
 fn emit_value_label(
     value: f64,
     rect: BarRect,
+    fill: Color,
     lc: LabelCtx,
     cx: NodeCtx,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let plot = lc.plot;
+    // A centered label must fit inside its segment — skip tiny segments.
+    if lc.placement == ValueLabelMode::Center && rect.h < 12.0 {
+        return;
+    }
     let label = format_tick_label(value);
     let req = ShapeRequest {
         text: &label,
@@ -344,12 +420,29 @@ fn emit_value_label(
             let total_advance: f64 = result.runs.iter().map(|r| r.advance_width as f64).sum();
             let ascent: f64 = result.runs.first().map(|r| r.ascent as f64).unwrap_or(7.0);
 
-            // Prefer label above bar; fall back to inside if it clips the plot top.
-            let baseline_y = if rect.y - 3.0 - ascent >= plot.y {
-                rect.y - 3.0
-            } else {
-                rect.y + 12.0
+            // Determine baseline + whether the label lands ON the bar fill.
+            let (baseline_y, on_fill) = match lc.placement {
+                // Centered: cap height in the middle of the segment, on the fill.
+                ValueLabelMode::Center => (rect.y + rect.h / 2.0 + ascent * 0.35, true),
+                // Top: above the bar; if it would clip the plot top, fall inside.
+                // Off is unreachable here (emit_bars skips labels when mode is Off),
+                // but must be listed to avoid a wildcard over a Zenith enum.
+                ValueLabelMode::Top | ValueLabelMode::Off => {
+                    if rect.y - 3.0 - ascent >= plot.y {
+                        (rect.y - 3.0, false)
+                    } else {
+                        (rect.y + 12.0, true)
+                    }
+                }
             };
+
+            // Color: explicit override wins; else contrast on the fill when the
+            // label sits on the bar, dark on the plot background when above it.
+            let color = lc.explicit.unwrap_or(if on_fill {
+                contrast_color(fill)
+            } else {
+                VALUE_LABEL_COLOR
+            });
 
             // Centered horizontally over the bar.
             let mut label_x = rect.x + rect.w / 2.0 - total_advance / 2.0;
@@ -362,7 +455,7 @@ fn emit_value_label(
                     y: baseline_y,
                     font_id: run.font_id.clone(),
                     font_size: run.font_size,
-                    color: VALUE_LABEL_COLOR,
+                    color,
                     stroke_color: None,
                     stroke_width: None,
                     glyphs,
@@ -514,6 +607,30 @@ mod tests {
         assert_eq!(BarMode::from_opt(None), BarMode::Grouped);
         assert_eq!(BarMode::from_opt(Some("grouped")), BarMode::Grouped);
         assert_eq!(BarMode::from_opt(Some("x")), BarMode::Grouped);
+    }
+
+    #[test]
+    fn value_label_mode_resolve() {
+        use ValueLabelMode::*;
+        // Explicit values.
+        assert_eq!(ValueLabelMode::resolve(Some("none"), false), Off);
+        assert_eq!(ValueLabelMode::resolve(Some("top"), true), Top);
+        assert_eq!(ValueLabelMode::resolve(Some("center"), false), Center);
+        // auto / None / unknown → smart default by stacking.
+        assert_eq!(ValueLabelMode::resolve(Some("auto"), true), Center);
+        assert_eq!(ValueLabelMode::resolve(Some("auto"), false), Top);
+        assert_eq!(ValueLabelMode::resolve(None, true), Center);
+        assert_eq!(ValueLabelMode::resolve(None, false), Top);
+        assert_eq!(ValueLabelMode::resolve(Some("???"), true), Center);
+    }
+
+    #[test]
+    fn contrast_color_picks_readable_text() {
+        // Dark fill → light text; light fill → dark text.
+        let dark = contrast_color(Color::srgb(20, 40, 80, 255));
+        assert_eq!((dark.r, dark.g, dark.b), (255, 255, 255));
+        let light = contrast_color(Color::srgb(240, 240, 200, 255));
+        assert_eq!((light.r, light.g, light.b), (20, 20, 20));
     }
 
     #[test]
