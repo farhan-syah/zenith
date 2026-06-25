@@ -72,8 +72,13 @@ Zenith is deterministic and auditable; lean into that instead of guessing.
    each line with `\` to continue), and booleans are written `#true` / `#false`.
 3. **Validate.** Run `zenith validate <file> --json` after every change. **Never finalize
    while hard (Error) diagnostics remain.** Fix at the source.
-4. **Render to inspect.** `zenith render <file> --png out.png` (or `--all-pages <dir>` for a
-   contact sheet, `--pdf` for print). Actually look at the output before declaring success.
+4. **Render to inspect — then actually LOOK.** `zenith render <file> --png out.png` (or
+   `--all-pages <dir>` for a contact sheet, `--pdf` for print), then OPEN the PNG and visually
+   verify before declaring success. Check, concretely: text is centered where you intended (both
+   axes), nothing overlaps or is clipped, labels sit inside their boxes, spacing/alignment look
+   deliberate. A clean `validate` does NOT mean it looks right — validation can't see a label
+   stuck to the top of a button or two boxes overlapping. If something is off, fix it; never
+   report "done" on a render you didn't inspect.
 5. **Iterate**, then report what changed and where the output is.
 
 Run `zenith fmt <file>` to canonicalize source; it is idempotent.
@@ -92,6 +97,15 @@ These make designs editable, on-brand, and reproducible — and keep the agentic
   `"900"`. Gradients, shadows, filters, and masks use child nodes inside the token, not a
   bare `value=`. Run `zenith schema token <type>` (or `zenith schema tokens`) for the exact
   value form and a working example per token type.
+- **Use the right primitive for a labeled box.** For anything that is a box WITH centered text
+  — a button/CTA, a flowchart node, a labelled card — prefer the `shape` node, not a `rect` plus a
+  separately-positioned `text`. `shape` carries an owned label (child `span`s) that it centers for
+  you via `h-align`/`v-align`, and `shape kind="decision"` gives a diamond, `terminator` a
+  pill, `process` a rounded box (run `zenith schema node shape`). Connectors anchor cleanly to a
+  `shape`'s real outline. If you DO overlay a standalone `text` on a box, set `v-align="middle"`
+  (and `align="center"`) on the text so the label is actually centered — a bare `text` sits at the
+  TOP of its box. For flowcharts, connect nodes with `connector` (`from`/`to` + `marker-end`),
+  never hand-drawn lines.
 - **Group semantically.** Put related layers in `group`/`frame` with a stable id so a whole
   motif can be moved, dimmed (`set_opacity`), or removed in one operation.
 - **Validate before render, render before finalize.** Hard diagnostics block finalization.
@@ -145,6 +159,7 @@ Read only the pack you need for the current sub-task (progressive disclosure). E
 | Defining or applying a brand/identity, or per-project style                                                                                      | `references/brand.md`                                                        |
 | Many outputs from one design — **sizes/formats** (`zenith variant`) or **data** rows (`zenith merge`, binding nodes with `role="data.<column>"`) | `references/variants.md` · `zenith merge --help`                             |
 | Per-variant tweaks (the `variants`/`override` block: hide nodes, swap text/fill, reposition with x/y/w/h)                                        | `zenith schema variant`                                                      |
+| Flowcharts / diagrams / labeled boxes & buttons (boxes with centered labels + arrows)                                                            | `zenith schema node shape` (kind, owned label) · `zenith schema node connector` |
 | Diagnostic policy (`allow`/`deny`/`warn` codes, CI gating, config files, CLI flags)                                                              | `references/diagnostics.md` + `zenith schema diagnostics`                    |
 | Local/system fonts, portability, deterministic rendering, `font.local` advisory                                                                  | `references/diagnostics.md` · `zenith fonts`                                 |
 | Reporting a Zenith bug or feature request (the `gh` feedback loop)                                                                               | `references/reporting-issues.md`                                             |
