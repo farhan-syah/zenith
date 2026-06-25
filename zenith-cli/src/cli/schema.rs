@@ -15,6 +15,7 @@ zenith schema token gradient        # value form + children + example for one to
 zenith schema page                  # attributes for a page declaration\n  \
 zenith schema asset                 # attributes for an asset declaration\n  \
 zenith schema document              # attributes for the document root\n  \
+zenith schema variant               # variants block and override entry structure\n  \
 zenith schema diagnostics           # diagnostic-policy verbs + governable codes\n  \
 zenith schema nodes --json          # machine-readable JSON")]
 pub struct SchemaArgs {
@@ -87,6 +88,16 @@ pub enum SchemaSub {
         #[arg(value_name = "TYPE")]
         ty: String,
     },
+
+    /// Show the structure of the `variants` block and the `override` entry.
+    ///
+    /// Documents the `variants { variant id=… source=<page-id> w=(px)N h=(px)N { … } }`
+    /// block structure, the `override node="<id>" …` entry, and its recognised
+    /// properties: `node` (required, the target node id selector — NOT `id`),
+    /// `visible` (#true/#false), `text` (string), `fill` (token ref or color),
+    /// and geometry `x`/`y`/`w`/`h` (typed dimensions, e.g. `(px)100`).
+    /// Includes a concrete worked example.
+    Variant,
 
     /// Show the in-file diagnostic-policy verbs and the governable diagnostic codes.
     ///

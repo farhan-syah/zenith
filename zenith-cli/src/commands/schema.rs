@@ -11,8 +11,9 @@ use crate::commands::serialize_pretty;
 use crate::json_types::{
     SchemaAttr, SchemaDiagnosticCode, SchemaDiagnosticsOutput, SchemaNodeDetail, SchemaNodeEntry,
     SchemaNodeOutput, SchemaNodesOutput, SchemaOpDetail, SchemaOpEntry, SchemaOpFieldEntry,
-    SchemaOpOutput, SchemaOpsOutput, SchemaOverviewOutput, SchemaSurfaceOutput, SchemaTokenDetail,
-    SchemaTokenEntry, SchemaTokenOutput, SchemaTokensOutput,
+    SchemaOpOutput, SchemaOpsOutput, SchemaOverridePropEntry, SchemaOverviewOutput,
+    SchemaSurfaceOutput, SchemaTokenDetail, SchemaTokenEntry, SchemaTokenOutput,
+    SchemaTokensOutput, SchemaVariantOutput,
 };
 
 /// Precedence note shown on the `schema diagnostics` surface.
@@ -53,6 +54,7 @@ pub fn overview(json: bool) -> (String, u8) {
              zenith schema page               # page declaration attributes\n  \
              zenith schema asset              # asset declaration attributes\n  \
              zenith schema document           # document root attributes\n  \
+             zenith schema variant            # variants block + override entry structure\n  \
              zenith schema diagnostics        # diagnostic-policy verbs + codes\n\n\
              Attribute types, required-ness, and valid values are enforced by \
              `zenith validate`."
@@ -101,7 +103,15 @@ pub fn node_detail(kind: &str, json: bool) -> (String, u8) {
         Some(s) => s,
         None => {
             let valid = core_schema::node_kinds().join(", ");
-            let msg = format!("error: unknown node kind '{kind}'\nvalid kinds: {valid}");
+            // Provide a targeted hint for the two most-common near-misses.
+            let hint = match kind {
+                "override" | "variant" => {
+                    "\nhint: 'override' and 'variant' are not node kinds — \
+                     see `zenith schema variant` for the variants block and override entry."
+                }
+                _ => "",
+            };
+            let msg = format!("error: unknown node kind '{kind}'\nvalid kinds: {valid}{hint}");
             return (msg, 1);
         }
     };
@@ -370,6 +380,69 @@ fn surface_detail(
              `zenith validate` (the authoritative diagnostic loop).",
         );
         (text.trim_end().to_owned(), 0)
+    }
+}
+
+/// `zenith schema variant`: descriptor for the `variants` block and `override` entry.
+///
+/// Returns `(stdout, exit_code)`.
+pub fn variant(json: bool) -> (String, u8) {
+    let desc = core_schema::variant_descriptor();
+
+    if json {
+        let props: Vec<SchemaOverridePropEntry> = desc
+            .override_props
+            .iter()
+            .map(|&(name, ty, required)| SchemaOverridePropEntry {
+                name: name.to_owned(),
+                ty: ty.to_owned(),
+                required,
+            })
+            .collect();
+        let out = SchemaVariantOutput {
+            schema: "zenith-schema-v1",
+            summary: desc.summary.to_owned(),
+            block_structure: desc.block_structure.to_owned(),
+            variant_node: desc.variant_node.to_owned(),
+            override_entry: desc.override_entry.to_owned(),
+            override_props: props,
+            example: desc.example.to_owned(),
+        };
+        (serialize_pretty(&out), 0)
+    } else {
+        let mut text = format!("variant: {}\n", desc.summary);
+
+        text.push_str(&format!("\nBlock structure:\n  {}\n", desc.block_structure));
+        text.push_str(&format!(
+            "\nvariant node:\n  {}\n",
+            desc.variant_node.replace('\n', "\n  ")
+        ));
+        text.push_str(&format!(
+            "\noverride entry:\n  {}\n",
+            desc.override_entry.replace('\n', "\n  ")
+        ));
+
+        text.push_str("\nOverride properties:\n");
+        let col_width = desc
+            .override_props
+            .iter()
+            .map(|(n, _, _)| n.len())
+            .max()
+            .unwrap_or(0);
+        for &(name, ty, required) in desc.override_props {
+            let req = if required { ", required" } else { "" };
+            text.push_str(&format!(
+                "  {:<col_width$}  —  ({ty}{req})\n",
+                name,
+                col_width = col_width,
+            ));
+        }
+
+        text.push_str(&format!(
+            "\nExample:\n  {}",
+            desc.example.replace('\n', "\n  ")
+        ));
+        (text, 0)
     }
 }
 
@@ -858,6 +931,168 @@ mod tests {
             "must report unknown type"
         );
         assert!(text.contains("valid types"), "must list valid types");
+    }
+
+    #[test]
+    fn node_detail_override_kind_hints_variant_surface() {
+        // "override" is not a node kind; the error must hint at `zenith schema variant`.
+        let (text, code) = node_detail("override", false);
+        assert_eq!(code, 1);
+        assert!(
+            text.contains("unknown node kind"),
+            "must report unknown kind"
+        );
+        assert!(
+            text.contains("zenith schema variant"),
+            "error for 'override' must hint at `zenith schema variant`; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn node_detail_variant_kind_hints_variant_surface() {
+        // "variant" is also not a node kind; same hint applies.
+        let (text, code) = node_detail("variant", false);
+        assert_eq!(code, 1);
+        assert!(
+            text.contains("unknown node kind"),
+            "must report unknown kind"
+        );
+        assert!(
+            text.contains("zenith schema variant"),
+            "error for 'variant' must hint at `zenith schema variant`; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn node_detail_other_unknown_no_variant_hint() {
+        // Truly unknown kinds get no variant hint.
+        let (text, code) = node_detail("frobnicate", false);
+        assert_eq!(code, 1);
+        assert!(
+            text.contains("unknown node kind"),
+            "must report unknown kind"
+        );
+        assert!(
+            !text.contains("zenith schema variant"),
+            "generic unknown kind must not mention variant surface; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn variant_human_contains_key_sections() {
+        let (text, code) = variant(false);
+        assert_eq!(code, 0);
+        assert!(text.contains("variant"), "must name the surface");
+        assert!(
+            text.contains("Override properties:"),
+            "must list override properties"
+        );
+        assert!(
+            text.contains("node"),
+            "override properties must include 'node' selector"
+        );
+        assert!(
+            text.contains("visible"),
+            "override properties must include 'visible'"
+        );
+        assert!(
+            text.contains("x") && text.contains("y") && text.contains("w") && text.contains("h"),
+            "override properties must include geometry keys x/y/w/h; got:\n{text}"
+        );
+        assert!(
+            text.contains("Example:"),
+            "must include a worked example section"
+        );
+        assert!(
+            text.contains("source="),
+            "example must show the source= attribute on a variant node"
+        );
+    }
+
+    #[test]
+    fn variant_human_override_node_selector_note() {
+        let (text, code) = variant(false);
+        assert_eq!(code, 0);
+        // The override entry description must emphasise that the key is `node`, not `id`.
+        assert!(
+            text.contains("node"),
+            "override entry must describe the 'node' selector key; got:\n{text}"
+        );
+        // Must warn about the wrong key.
+        assert!(
+            text.to_lowercase().contains("not") || text.contains("NOT"),
+            "override entry should warn that 'id' is the wrong key; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn variant_json_schema_field() {
+        let (text, code) = variant(true);
+        assert_eq!(code, 0);
+        assert!(
+            text.contains("zenith-schema-v1"),
+            "JSON must carry schema field"
+        );
+        assert!(
+            text.contains("\"summary\""),
+            "JSON must carry summary field"
+        );
+        assert!(
+            text.contains("\"override_props\""),
+            "JSON must carry override_props array"
+        );
+        assert!(
+            text.contains("\"example\""),
+            "JSON must carry example field"
+        );
+    }
+
+    #[test]
+    fn variant_json_override_props_have_geometry() {
+        let (text, code) = variant(true);
+        assert_eq!(code, 0);
+        // x, y, w, h must all appear as override prop names.
+        for key in &["\"x\"", "\"y\"", "\"w\"", "\"h\""] {
+            assert!(
+                text.contains(key),
+                "variant JSON override_props must include {key}; got:\n{text}"
+            );
+        }
+        // node must be required.
+        assert!(
+            text.contains("\"node\""),
+            "variant JSON override_props must include node; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn op_detail_add_node_position_describes_id_field() {
+        // Regression: before/after variants use `id` (sibling id), not `sibling`.
+        let (text, code) = op_detail("add_node", false);
+        assert_eq!(code, 0);
+        assert!(
+            text.contains("id"),
+            "add_node position description must mention the 'id' field; got:\n{text}"
+        );
+        assert!(
+            text.contains("before") && text.contains("after"),
+            "add_node position description must mention before/after variants; got:\n{text}"
+        );
+        assert!(
+            text.contains("index"),
+            "add_node position description must mention index variant; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn op_detail_add_node_position_json_has_correct_shape() {
+        let (text, code) = op_detail("add_node", true);
+        assert_eq!(code, 0);
+        // The ty string must contain "id" to describe the before/after sibling key.
+        assert!(
+            text.contains("sibling-id") || text.contains("\"id\""),
+            "add_node position field ty must describe the sibling id key; got:\n{text}"
+        );
     }
 
     #[test]

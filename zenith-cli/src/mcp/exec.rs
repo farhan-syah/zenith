@@ -60,6 +60,7 @@ fn run_schema(args: &Value) -> Result<Value, String> {
         "page" => commands::schema::page(true),
         "asset" => commands::schema::asset(true),
         "document" => commands::schema::document(true),
+        "variant" => commands::schema::variant(true),
         "diagnostics" => commands::schema::diagnostics(true),
         "tokens" => commands::schema::tokens(true),
         "token" => commands::schema::token_detail(need(name, "name (token type)")?, true),

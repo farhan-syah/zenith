@@ -222,6 +222,111 @@ fn schema_unknown_node_is_tool_error() {
 }
 
 #[test]
+fn schema_variant_returns_override_props_including_geometry() {
+    let resp = tool_call("zenith_schema", json!({ "surface": "variant" }));
+    assert_eq!(resp["result"]["isError"], false, "{resp}");
+    let s = structured(&resp);
+    // Top-level fields present.
+    assert!(s["summary"].is_string(), "must have summary");
+    assert!(
+        s["override_props"].is_array(),
+        "must have override_props array"
+    );
+    assert!(s["example"].is_string(), "must have example");
+
+    // override_props must include the node selector and geometry keys.
+    let props = s["override_props"]
+        .as_array()
+        .expect("override_props array");
+    let names: Vec<&str> = props.iter().filter_map(|p| p["name"].as_str()).collect();
+    for key in ["node", "visible", "x", "y", "w", "h"] {
+        assert!(
+            names.contains(&key),
+            "override_props must include '{key}'; got: {names:?}"
+        );
+    }
+
+    // `node` must be marked required.
+    let node_prop = props
+        .iter()
+        .find(|p| p["name"] == "node")
+        .expect("node prop");
+    assert_eq!(
+        node_prop["required"], true,
+        "'node' override prop must be required"
+    );
+}
+
+#[test]
+fn schema_node_override_hints_variant_surface() {
+    // Querying 'override' as a node kind must produce a tool error with a hint.
+    let resp = tool_call(
+        "zenith_schema",
+        json!({ "surface": "node", "name": "override" }),
+    );
+    assert_eq!(
+        resp["result"]["isError"], true,
+        "override is not a node kind"
+    );
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("zenith schema variant"),
+        "error for 'override' node kind must hint at `zenith schema variant`; got: {text}"
+    );
+}
+
+#[test]
+fn schema_node_variant_kind_hints_variant_surface() {
+    // Querying 'variant' as a node kind must also produce a hint.
+    let resp = tool_call(
+        "zenith_schema",
+        json!({ "surface": "node", "name": "variant" }),
+    );
+    assert_eq!(
+        resp["result"]["isError"], true,
+        "variant is not a node kind"
+    );
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("zenith schema variant"),
+        "error for 'variant' node kind must hint at `zenith schema variant`; got: {text}"
+    );
+}
+
+#[test]
+fn schema_op_add_node_position_describes_id_field() {
+    // Regression guard: before/after take `id` (sibling id), NOT `sibling`.
+    let resp = tool_call(
+        "zenith_schema",
+        json!({ "surface": "op", "name": "add_node" }),
+    );
+    assert_eq!(resp["result"]["isError"], false, "{resp}");
+    let fields = structured(&resp)["op"]["fields"]
+        .as_array()
+        .expect("fields array");
+    let pos = fields
+        .iter()
+        .find(|f| f["name"] == "position")
+        .expect("position field");
+    let ty = pos["ty"].as_str().unwrap_or("");
+    // The type description must mention "id" for the sibling reference.
+    assert!(
+        ty.contains("id"),
+        "add_node position field must describe the 'id' sibling key; got: {ty}"
+    );
+    // Must mention both before and after variants.
+    assert!(
+        ty.contains("before") && ty.contains("after"),
+        "add_node position field must mention before/after variants; got: {ty}"
+    );
+    // Must mention index variant.
+    assert!(
+        ty.contains("index"),
+        "add_node position field must mention index variant; got: {ty}"
+    );
+}
+
+#[test]
 fn schema_token_returns_value_form_on_demand() {
     let resp = tool_call(
         "zenith_schema",

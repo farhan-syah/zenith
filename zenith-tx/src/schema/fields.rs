@@ -182,7 +182,7 @@ pub fn op_fields(name: &str) -> Option<&'static [OpFieldSchema]> {
                 },
                 OpFieldSchema {
                     name: "position",
-                    ty: r#"{at:"last"|"first"|"index"|"before"|"after"}"#,
+                    ty: r#"{at:"last"} | {at:"first"} | {at:"index",index:N} | {at:"before",id:"<sibling-id>"} | {at:"after",id:"<sibling-id>"}"#,
                     required: false,
                 },
             ];
@@ -290,7 +290,7 @@ pub fn op_fields(name: &str) -> Option<&'static [OpFieldSchema]> {
                 },
                 OpFieldSchema {
                     name: "position",
-                    ty: r#"{at:"last"|"first"|"index"|"before"|"after"}"#,
+                    ty: r#"{at:"last"} | {at:"first"} | {at:"index",index:N} | {at:"before",id:"<sibling-id>"} | {at:"after",id:"<sibling-id>"}"#,
                     required: false,
                 },
             ];

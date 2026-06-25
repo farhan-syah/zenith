@@ -324,6 +324,26 @@ pub struct SchemaDiagnosticsOutput {
     pub codes: Vec<SchemaDiagnosticCode>,
 }
 
+/// One override property entry in the `schema variant` JSON output.
+#[derive(Debug, Serialize)]
+pub struct SchemaOverridePropEntry {
+    pub name: String,
+    pub ty: String,
+    pub required: bool,
+}
+
+/// Top-level JSON envelope for `schema variant`.
+#[derive(Debug, Serialize)]
+pub struct SchemaVariantOutput {
+    pub schema: &'static str,
+    pub summary: String,
+    pub block_structure: String,
+    pub variant_node: String,
+    pub override_entry: String,
+    pub override_props: Vec<SchemaOverridePropEntry>,
+    pub example: String,
+}
+
 // ── Fonts JSON types ──────────────────────────────────────────────────────────
 
 /// Top-level JSON envelope for `zenith fonts --json`.
