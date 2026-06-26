@@ -49,16 +49,20 @@ use super::text_node::compile_text_sized;
 
 // ── Internal layout constants ───────────────────────────────────────────────
 
-/// Left indent (px) applied to a blockquote block.
-const BLOCKQUOTE_INDENT_PX: f64 = 24.0;
-/// Per-depth-level indent (px) applied to a list item.
-const LIST_INDENT_PX: f64 = 24.0;
-/// Color of a horizontal-rule fill (muted gray, #CCCCCC).
-const HR_COLOR: Color = Color::srgb(204, 204, 204, 255);
+/// Left indent (px) applied to a blockquote block. Shared with the chain block
+/// flow so a chained blockquote indents identically to a single-box one.
+pub(in crate::compile) const BLOCKQUOTE_INDENT_PX: f64 = 24.0;
+/// Per-depth-level indent (px) applied to a list item. Shared with the chain
+/// block flow so a chained list item indents identically to a single-box one.
+pub(in crate::compile) const LIST_INDENT_PX: f64 = 24.0;
+/// Color of a horizontal-rule fill (muted gray, #CCCCCC). Shared with the chain
+/// block flow so a chained `hr` rule matches a single-box one.
+pub(in crate::compile) const HR_COLOR: Color = Color::srgb(204, 204, 204, 255);
 /// Background color behind a fenced code block (light neutral gray, #F5F5F5).
-const CODE_BLOCK_BG: Color = Color::srgb(245, 245, 245, 255);
-/// Thickness (px) of a horizontal-rule fill.
-const HR_THICKNESS_PX: f64 = 2.0;
+/// Shared with the chain block flow so a chained code block matches a single-box one.
+pub(in crate::compile) const CODE_BLOCK_BG: Color = Color::srgb(245, 245, 245, 255);
+/// Thickness (px) of a horizontal-rule fill. Shared with the chain block flow.
+pub(in crate::compile) const HR_THICKNESS_PX: f64 = 2.0;
 
 // ── Default spacing factors (× the block's resolved font size) ──────────────
 // Applied only when the role's cascade carries NO explicit space_before /

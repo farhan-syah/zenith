@@ -16,18 +16,17 @@
 //! single-box markdown path ([`super::markdown_block`]) and all non-markdown
 //! chains are untouched.
 //!
-//! ## v1 limitations (documented)
+//! ## Visual parity with the single-box path
 //!
-//! - **Code-block background.** A `CodeBlock` is shaped as one literal mono span;
-//!   the light background rect the single-box path draws behind it is NOT emitted
-//!   in the chain flow (a chained code block has no per-box background).
-//! - **Horizontal rule.** An `hr` contributes a single empty spacer line (a
-//!   visual gap) — the thin rule fill the single-box path draws is NOT emitted in
-//!   the chain flow.
-//! - **Blockquote / list-item indent.** The left indent the single-box path
-//!   applies to blockquotes and list items is NOT applied in the chain flow; the
-//!   list bullet is prepended as a leading literal span instead of using the
-//!   hanging-indent gutter.
+//! Blockquote / list-item left indent, fenced-code-block backgrounds, and the
+//! horizontal-rule fill are all carried into the chain flow via per-block
+//! [`BlockDescriptor::left_indent_px`] / [`BlockDescriptor::decoration`], stamped
+//! onto every packed line so the emit path reproduces the single-box look using
+//! the SAME constants ([`super::markdown_block::BLOCKQUOTE_INDENT_PX`] etc.). The
+//! list bullet still flows inline as a leading literal span; the indent shifts
+//! the whole item (the bullet sits at the indent column, continuation lines
+//! align under the text — for the chain flow the indent is applied uniformly to
+//! every wrapped line of the item).
 
 use std::collections::BTreeMap;
 
@@ -41,9 +40,10 @@ use crate::ir::Color;
 use super::super::paint::resolve_property_color;
 use super::ctx::{NodeShape, ShapeEnv};
 use super::markdown_block::{
-    BlockStyleCascade, ResolvedBlockStyle, block_role, resolve_block_style_core,
+    BLOCKQUOTE_INDENT_PX, BlockStyleCascade, CODE_BLOCK_BG, HR_COLOR, HR_THICKNESS_PX,
+    LIST_INDENT_PX, ResolvedBlockStyle, block_role, resolve_block_style_core,
 };
-use super::pack::LineStyle;
+use super::pack::{LineDecoration, LineStyle};
 use super::shape::{
     LINK_COLOR, ResolvedSpan, WordMetrics, WordToken, resolve_font_family_name,
     resolve_font_weight, resolve_vertical_align, shape_words,
@@ -64,10 +64,19 @@ pub(in crate::compile) struct BlockDescriptor {
     /// Space (px) inserted BELOW the block.
     pub(in crate::compile) space_after_px: f64,
     /// `true` for a `HorizontalRule`: the block has no shaped text and instead
-    /// contributes a single EMPTY spacer line in the chain flow (v1: the rule
-    /// fill is not drawn). The distributor emits one zero-word line of the block's
-    /// `metrics.line_height` so the gap is visible.
+    /// contributes a single EMPTY line in the chain flow whose `decoration` is a
+    /// [`LineDecoration::Rule`]. The distributor emits one zero-word line of the
+    /// block's `metrics.line_height` carrying that rule fill, so the rule renders
+    /// like the single-box path.
     pub(in crate::compile) is_spacer: bool,
+    /// Left indent (px) applied to every line packed from this block (blockquote
+    /// and list-item blocks; `0.0` otherwise). The distributor stamps it onto each
+    /// [`super::pack::Line::left_indent_px`].
+    pub(in crate::compile) left_indent_px: f64,
+    /// Full-width per-line decoration for this block (code-block background or
+    /// horizontal-rule fill; `None` otherwise). The distributor stamps it onto
+    /// each [`super::pack::Line::decoration`].
+    pub(in crate::compile) decoration: Option<LineDecoration>,
 }
 
 /// The cascade tiers + token map needed to resolve each block's role style,
@@ -148,8 +157,10 @@ pub(in crate::compile) fn shape_source_blocks(
             .as_ref()
             .and_then(|fp| resolve_property_color(fp, style_env.resolved, diagnostics, &src.id));
 
-        // A horizontal rule has no shaped text: it becomes a single empty spacer
-        // line whose height carries the rule's surrounding gap (v1: no rule fill).
+        // A horizontal rule has no shaped text: it becomes a single empty line
+        // whose height carries the rule's surrounding gap and whose decoration is
+        // the rule fill (centered in the band by the emit path), matching the
+        // single-box look.
         if matches!(block, MdBlock::HorizontalRule) {
             let gap = style.space_before_px + style.space_after_px;
             descriptors.push(BlockDescriptor {
@@ -169,6 +180,11 @@ pub(in crate::compile) fn shape_source_blocks(
                 space_before_px: 0.0,
                 space_after_px: 0.0,
                 is_spacer: true,
+                left_indent_px: 0.0,
+                decoration: Some(LineDecoration::Rule {
+                    color: HR_COLOR,
+                    thickness: HR_THICKNESS_PX,
+                }),
             });
             continue;
         }
@@ -196,6 +212,22 @@ pub(in crate::compile) fn shape_source_blocks(
             src.source_span,
         );
 
+        // Left indent + full-width decoration recovered from the block kind, so a
+        // chained blockquote/list/code block matches the single-box look. Indent
+        // shifts the whole item right (and the emit path shrinks the usable width
+        // to keep wrapped text inside the box); the code-block background fills
+        // each line's band. EXHAUSTIVE over the text-bearing `MdBlock` variants
+        // (HorizontalRule returned above).
+        let (left_indent_px, decoration) = match block {
+            MdBlock::Blockquote { .. } => (BLOCKQUOTE_INDENT_PX, None),
+            MdBlock::ListItem { depth, .. } => ((*depth as f64) * LIST_INDENT_PX, None),
+            MdBlock::CodeBlock { .. } => (0.0, Some(LineDecoration::Background(CODE_BLOCK_BG))),
+            MdBlock::Heading { .. } | MdBlock::Paragraph { .. } => (0.0, None),
+            // Returned earlier as a spacer; unreachable here but matched
+            // exhaustively (no `_`) so a new variant forces a decision.
+            MdBlock::HorizontalRule => (0.0, None),
+        };
+
         descriptors.push(BlockDescriptor {
             tokens,
             metrics,
@@ -208,6 +240,8 @@ pub(in crate::compile) fn shape_source_blocks(
             space_before_px: style.space_before_px,
             space_after_px: style.space_after_px,
             is_spacer: false,
+            left_indent_px,
+            decoration,
         });
     }
 
@@ -253,8 +287,10 @@ fn block_spans(
         }
         MdBlock::CodeBlock { content, .. } => {
             // Raw content as ONE literal span; the shaper switches it to the
-            // bundled mono family because `code` is set. No inline parsing, and
-            // (v1 limitation) no background rect in the chain flow.
+            // bundled mono family because `code` is set. No inline parsing.
+            // The full-width band background is delivered via the block's
+            // `decoration: LineDecoration::Background(CODE_BLOCK_BG)` stamped
+            // onto every packed line by the distributor (not here in spans).
             vec![ResolvedSpan {
                 text: content.clone(),
                 color: ctx.fill.unwrap_or(Color::srgb(0, 0, 0, 255)),
@@ -269,9 +305,9 @@ fn block_spans(
                 baseline_dy: 0.0,
             }]
         }
-        // A horizontal rule contributes no shaped text (v1: the rule fill is not
-        // drawn in the chain flow). The distributor emits a single empty spacer
-        // line for it, so it yields no spans here.
+        // A horizontal rule contributes no shaped text: the distributor emits a
+        // single empty spacer line with `LineDecoration::Rule` for it (drawn
+        // centered in its band by the emit path), so no spans are needed here.
         MdBlock::HorizontalRule => Vec::new(),
     }
 }

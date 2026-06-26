@@ -46,7 +46,7 @@ pub(in crate::compile) use hyphen::{
 pub(in crate::compile) use measure::{
     MeasureEnv, measure_text_natural, measure_text_wrapped_height, resolve_text_families,
 };
-pub(in crate::compile) use pack::{Line, LineStyle, pack_lines};
+pub(in crate::compile) use pack::{Line, LineDecoration, LineStyle, pack_lines};
 pub(in crate::compile) use shape::{
     LINK_COLOR, ResolvedSpan, WordMetrics, WordToken, resolve_family_with_fallback,
     resolve_font_family_name, resolve_font_weight, resolve_vertical_align, run_to_scene_glyphs,

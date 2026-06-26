@@ -174,3 +174,102 @@ fn non_markdown_chain_byte_identical() {
         "non-markdown chain must compile deterministically + unchanged"
     );
 }
+
+// ── Test 3: blockquote/list indent + code-block bg + hr fill in the flow ──────
+
+/// Smallest x among DrawGlyphRun baselines in `[lo, hi)`.
+fn min_glyph_x(cmds: &[SceneCommand], lo: f64, hi: f64) -> Option<f64> {
+    cmds.iter()
+        .filter_map(|c| match c {
+            SceneCommand::DrawGlyphRun { x, y, .. } if *y >= lo && *y < hi => Some(*x),
+            _ => None,
+        })
+        .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+}
+
+/// `true` when a solid FillRect of exactly `(r,g,b)` appears in `[lo, hi)`.
+fn has_fill_rgb(cmds: &[SceneCommand], lo: f64, hi: f64, rgb: (u8, u8, u8)) -> bool {
+    cmds.iter().any(|c| match c {
+        SceneCommand::FillRect {
+            y,
+            paint: zenith_scene::ir::Paint::Solid { color },
+            ..
+        } => *y >= lo && *y < hi && (color.r, color.g, color.b) == rgb,
+        _ => false,
+    })
+}
+
+#[test]
+fn chained_markdown_indent_codebg_and_hr_flow() {
+    // A 2-box chain carrying a paragraph, a blockquote, a list, a fenced code
+    // block, and an hr. box1 is short so the article straddles into box2. We
+    // assert (a) blockquote + list lines start further right than a plain
+    // paragraph line (left indent applied), (b) a #F5F5F5 background rect is drawn
+    // for the code block, (c) a thin #CCCCCC rect is drawn for the hr, and that
+    // the whole thing is deterministic.
+    let src = r##"zenith version=1 {
+  project id="proj.cmi" name="CMI"
+  tokens format="zenith-token-v1" {
+    token id="color.ink" type="color" value="#111827"
+    token id="font.body" type="fontFamily" value="Noto Sans"
+  }
+  styles {}
+  document id="doc.cmi" title="CMI" {
+    page id="page.cmi" w=(px)800 h=(px)2000 {
+      text id="cibox1" x=(px)20 y=(px)0 w=(px)400 h=(px)120 chain="ci" format="markdown" fill=(token)"color.ink" font-family=(token)"font.body" font-size=(px)16 {
+        span "Plain paragraph alpha bravo charlie delta echo foxtrot golf hotel.\n\n> Quoted blockquote line india juliet kilo lima mike november oscar.\n\n- List item papa quebec romeo sierra tango uniform victor whiskey.\n\n```\ncode line one\ncode line two\n```\n\n---\n\nClosing paragraph after the rule xray yankee zulu."
+      }
+      text id="cibox2" x=(px)20 y=(px)1000 w=(px)400 h=(px)800 chain="ci" format="markdown" fill=(token)"color.ink" font-family=(token)"font.body" font-size=(px)16 {
+      }
+    }
+  }
+}"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .all(|d| d.severity != zenith_core::Severity::Error),
+        "expected no errors; got: {:?}",
+        result.diagnostics
+    );
+
+    // The plain paragraph is the FIRST block in box1; its glyph x is the left edge
+    // of the un-indented text column (box origin 20). The blockquote is indented by
+    // 24px (a top-level list item is depth 0 → no indent, matching the single-box
+    // path), so SOME glyph in the flow must start strictly right of the plain
+    // column. We take the global min glyph x as the plain column baseline and
+    // require an indented line beyond it.
+    let all_min = min_glyph_x(cmds, 0.0, 2000.0).expect("flow must draw glyphs");
+    // A line shifted by the 24px indent must exist among the drawn glyph xs.
+    let indented_exists = cmds.iter().any(|c| match c {
+        SceneCommand::DrawGlyphRun { x, .. } => *x >= all_min + 20.0,
+        _ => false,
+    });
+    assert!(
+        indented_exists,
+        "blockquote/list lines must be shifted right by the indent; min x = {all_min}"
+    );
+
+    // (b) Code-block background rect (#F5F5F5) somewhere in the flow (either box).
+    assert!(
+        has_fill_rgb(cmds, 0.0, 2000.0, (245, 245, 245)),
+        "a code-block background FillRect (#F5F5F5) must be drawn in the chain flow"
+    );
+
+    // (c) Horizontal-rule fill (#CCCCCC) somewhere in the flow.
+    assert!(
+        has_fill_rgb(cmds, 0.0, 2000.0, (204, 204, 204)),
+        "an hr rule FillRect (#CCCCCC) must be drawn in the chain flow"
+    );
+
+    // Determinism.
+    let result2 = compile(&doc, &default_provider());
+    assert_eq!(
+        result.scene.commands, result2.scene.commands,
+        "chained markdown with indent/code/hr must be deterministic"
+    );
+}

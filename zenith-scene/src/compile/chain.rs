@@ -57,10 +57,10 @@ use super::markdown_resolve::MdBlockMap;
 use super::paint::resolve_property_color;
 use super::style_prop;
 use super::text::{
-    BlockStyleEnv, ChainSourceShape, HyphenationContext, LINK_COLOR, Line, LineStyle, NodeShape,
-    ResolvedSpan, ShapeEnv, WordMetrics, WordToken, en_us_hyphenator, flatten_lines_to_tokens,
-    pack_lines, resolve_family_with_fallback, resolve_font_family_name, resolve_font_weight,
-    resolve_vertical_align, shape_source_blocks, shape_words,
+    BlockStyleEnv, ChainSourceShape, HyphenationContext, LINK_COLOR, Line, LineDecoration,
+    LineStyle, NodeShape, ResolvedSpan, ShapeEnv, WordMetrics, WordToken, en_us_hyphenator,
+    flatten_lines_to_tokens, pack_lines, resolve_family_with_fallback, resolve_font_family_name,
+    resolve_font_weight, resolve_vertical_align, shape_source_blocks, shape_words,
 };
 use super::util::{resolve_geometry_px, resolve_property_dimension_px};
 
@@ -645,6 +645,24 @@ fn distribute_block_chain(
     // each Line carries the real per-block values for emit.
     let rep_metrics = descriptors.first().map(|d| d.metrics).unwrap_or_default();
 
+    // Opt-in en-US hyphenation for prose blocks, read from the source node and
+    // mirroring the inline chain path: absent → `None` → packing byte-identical.
+    // Code blocks never hyphenate (they pass `None` regardless). Break-word stays
+    // off, matching the inline chain path's documented behavior.
+    let hyph_ctx = if src.hyphenate == Some(true) {
+        en_us_hyphenator().map(|dict| HyphenationContext {
+            dict: Some(dict),
+            engine,
+            fonts,
+            families: &families,
+            hyphen: "-",
+            direction,
+            break_word: false,
+        })
+    } else {
+        None
+    };
+
     // A FIFO of blocks awaiting placement. Each block's owned tokens are consumed
     // exactly once (no cloning): a straddling block re-queues its overflow tail at
     // the FRONT (re-wrapped to the next member's width). `style` carries the
@@ -658,12 +676,20 @@ fn distribute_block_chain(
         space_after_px: f64,
         space_before_px: f64,
         is_spacer: bool,
+        left_indent_px: f64,
+        decoration: Option<LineDecoration>,
+        /// Code blocks render raw — no hyphenation; prose blocks hyphenate when
+        /// the source opts in (mirrors the single-box wrap path).
+        hyphenate: bool,
     }
     let mut queue: std::collections::VecDeque<PendingBlock> = descriptors
         .into_iter()
         .enumerate()
         .map(|(index, d)| PendingBlock {
             index,
+            // A code block (background decoration) renders raw; everything else
+            // is prose eligible for hyphenation.
+            hyphenate: !matches!(d.decoration, Some(LineDecoration::Background(_))),
             tokens: d.tokens,
             style: d.line_style,
             line_height: d.metrics.line_height,
@@ -671,6 +697,8 @@ fn distribute_block_chain(
             space_after_px: d.space_after_px,
             space_before_px: d.space_before_px,
             is_spacer: d.is_spacer,
+            left_indent_px: d.left_indent_px,
+            decoration: d.decoration,
         })
         .collect();
 
@@ -688,7 +716,8 @@ fn distribute_block_chain(
         let mut prev_space_after: f64 = 0.0;
 
         while let Some(block) = queue.pop_front() {
-            // A spacer block (horizontal rule) is ONE empty line of the gap height.
+            // A spacer block (horizontal rule) is ONE empty line of the gap height
+            // carrying the rule decoration (drawn centered in its band by emit).
             let mut block_lines: Vec<Line> = if block.is_spacer {
                 vec![Line {
                     words: Vec::new(),
@@ -696,18 +725,32 @@ fn distribute_block_chain(
                     paragraph: block.index,
                     height_px: block.line_height,
                     line_style: Some(block.style),
+                    left_indent_px: block.left_indent_px,
+                    decoration: block.decoration,
                 }]
             } else {
+                // Prose blocks hyphenate when the source opts in; code blocks pass
+                // `None` so their raw content is never split. The indent shrinks the
+                // packing width so wrapped text stays inside the box (emit applies
+                // the matching shift), mirroring the single-box indent slot.
+                let pack_hyph = if block.hyphenate {
+                    hyph_ctx.as_ref()
+                } else {
+                    None
+                };
+                let pack_w = (member.w - block.left_indent_px).max(0.0);
                 let mut ls = pack_lines(
                     block.tokens,
-                    member.w,
+                    pack_w,
                     block.space_advance,
-                    None,
+                    pack_hyph,
                     block.line_height,
                 );
                 for l in &mut ls {
                     l.paragraph = block.index;
                     l.line_style = Some(block.style);
+                    l.left_indent_px = block.left_indent_px;
+                    l.decoration = block.decoration;
                 }
                 ls
             };
@@ -772,7 +815,14 @@ fn distribute_block_chain(
             // re-queue the overflow tail (re-wrapped to the NEXT member's width).
             let kept: Vec<Line> = block_lines.drain(..placed).collect();
             member_lines.extend(kept);
-            let tail_tokens = flatten_lines_to_tokens(block_lines, None);
+            // Merge hyphen fragments back into whole words for prose tails so the
+            // next member re-wraps cleanly; code tails carry `None` (never split).
+            let tail_hyph = if block.hyphenate {
+                hyph_ctx.as_ref()
+            } else {
+                None
+            };
+            let tail_tokens = flatten_lines_to_tokens(block_lines, tail_hyph);
             queue.push_front(PendingBlock {
                 index: block.index,
                 tokens: tail_tokens,
@@ -784,6 +834,9 @@ fn distribute_block_chain(
                 // started above); its space-after still applies after it ends.
                 space_before_px: 0.0,
                 is_spacer: false,
+                left_indent_px: block.left_indent_px,
+                decoration: block.decoration,
+                hyphenate: block.hyphenate,
             });
             break;
         }
@@ -882,6 +935,8 @@ mod widow_orphan_tests {
                 paragraph: p,
                 height_px: 0.0,
                 line_style: None,
+                left_indent_px: 0.0,
+                decoration: None,
             })
             .collect()
     }

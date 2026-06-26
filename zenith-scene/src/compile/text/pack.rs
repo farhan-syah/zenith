@@ -35,6 +35,22 @@ pub(in crate::compile) struct LineStyle {
     pub(in crate::compile) deco_thickness: f64,
 }
 
+/// A full-width visual decoration drawn behind/around a line's band, BEFORE the
+/// line's glyphs and per-word backgrounds. `None` (the default for every line on
+/// every existing path) emits nothing, so output stays byte-identical. Only the
+/// chain block flow sets `Some(..)`, to recover the single-box markdown look for
+/// fenced code blocks and horizontal rules when content flows across boxes.
+#[derive(Clone, Copy)]
+pub(in crate::compile) enum LineDecoration {
+    /// Full-width background fill behind the line's band (code blocks).
+    Background(crate::ir::Color),
+    /// A horizontal rule centered in the line's band (thematic break).
+    Rule {
+        color: crate::ir::Color,
+        thickness: f64,
+    },
+}
+
 /// One packed line: its words plus the summed content width (no trailing space).
 pub(in crate::compile) struct Line {
     pub(in crate::compile) words: Vec<WordToken>,
@@ -55,6 +71,15 @@ pub(in crate::compile) struct Line {
     /// ascent, space_advance, font_size, and deco_thickness. Byte-identical
     /// when `None` for every line (all existing paths).
     pub(in crate::compile) line_style: Option<LineStyle>,
+    /// Left indent (px) applied to this line's text origin, also shrinking the
+    /// usable width so wrapped/aligned text stays inside the box. `0.0` (the
+    /// default for every existing path) leaves emit arithmetic byte-identical;
+    /// the chain block flow sets it for blockquotes and list items.
+    pub(in crate::compile) left_indent_px: f64,
+    /// Full-width decoration drawn behind this line's band before its glyphs.
+    /// `None` (the default for every existing path) emits nothing; the chain
+    /// block flow sets it for code-block backgrounds and horizontal rules.
+    pub(in crate::compile) decoration: Option<LineDecoration>,
 }
 
 /// Greedy-pack word tokens into lines for a given box width, left-to-right and
@@ -276,6 +301,8 @@ pub(in crate::compile) fn pack_lines_core(
                     paragraph: tok.src.paragraph,
                     height_px: line_height,
                     line_style: None,
+                    left_indent_px: 0.0,
+                    decoration: None,
                 });
             }
         }
@@ -318,6 +345,8 @@ pub(in crate::compile) fn pack_lines_core(
                         paragraph: cur_para,
                         height_px: line_height,
                         line_style: None,
+                        left_indent_px: 0.0,
+                        decoration: None,
                     });
                     line_w = 0.0;
                     // The tail becomes the first word of the next line.
@@ -354,6 +383,8 @@ pub(in crate::compile) fn pack_lines_core(
                     paragraph,
                     height_px: line_height,
                     line_style: None,
+                    left_indent_px: 0.0,
+                    decoration: None,
                 });
                 return lines;
             }
@@ -367,6 +398,8 @@ pub(in crate::compile) fn pack_lines_core(
                     paragraph: head_para,
                     height_px: line_height,
                     line_style: None,
+                    left_indent_px: 0.0,
+                    decoration: None,
                 });
                 queue.push_front(tail);
                 continue;
@@ -383,6 +416,8 @@ pub(in crate::compile) fn pack_lines_core(
                 paragraph: cur_para,
                 height_px: line_height,
                 line_style: None,
+                left_indent_px: 0.0,
+                decoration: None,
             });
             line_w = 0.0;
             // Re-queue this word and restart the loop so the blocked-line skip at
@@ -411,6 +446,8 @@ pub(in crate::compile) fn pack_lines_core(
             paragraph: cur_para,
             height_px: line_height,
             line_style: None,
+            left_indent_px: 0.0,
+            decoration: None,
         });
     }
     lines

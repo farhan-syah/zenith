@@ -9,7 +9,7 @@ use zenith_layout::TextDirection;
 use crate::ir::{Color, Paint, SceneCommand};
 
 use super::ctx::{EmitStyle, UniformGeom};
-use super::pack::{Line, LineStyle};
+use super::pack::{Line, LineDecoration, LineStyle};
 use super::shape::{CODE_BG, WordToken, run_to_scene_glyphs};
 
 /// Emit decoration FillRects + DrawGlyphRun commands for a sequence of packed
@@ -76,7 +76,46 @@ pub(in crate::compile) fn emit_lines_profiled<F>(
     // line-height values). See the `height_px` field on [`Line`].
     let mut y_offset: f64 = 0.0;
     for (i, line) in lines.iter().enumerate() {
-        let (text_x, box_w) = geom(i);
+        let (geom_x, geom_w) = geom(i);
+
+        // Full-width line decoration (code-block background / horizontal rule) is
+        // painted FIRST, behind glyphs and per-word backgrounds, spanning the
+        // line's UN-indented box (`geom_x`/`geom_w`) so a code block's fill is the
+        // full column width. `None` (every existing path) emits nothing → output
+        // byte-identical. The band runs from the line top to top + height_px.
+        match line.decoration {
+            Some(LineDecoration::Background(color)) => {
+                commands.push(SceneCommand::FillRect {
+                    x: geom_x,
+                    y: text_y + y_offset,
+                    w: geom_w,
+                    h: line.height_px,
+                    paint: Paint::solid(color),
+                });
+            }
+            Some(LineDecoration::Rule { color, thickness }) => {
+                // Centered vertically in the line's band.
+                let band_mid = text_y + y_offset + line.height_px / 2.0;
+                commands.push(SceneCommand::FillRect {
+                    x: geom_x,
+                    y: band_mid - thickness / 2.0,
+                    w: geom_w,
+                    h: thickness,
+                    paint: Paint::solid(color),
+                });
+            }
+            None => {}
+        }
+
+        // Left indent (blockquote / list item in the chain block flow): shift the
+        // text origin right by `left_indent_px` and shrink the usable width by the
+        // same so wrapped/aligned text stays inside the box. `0.0` (every existing
+        // path) leaves the arithmetic untouched → output byte-identical. RTL
+        // applies the same left-side shift (a documented nuance: an RTL blockquote
+        // would conventionally indent on the right, not yet handled).
+        let indent = line.left_indent_px;
+        let text_x = geom_x + indent;
+        let box_w = (geom_w - indent).max(0.0);
         // Per-line scalars: use the line's own override when present, else fall
         // back to the node-global values. When `line_style` is `None` for every
         // line (all existing paths) the values are identical to the old hoisted
@@ -438,6 +477,8 @@ mod rtl_tests {
             paragraph: 0,
             height_px: 18.0,
             line_style: None,
+            left_indent_px: 0.0,
+            decoration: None,
         };
         let mut commands = Vec::new();
         emit_lines(
@@ -573,6 +614,8 @@ mod line_style_tests {
             paragraph: 0,
             height_px: 18.0,
             line_style: None,
+            left_indent_px: 0.0,
+            decoration: None,
         };
         let mut commands = Vec::new();
         emit_lines(
@@ -612,6 +655,8 @@ mod line_style_tests {
                 font_size: 32.0,
                 deco_thickness: 2.0,
             }),
+            left_indent_px: 0.0,
+            decoration: None,
         };
         let mut commands = Vec::new();
         emit_lines(
@@ -651,6 +696,8 @@ mod line_style_tests {
             paragraph: 0,
             height_px: 18.0,
             line_style: None,
+            left_indent_px: 0.0,
+            decoration: None,
         };
         let line1 = Line {
             words: vec![word(20.0)],
@@ -663,6 +710,8 @@ mod line_style_tests {
                 font_size: 32.0,
                 deco_thickness: 2.0,
             }),
+            left_indent_px: 0.0,
+            decoration: None,
         };
         let mut commands = Vec::new();
         emit_lines(
