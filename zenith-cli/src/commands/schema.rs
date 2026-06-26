@@ -745,6 +745,34 @@ pub fn block(json: bool) -> (String, u8) {
         Block decls are consumed ONLY on text nodes with `format=\"markdown\"`; they have no \
         effect on plain-text or non-markdown nodes.";
 
+    // Source syntax that PRODUCES each block role (for agent discoverability).
+    // Uses r##"..."## because headings contain '#'.
+    const SOURCE_SYNTAX: &[(&str, &str)] = &[
+        (
+            "h1..h6",
+            r##"# H1  ## H2  ### H3  #### H4  ##### H5  ###### H6  (ATX headings)"##,
+        ),
+        ("p", "blank line between paragraphs"),
+        ("blockquote", "> text on its own line"),
+        (
+            "li",
+            "- item  or  * item  or  + item  (unordered);  1. item  (ordered)",
+        ),
+        (
+            "code-block",
+            "``` (optional lang)\ncode lines\n```  (fenced; lang after opening fence is optional)",
+        ),
+        ("hr", "--- or *** or ___ on its own line"),
+    ];
+    // Inline marks (not block roles, but shown here for completeness since block decls
+    // apply to the same format=\"markdown\" nodes).
+    const INLINE_SYNTAX: &str =
+        "**bold**  *italic*  ~~strike~~  ==highlight==  ++underline++  `code`  [label](url)";
+
+    const V1_LIMITS: &str = "v1 limitation: in a chain flow, code-block backgrounds and --- rules are not drawn \
+         and blockquote/list indent is not applied. These render fully only in a single \
+         non-chained text box.";
+
     const EXAMPLE: &str = concat!(
         "document id=\"doc.main\" {\n",
         "  block role=\"h1\" font-size=(token)\"size.h1\" font-weight=(token)\"weight.bold\" space-after=(px)16\n",
@@ -769,10 +797,17 @@ pub fn block(json: bool) -> (String, u8) {
             .iter()
             .map(|(name, desc)| json!({ "scope": name, "description": desc }))
             .collect();
+        let source_syntax: Vec<serde_json::Value> = SOURCE_SYNTAX
+            .iter()
+            .map(|(role, syntax)| json!({ "role": role, "source_syntax": syntax }))
+            .collect();
         let out = json!({
             "schema": "zenith-schema-v1",
             "surface": "block",
             "role_vocabulary": roles,
+            "markdown_source_syntax": source_syntax,
+            "markdown_inline_syntax": INLINE_SYNTAX,
+            "v1_limitations": V1_LIMITS,
             "properties": props,
             "scopes": scopes,
             "cascade": CASCADE_NOTE,
@@ -782,11 +817,20 @@ pub fn block(json: bool) -> (String, u8) {
     } else {
         let mut text = String::new();
         text.push_str("block role=\"…\" — per-role markdown block style declaration\n");
-        text.push_str("\nRole vocabulary:\n");
-        for role in role_vocab {
-            text.push_str(&format!("  {role}\n"));
+        text.push_str("\nRole vocabulary and markdown source syntax:\n");
+        let col = SOURCE_SYNTAX
+            .iter()
+            .map(|(r, _)| r.len())
+            .max()
+            .unwrap_or(0);
+        for (role, syntax) in SOURCE_SYNTAX {
+            text.push_str(&format!("  {role:<col$}  {syntax}\n", col = col));
         }
-        text.push_str("\nProperties:\n");
+        text.push_str(&format!(
+            "\nInline marks (format=\"markdown\"):\n  {INLINE_SYNTAX}\n"
+        ));
+        text.push_str(&format!("\nv1 limitations:\n  {V1_LIMITS}\n"));
+        text.push_str("\nProperties (on block role=\"…\" declarations):\n");
         for (name, desc) in PROPS {
             text.push_str(&format!("  {name:<16}  {desc}\n"));
         }

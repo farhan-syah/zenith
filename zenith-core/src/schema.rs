@@ -119,10 +119,21 @@ pub fn node_content(kind: &str) -> Option<NodeContentDescriptor> {
                 `link=\"url\"` renders the span underlined in the default link color (unless \
                 `fill` is set) and retains the URL for future PDF annotation / GUI use. \
                 The `format` node attribute (values: `markdown` | `plain`) opts into \
-                inline-markdown parsing of the concatenated span text. When `format=\"markdown\"`, \
-                the scene compile pass re-parses the span content AFTER data-binding \
-                substitution, turning `**bold**`, `*italic*`, `~~strike~~`, `==highlight==`, \
-                `++underline++`, `` `code` ``, and `[label](url)` into styled spans. \
+                markdown rendering of the concatenated span text. \
+                When `format=\"markdown\"`, the scene compile pass re-parses the span content \
+                AFTER data-binding substitution and renders both inline marks and block structure. \
+                Inline marks: `**bold**`, `*italic*`, `~~strike~~`, `==highlight==`, \
+                `++underline++`, `` `code` ``, `[label](url)`. \
+                Block structure (one construct per line/paragraph): \
+                `# H1` through `###### H6` (ATX headings), blank line separates paragraphs, \
+                `> text` blockquote, `- item` / `* item` / `+ item` unordered list, \
+                `1. item` ordered list, ` ``` ` fenced code block (optional lang after opening \
+                fence; ends at closing ` ``` `), `---` / `***` / `___` horizontal rule. \
+                The block roles produced (h1..h6, p, blockquote, li, code-block, hr) are the \
+                same names styled by `block role=\"…\"` declarations (see `zenith schema block`). \
+                v1 limitation: in a `chain` flow, code-block backgrounds and `---` rules are \
+                not drawn and blockquote/list indent is not applied — these render fully only \
+                in a single non-chained text box. \
                 Pairs well with a single `data-ref` span to parse external content as markdown \
                 without encoding marks in the document. `format=\"plain\"` or absent = literal \
                 (byte-identical to today's behavior). \
@@ -130,14 +141,24 @@ pub fn node_content(kind: &str) -> Option<NodeContentDescriptor> {
                 given path (resolved relative to the document's project directory) and uses its \
                 UTF-8 contents as the node's text content, replacing any inline `span` children \
                 at render time. This keeps the `.zen` file lean for long-form prose. When paired \
-                with `format=\"markdown\"`, the loaded text is parsed as inline markdown by the \
+                with `format=\"markdown\"`, the loaded text is parsed as markdown by the \
                 scene compile pass. A missing or unreadable file emits a `text.src_missing` \
                 Error diagnostic (same gate as `asset.missing`). The `src` field is retained \
                 on the node so a future editor can write edits back to the original file. \
+                Threaded text flow (`chain` attribute): all `text` nodes that share the same \
+                `chain=\"id\"` value form one ordered chain (document source order, across pages). \
+                The FIRST member that carries spans or `src` content is the content source; \
+                subsequent members must have EMPTY spans (no `src`, no inline spans) and serve \
+                as overflow boxes. Each member needs explicit `x`/`y`/`w`/`h` geometry. Text \
+                fills box 1, the remainder flows into box 2, etc., across page boundaries. \
+                This is how you resolve a `text.overflow` warning for long-form copy: add \
+                chained continuation boxes (on the same or new pages) until nothing overflows. \
+                Only the first member's font/style drives the whole chain; per-span overrides \
+                on the source are honored. \
                 A `block role=\"…\"` declaration may appear BEFORE span children to set per-role \
                 markdown block style at this text node's scope (highest cascade precedence: \
                 text > page > document). Block decls affect only nodes with `format=\"markdown\"` \
-                and have no effect on plain-text nodes (`see zenith schema block`).",
+                and have no effect on plain-text nodes (see `zenith schema block`).",
             example: concat!(
                 "block role=\"h1\" font-size=(token)\"size.h1\" font-weight=(token)\"weight.bold\"\n",
                 "span \"Hello \"\n",
@@ -573,7 +594,11 @@ fn attribute_type_generic(name: &str, fallback: &'static str) -> &'static str {
         "marker-start" | "marker-end" => "string",
 
         // ── Text-specific strings ─────────────────────────────────────────
-        "chain" => "node id",
+        // chain: shared id string (NOT a node id — it is a user-chosen label that
+        // groups text nodes into a threaded flow). All text nodes with the same
+        // chain value form one chain; the first span-bearing member is the content
+        // source and the rest are empty continuation boxes. See `zenith schema node text`.
+        "chain" => "string (chain id)",
         "tab-leader" | "text-exclusion" | "bullet" => "string",
         "language" => "string",
         "syntax-theme" => "string",
