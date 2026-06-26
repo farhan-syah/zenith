@@ -9,7 +9,7 @@ use zenith_layout::TextDirection;
 use crate::ir::{Color, Paint, SceneCommand};
 
 use super::ctx::{EmitStyle, UniformGeom};
-use super::pack::Line;
+use super::pack::{Line, LineStyle};
 use super::shape::{CODE_BG, WordToken, run_to_scene_glyphs};
 
 /// Emit decoration FillRects + DrawGlyphRun commands for a sequence of packed
@@ -57,14 +57,17 @@ pub(in crate::compile) fn emit_lines_profiled<F>(
 {
     let align = style.align;
     let metrics = style.metrics;
-    let font_size = style.font_size;
-    let deco_thickness = style.deco_thickness;
     let justify_final_line = style.justify_final_line;
     let direction = style.direction;
     let glyph_stroke = style.glyph_stroke;
 
-    let ascent = metrics.ascent;
-    let space_advance = metrics.space_advance;
+    // Node-global fallback scalars (used when `line.line_style` is `None`,
+    // which is every existing path → byte-identical output).
+    let global_ascent = metrics.ascent;
+    let global_space_advance = metrics.space_advance;
+    let global_font_size = style.font_size;
+    let global_deco_thickness = style.deco_thickness;
+
     let last_idx = lines.len().saturating_sub(1);
     let is_rtl = direction == TextDirection::Rtl;
     // Cumulative vertical advance: sum of preceding lines' per-line heights.
@@ -74,6 +77,24 @@ pub(in crate::compile) fn emit_lines_profiled<F>(
     let mut y_offset: f64 = 0.0;
     for (i, line) in lines.iter().enumerate() {
         let (text_x, box_w) = geom(i);
+        // Per-line scalars: use the line's own override when present, else fall
+        // back to the node-global values. When `line_style` is `None` for every
+        // line (all existing paths) the values are identical to the old hoisted
+        // reads → byte-identical output guaranteed.
+        let (ascent, space_advance, font_size, deco_thickness) = match line.line_style {
+            Some(LineStyle {
+                ascent,
+                space_advance,
+                font_size,
+                deco_thickness,
+            }) => (ascent, space_advance, font_size, deco_thickness),
+            None => (
+                global_ascent,
+                global_space_advance,
+                global_font_size,
+                global_deco_thickness,
+            ),
+        };
         let baseline_y = text_y + ascent + y_offset;
         let word_count = line.words.len();
 
@@ -416,6 +437,7 @@ mod rtl_tests {
             content_w: 70.0,
             paragraph: 0,
             height_px: 18.0,
+            line_style: None,
         };
         let mut commands = Vec::new();
         emit_lines(
@@ -476,5 +498,196 @@ mod rtl_tests {
         // only the word order differs.
         let xs = emit_line(TextDirection::Rtl, "center");
         assert_eq!(xs, vec![165.0, 200.0, 225.0]);
+    }
+}
+
+#[cfg(test)]
+mod line_style_tests {
+    use super::{EmitStyle, Line, WordToken, emit_lines};
+    use zenith_core::FontStyle;
+    use zenith_layout::{TextDirection, ZenithGlyphRun};
+
+    use crate::ir::{Color, SceneCommand};
+
+    use super::super::pack::LineStyle;
+    use super::super::shape::{WordMetrics, WordSource};
+
+    fn word(advance: f64) -> WordToken {
+        WordToken {
+            runs: vec![ZenithGlyphRun {
+                font_id: "test-font".to_owned(),
+                font_size: 16.0,
+                ascent: 12.0,
+                descent: 4.0,
+                line_height: 18.0,
+                advance_width: advance as f32,
+                glyphs: Vec::new(),
+            }],
+            advance,
+            color: Color::srgb(0, 0, 0, 255),
+            underline: false,
+            strikethrough: false,
+            highlight: None,
+            code: false,
+            link: None,
+            baseline_dy: 0.0,
+            glued: false,
+            src: WordSource {
+                text: String::new(),
+                weight: 400,
+                style: FontStyle::Normal,
+                font_size: 16.0,
+                paragraph: 0,
+                hyphen_part: None,
+            },
+        }
+    }
+
+    fn global_metrics() -> WordMetrics {
+        WordMetrics {
+            ascent: 12.0,
+            line_height: 18.0,
+            space_advance: 5.0,
+        }
+    }
+
+    /// Collect baseline_y for every DrawGlyphRun command (the `y` field).
+    fn baseline_ys(commands: &[SceneCommand]) -> Vec<f64> {
+        commands
+            .iter()
+            .filter_map(|c| match c {
+                SceneCommand::DrawGlyphRun { y, .. } => Some(*y),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// (a) A line with `line_style: None` uses the node-global ascent to
+    /// position its baseline. With `text_y = 0` and `global ascent = 12`,
+    /// `baseline_y = 0 + 12 + 0 = 12`.
+    #[test]
+    fn none_line_uses_global_ascent() {
+        let line = Line {
+            words: vec![word(20.0)],
+            content_w: 20.0,
+            paragraph: 0,
+            height_px: 18.0,
+            line_style: None,
+        };
+        let mut commands = Vec::new();
+        emit_lines(
+            std::slice::from_ref(&line),
+            0.0,
+            /* text_y */ 0.0,
+            100.0,
+            EmitStyle {
+                align: "start",
+                metrics: global_metrics(),
+                font_size: 16.0,
+                deco_thickness: 1.0,
+                justify_final_line: false,
+                direction: TextDirection::Ltr,
+                glyph_stroke: (None, None),
+            },
+            &mut commands,
+        );
+        let ys = baseline_ys(&commands);
+        // baseline_y = text_y(0) + global_ascent(12) + y_offset(0) = 12.
+        assert_eq!(ys, vec![12.0], "None line must use global ascent (12)");
+    }
+
+    /// (b) A line with `line_style: Some(LineStyle { ascent: 24, .. })` uses
+    /// its own larger ascent, shifting the baseline down relative to a None line.
+    /// With `text_y = 0` and `line ascent = 24`, `baseline_y = 0 + 24 + 0 = 24`.
+    #[test]
+    fn some_line_uses_override_ascent() {
+        let line = Line {
+            words: vec![word(20.0)],
+            content_w: 20.0,
+            paragraph: 0,
+            height_px: 36.0,
+            line_style: Some(LineStyle {
+                ascent: 24.0,
+                space_advance: 8.0,
+                font_size: 32.0,
+                deco_thickness: 2.0,
+            }),
+        };
+        let mut commands = Vec::new();
+        emit_lines(
+            std::slice::from_ref(&line),
+            0.0,
+            /* text_y */ 0.0,
+            100.0,
+            EmitStyle {
+                align: "start",
+                metrics: global_metrics(), // global ascent = 12, NOT used for this line
+                font_size: 16.0,
+                deco_thickness: 1.0,
+                justify_final_line: false,
+                direction: TextDirection::Ltr,
+                glyph_stroke: (None, None),
+            },
+            &mut commands,
+        );
+        let ys = baseline_ys(&commands);
+        // baseline_y = text_y(0) + line_ascent(24) + y_offset(0) = 24.
+        assert_eq!(
+            ys,
+            vec![24.0],
+            "Some line must use its own ascent (24), not the global (12)"
+        );
+    }
+
+    /// Two lines: line0 has `None` (global ascent 12), line1 has
+    /// `Some(ascent=24)`. The baselines must be at 12 and 12+18+24=54
+    /// (line0 height_px=18 advances y_offset to 18, then line1 baseline
+    /// = text_y(0) + line1_ascent(24) + y_offset(18) = 42).
+    #[test]
+    fn two_lines_mixed_style_correct_baselines() {
+        let line0 = Line {
+            words: vec![word(20.0)],
+            content_w: 20.0,
+            paragraph: 0,
+            height_px: 18.0,
+            line_style: None,
+        };
+        let line1 = Line {
+            words: vec![word(20.0)],
+            content_w: 20.0,
+            paragraph: 0,
+            height_px: 36.0,
+            line_style: Some(LineStyle {
+                ascent: 24.0,
+                space_advance: 8.0,
+                font_size: 32.0,
+                deco_thickness: 2.0,
+            }),
+        };
+        let mut commands = Vec::new();
+        emit_lines(
+            &[line0, line1],
+            0.0,
+            0.0,
+            100.0,
+            EmitStyle {
+                align: "start",
+                metrics: global_metrics(),
+                font_size: 16.0,
+                deco_thickness: 1.0,
+                justify_final_line: false,
+                direction: TextDirection::Ltr,
+                glyph_stroke: (None, None),
+            },
+            &mut commands,
+        );
+        let ys = baseline_ys(&commands);
+        // line0: baseline = 0 + 12 + 0 = 12. y_offset advances by 18.
+        // line1: baseline = 0 + 24 + 18 = 42.
+        assert_eq!(
+            ys,
+            vec![12.0, 42.0],
+            "mixed None/Some lines must produce independent baselines"
+        );
     }
 }

@@ -544,6 +544,7 @@ mod widow_orphan_tests {
                 content_w: 0.0,
                 paragraph: p,
                 height_px: 0.0,
+                line_style: None,
             })
             .collect()
     }

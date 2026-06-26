@@ -21,6 +21,20 @@ pub(in crate::compile) struct LineMetrics {
     pub(in crate::compile) line_height: f64,
 }
 
+/// Per-line style scalars that override the node-global [`EmitStyle`] values
+/// when `Some`. When `None` (the default for every existing path), the emit
+/// loop falls back to the node-global values and produces byte-identical output.
+///
+/// Used by the next unit to vary ascent/spacing per heading level inside one
+/// flow without touching any existing path.
+#[derive(Clone, Copy)]
+pub(in crate::compile) struct LineStyle {
+    pub(in crate::compile) ascent: f64,
+    pub(in crate::compile) space_advance: f64,
+    pub(in crate::compile) font_size: f32,
+    pub(in crate::compile) deco_thickness: f64,
+}
+
 /// One packed line: its words plus the summed content width (no trailing space).
 pub(in crate::compile) struct Line {
     pub(in crate::compile) words: Vec<WordToken>,
@@ -36,6 +50,11 @@ pub(in crate::compile) struct Line {
     /// unit will vary this per-line (e.g. markdown headings vs body in one flow)
     /// without changing any existing output.
     pub(in crate::compile) height_px: f64,
+    /// Per-line style override. `None` (the default) means use the node-global
+    /// [`EmitStyle`] values; `Some(ls)` substitutes `ls` for this line's
+    /// ascent, space_advance, font_size, and deco_thickness. Byte-identical
+    /// when `None` for every line (all existing paths).
+    pub(in crate::compile) line_style: Option<LineStyle>,
 }
 
 /// Greedy-pack word tokens into lines for a given box width, left-to-right and
@@ -256,6 +275,7 @@ pub(in crate::compile) fn pack_lines_core(
                     content_w: 0.0,
                     paragraph: tok.src.paragraph,
                     height_px: line_height,
+                    line_style: None,
                 });
             }
         }
@@ -297,6 +317,7 @@ pub(in crate::compile) fn pack_lines_core(
                         content_w: line_w,
                         paragraph: cur_para,
                         height_px: line_height,
+                        line_style: None,
                     });
                     line_w = 0.0;
                     // The tail becomes the first word of the next line.
@@ -332,6 +353,7 @@ pub(in crate::compile) fn pack_lines_core(
                     content_w: advance,
                     paragraph,
                     height_px: line_height,
+                    line_style: None,
                 });
                 return lines;
             }
@@ -344,6 +366,7 @@ pub(in crate::compile) fn pack_lines_core(
                     content_w: head_advance,
                     paragraph: head_para,
                     height_px: line_height,
+                    line_style: None,
                 });
                 queue.push_front(tail);
                 continue;
@@ -359,6 +382,7 @@ pub(in crate::compile) fn pack_lines_core(
                 content_w,
                 paragraph: cur_para,
                 height_px: line_height,
+                line_style: None,
             });
             line_w = 0.0;
             // Re-queue this word and restart the loop so the blocked-line skip at
@@ -386,6 +410,7 @@ pub(in crate::compile) fn pack_lines_core(
             content_w: line_w,
             paragraph: cur_para,
             height_px: line_height,
+            line_style: None,
         });
     }
     lines
