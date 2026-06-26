@@ -439,8 +439,15 @@ pub fn compile_page(
     // already surfaced on page 0). Page 0 keeps them.
     let engine = RustybuzzEngine::new();
     let mut chain_diags: Vec<Diagnostic> = Vec::new();
-    let chains =
-        resolve_chains_document(doc, resolved, &style_map, fonts, &engine, &mut chain_diags);
+    let chains = resolve_chains_document(
+        doc,
+        resolved,
+        &style_map,
+        fonts,
+        &engine,
+        &md_blocks,
+        &mut chain_diags,
+    );
     // Multi-page table flow pre-pass (DOCUMENT-WIDE), built ONCE like the chain
     // map and threaded identically into every `compile_node`. Its advisories are
     // document-wide; like the chain diags they surface only on page 0.

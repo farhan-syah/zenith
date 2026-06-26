@@ -31,9 +31,11 @@
 //! for the first block) and so reduces to the historical inline path's command
 //! stream.
 
+use std::collections::BTreeMap;
+
 use zenith_core::{
-    BlockStyle, Diagnostic, Dimension, ListKind, MdBlock, PropertyValue, TextNode, TextSpan, Unit,
-    dim_to_px,
+    BlockStyle, Diagnostic, Dimension, ListKind, MdBlock, PropertyValue, ResolvedToken, TextNode,
+    TextSpan, Unit, dim_to_px,
 };
 
 use crate::ir::{Color, Paint, SceneCommand};
@@ -74,30 +76,30 @@ const BLOCK_SPACE_AFTER_FACTOR: f64 = 0.4;
 const HR_SPACE_FACTOR: f64 = 0.5;
 
 /// A block role's fully resolved, concrete style + spacing.
-struct ResolvedBlockStyle {
+pub(in crate::compile) struct ResolvedBlockStyle {
     /// Font family as a `PropertyValue` ready to set on the synth node (token
     /// ref or literal); `None` keeps the node's own family.
-    font_family: Option<PropertyValue>,
+    pub(in crate::compile) font_family: Option<PropertyValue>,
     /// Font size in pixels.
-    font_size_px: f64,
+    pub(in crate::compile) font_size_px: f64,
     /// Font weight as a `PropertyValue` (token ref or literal); `None` keeps the
     /// node's own weight.
-    font_weight: Option<PropertyValue>,
+    pub(in crate::compile) font_weight: Option<PropertyValue>,
     /// Fill color as a `PropertyValue`; `None` keeps the node's own fill.
-    fill: Option<PropertyValue>,
+    pub(in crate::compile) fill: Option<PropertyValue>,
     /// Horizontal alignment override (`"left"`/`"center"`/`"right"`/`"justify"`);
     /// `None` keeps the node's own align.
-    align: Option<String>,
+    pub(in crate::compile) align: Option<String>,
     /// Italic override; `None` keeps upright.
-    italic: Option<bool>,
+    pub(in crate::compile) italic: Option<bool>,
     /// Space inserted above the block, in pixels.
-    space_before_px: f64,
+    pub(in crate::compile) space_before_px: f64,
     /// Space inserted below the block, in pixels.
-    space_after_px: f64,
+    pub(in crate::compile) space_after_px: f64,
 }
 
 /// Map an [`MdBlock`] to its block-role string (the cascade key).
-fn block_role(block: &MdBlock) -> &'static str {
+pub(in crate::compile) fn block_role(block: &MdBlock) -> &'static str {
     match block {
         MdBlock::Heading { level, .. } => match level {
             1 => "h1",
@@ -176,25 +178,71 @@ fn resolve_block_style_for_role(
     text: &TextNode,
     env: TextCompileEnv,
 ) -> ResolvedBlockStyle {
-    let node_styles = text.block_styles.as_slice();
-    let page_styles = env.page_block_styles;
-    let doc_styles = env.doc_block_styles;
+    let node_font_size = f64::from(font_size_px(text, env.resolved, env.style_map));
+    resolve_block_style_core(BlockStyleCascade {
+        role,
+        node_styles: text.block_styles.as_slice(),
+        page_styles: env.page_block_styles,
+        doc_styles: env.doc_block_styles,
+        resolved: env.resolved,
+        node_font_size,
+        node_font_family: text.font_family.as_ref(),
+        node_font_weight: text.font_weight.as_ref(),
+        node_fill: text.fill.as_ref(),
+        node_align: text.align.as_ref(),
+    })
+}
+
+/// The inputs the block-role cascade needs, bundled into one `Copy`-ish struct so
+/// both the single-box markdown path and the chain block path call the SAME
+/// resolver (keeping cascade behavior byte-identical between the two). The
+/// `node_*` fields are the node-level fallbacks applied per property when the
+/// cascade supplies none; `node_font_size` is the already-resolved node base size
+/// (px) used both as the font-size fallback and as the spacing-factor base.
+pub(in crate::compile) struct BlockStyleCascade<'a> {
+    pub(in crate::compile) role: &'a str,
+    pub(in crate::compile) node_styles: &'a [BlockStyle],
+    pub(in crate::compile) page_styles: &'a [BlockStyle],
+    pub(in crate::compile) doc_styles: &'a [BlockStyle],
+    pub(in crate::compile) resolved: &'a BTreeMap<String, ResolvedToken>,
+    pub(in crate::compile) node_font_size: f64,
+    pub(in crate::compile) node_font_family: Option<&'a PropertyValue>,
+    pub(in crate::compile) node_font_weight: Option<&'a PropertyValue>,
+    pub(in crate::compile) node_fill: Option<&'a PropertyValue>,
+    pub(in crate::compile) node_align: Option<&'a String>,
+}
+
+/// Resolve a block role's concrete style + spacing via the node > page > document
+/// cascade, falling back per-property to the node-level values. This is the
+/// SINGLE cascade resolver shared by the single-box markdown layout and the
+/// chained-markdown block flow, so both honor the same precedence.
+pub(in crate::compile) fn resolve_block_style_core(c: BlockStyleCascade) -> ResolvedBlockStyle {
+    let BlockStyleCascade {
+        role,
+        node_styles,
+        page_styles,
+        doc_styles,
+        resolved,
+        node_font_size,
+        node_font_family,
+        node_font_weight,
+        node_fill,
+        node_align,
+    } = c;
 
     // Font family: cascade override, else the node's own family.
     let font_family = cascade_prop(role, node_styles, page_styles, doc_styles, |b| {
         b.font_family.as_ref()
     })
     .cloned()
-    .or_else(|| text.font_family.clone());
+    .or_else(|| node_font_family.cloned());
 
     // Font size px: cascade override resolves against the token map, else the
-    // node's own resolved size (the historical default 16.0 applies inside
-    // `font_size_px` when the node sets none).
-    let node_font_size = f64::from(font_size_px(text, env.resolved, env.style_map));
+    // node's own resolved size.
     let font_size_px = match cascade_prop(role, node_styles, page_styles, doc_styles, |b| {
         b.font_size.as_ref()
     }) {
-        Some(prop) => resolve_property_dimension_px(Some(prop), env.resolved, node_font_size),
+        Some(prop) => resolve_property_dimension_px(Some(prop), resolved, node_font_size),
         None => node_font_size,
     };
 
@@ -202,18 +250,18 @@ fn resolve_block_style_for_role(
         b.font_weight.as_ref()
     })
     .cloned()
-    .or_else(|| text.font_weight.clone());
+    .or_else(|| node_font_weight.cloned());
 
     let fill = cascade_prop(role, node_styles, page_styles, doc_styles, |b| {
         b.fill.as_ref()
     })
     .cloned()
-    .or_else(|| text.fill.clone());
+    .or_else(|| node_fill.cloned());
 
     let align = cascade_field(role, node_styles, page_styles, doc_styles, |b| {
         b.align.clone()
     })
-    .or_else(|| text.align.clone());
+    .or_else(|| node_align.cloned());
 
     let italic = cascade_field(role, node_styles, page_styles, doc_styles, |b| b.italic);
 

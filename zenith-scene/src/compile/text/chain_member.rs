@@ -90,7 +90,12 @@ pub(in crate::compile) fn render_chain_member(
         && let Some(box_h) = box_h_opt
     {
         const EPSILON: f64 = 0.5;
-        let content_height = assignment.lines.len() as f64 * assignment.metrics.line_height;
+        // Sum the per-line heights: a chained markdown flow has heterogeneous line
+        // heights (headings vs body + folded inter-block gaps), so the content
+        // height is the cumulative `height_px`, not `lines × line_height`. For a
+        // uniform chain every `height_px` equals `metrics.line_height`, so this is
+        // identical to the prior formula (byte-identical for non-markdown chains).
+        let content_height = assignment.lines.iter().map(|l| l.height_px).sum::<f64>();
         if content_height > box_h + EPSILON {
             diagnostics.push(Diagnostic::error(
                 "text.fit_failed",
@@ -213,5 +218,8 @@ pub(in crate::compile) fn render_chain_member(
         commands.push(SceneCommand::PopTransform);
     }
 
-    assignment.lines.len() as f64 * emit_metrics.line_height
+    // Laid-out content height = sum of per-line heights (heterogeneous for a
+    // chained markdown flow; identical to `lines × line_height` for a uniform
+    // chain, so byte-identical flow-advance for non-markdown chains).
+    assignment.lines.iter().map(|l| l.height_px).sum::<f64>()
 }

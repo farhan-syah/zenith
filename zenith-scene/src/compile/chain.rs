@@ -54,12 +54,14 @@ use zenith_layout::{RustybuzzEngine, TextDirection};
 
 use crate::ir::Color;
 
+use super::markdown_resolve::MdBlockMap;
 use super::paint::resolve_property_color;
 use super::style_prop;
 use super::text::{
-    HyphenationContext, LINK_COLOR, Line, NodeShape, ResolvedSpan, ShapeEnv, WordMetrics,
-    en_us_hyphenator, flatten_lines_to_tokens, pack_lines, resolve_family_with_fallback,
-    resolve_font_family_name, resolve_font_weight, resolve_vertical_align, shape_words,
+    BlockStyleEnv, ChainSourceShape, HyphenationContext, LINK_COLOR, Line, LineStyle, NodeShape,
+    ResolvedSpan, ShapeEnv, WordMetrics, WordToken, en_us_hyphenator, flatten_lines_to_tokens,
+    pack_lines, resolve_family_with_fallback, resolve_font_family_name, resolve_font_weight,
+    resolve_vertical_align, shape_source_blocks, shape_words,
 };
 use super::util::resolve_property_dimension_px;
 
@@ -106,20 +108,27 @@ fn member_box(text: &TextNode) -> Option<(f64, f64, f64, f64)> {
 }
 
 /// Depth-first walk in source order collecting `(chain_id → ordered members)`
-/// plus the first span-bearing member node per chain (the content source).
+/// plus the first span-bearing member node per chain (the content source) and the
+/// block-style cascade scope (the page the source lives on) for that source.
 fn collect_chains<'a>(
     nodes: &'a [Node],
+    page_block_styles: &'a [zenith_core::BlockStyle],
     members: &mut BTreeMap<String, Vec<Member>>,
     source: &mut BTreeMap<String, &'a TextNode>,
+    source_page_styles: &mut BTreeMap<String, &'a [zenith_core::BlockStyle]>,
 ) {
     for node in nodes {
         match node {
             Node::Text(t) => {
                 if let Some(chain_id) = &t.chain {
-                    // First span-bearing member becomes the content source.
+                    // First span-bearing member becomes the content source. Record
+                    // the page-scope block styles for that source's page, so a
+                    // markdown chain resolves its block cascade against the page it
+                    // is authored on (chains span pages, but the source is on one).
                     let has_spans = t.spans.iter().any(|s| !s.text.is_empty());
-                    if has_spans {
-                        source.entry(chain_id.clone()).or_insert(t);
+                    if has_spans && !source.contains_key(chain_id) {
+                        source.insert(chain_id.clone(), t);
+                        source_page_styles.insert(chain_id.clone(), page_block_styles);
                     }
                     if let Some((_x, _y, w, h)) = member_box(t) {
                         members.entry(chain_id.clone()).or_default().push(Member {
@@ -130,12 +139,30 @@ fn collect_chains<'a>(
                     }
                 }
             }
-            Node::Frame(f) => collect_chains(&f.children, members, source),
-            Node::Group(g) => collect_chains(&g.children, members, source),
+            Node::Frame(f) => collect_chains(
+                &f.children,
+                page_block_styles,
+                members,
+                source,
+                source_page_styles,
+            ),
+            Node::Group(g) => collect_chains(
+                &g.children,
+                page_block_styles,
+                members,
+                source,
+                source_page_styles,
+            ),
             Node::Table(t) => {
                 for row in &t.rows {
                     for cell in &row.cells {
-                        collect_chains(&cell.children, members, source);
+                        collect_chains(
+                            &cell.children,
+                            page_block_styles,
+                            members,
+                            source,
+                            source_page_styles,
+                        );
                     }
                 }
             }
@@ -159,17 +186,17 @@ fn collect_chains<'a>(
     }
 }
 
-/// Resolve the chain source's shared render style into `families`, `font_size`,
-/// the node base weight, and the per-span [`ResolvedSpan`] carriers used for
-/// shaping. Mirrors `compile_text`'s resolution at opacity 1.0 (v0: no cascade).
-fn resolve_chain_style(
+/// Resolve only the chain source's shared base render style: `families`,
+/// `font_size`, and the node base `weight`. Does NOT build [`ResolvedSpan`]s, so
+/// it is cheap enough to call on the block path where the per-span resolution
+/// would allocate a [`Vec<ResolvedSpan>`] that is immediately discarded.
+fn resolve_chain_base_style(
     source: &TextNode,
     resolved: &BTreeMap<String, ResolvedToken>,
     style_map: &BTreeMap<&str, &Style>,
     fonts: &dyn FontProvider,
     diagnostics: &mut Vec<Diagnostic>,
-) -> (Vec<String>, f32, u16, Vec<ResolvedSpan>) {
-    // Font family with style cascade → default "Noto Sans".
+) -> (Vec<String>, f32, u16) {
     let font_family_prop = source
         .font_family
         .as_ref()
@@ -203,13 +230,34 @@ fn resolve_chain_style(
     }
     let families = vec![family_name];
 
-    // Font size with style cascade → 16.0.
     let font_size_prop = source
         .font_size
         .clone()
         .or_else(|| style_prop(&source.style, style_map, "font-size").cloned());
     let font_size: f32 =
         resolve_property_dimension_px(font_size_prop.as_ref(), resolved, 16.0) as f32;
+
+    let node_weight_prop: Option<&PropertyValue> = source
+        .font_weight
+        .as_ref()
+        .or_else(|| style_prop(&source.style, style_map, "font-weight"));
+    let base_weight = resolve_font_weight(node_weight_prop, resolved, 400);
+
+    (families, font_size, base_weight)
+}
+
+/// Resolve the chain source's shared render style into `families`, `font_size`,
+/// the node base weight, and the per-span [`ResolvedSpan`] carriers used for
+/// shaping. Mirrors `compile_text`'s resolution at opacity 1.0 (v0: no cascade).
+fn resolve_chain_style(
+    source: &TextNode,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    style_map: &BTreeMap<&str, &Style>,
+    fonts: &dyn FontProvider,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> (Vec<String>, f32, u16, Vec<ResolvedSpan>) {
+    let (families, font_size, base_weight) =
+        resolve_chain_base_style(source, resolved, style_map, fonts, diagnostics);
 
     // Node-level fill/weight fallbacks (span override → node → style → default).
     let node_fill_prop: Option<&PropertyValue> = source
@@ -220,7 +268,6 @@ fn resolve_chain_style(
         .font_weight
         .as_ref()
         .or_else(|| style_prop(&source.style, style_map, "font-weight"));
-    let base_weight = resolve_font_weight(node_weight_prop, resolved, 400);
 
     let mut spans: Vec<ResolvedSpan> = Vec::new();
     for span in &source.spans {
@@ -300,6 +347,7 @@ pub(super) fn resolve_chains_document<'a>(
     style_map: &BTreeMap<&str, &Style>,
     fonts: &dyn FontProvider,
     engine: &RustybuzzEngine,
+    md_blocks: &MdBlockMap,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> ChainAssignments {
     // Collect members + content sources across ALL pages in page-then-source
@@ -307,19 +355,43 @@ pub(super) fn resolve_chains_document<'a>(
     // is exactly the document-wide flow order.
     let mut members: BTreeMap<String, Vec<Member>> = BTreeMap::new();
     let mut source: BTreeMap<String, &'a TextNode> = BTreeMap::new();
+    let mut source_page_styles: BTreeMap<String, &'a [zenith_core::BlockStyle]> = BTreeMap::new();
     for page in &doc.body.pages {
-        collect_chains(&page.children, &mut members, &mut source);
+        collect_chains(
+            &page.children,
+            &page.block_styles,
+            &mut members,
+            &mut source,
+            &mut source_page_styles,
+        );
     }
 
     distribute_chains(
         &members,
         &source,
-        resolved,
-        style_map,
+        &source_page_styles,
+        ChainDocStyles {
+            resolved,
+            style_map,
+            doc_block_styles: &doc.body.block_styles,
+            md_blocks,
+        },
         fonts,
         engine,
         diagnostics,
     )
+}
+
+/// The document-wide style lookups threaded into [`distribute_chains`], bundled
+/// so the distributor edge stays under the argument lint. `md_blocks` is the
+/// parsed-markdown side-channel keyed by node id: a chain whose source id is
+/// present here flows as BLOCKS; every other chain stays on the inline path.
+#[derive(Clone, Copy)]
+struct ChainDocStyles<'a> {
+    resolved: &'a BTreeMap<String, ResolvedToken>,
+    style_map: &'a BTreeMap<&'a str, &'a Style>,
+    doc_block_styles: &'a [zenith_core::BlockStyle],
+    md_blocks: &'a MdBlockMap,
 }
 
 /// Shared distributor: shape each chain's source once and pour its words greedily
@@ -329,12 +401,14 @@ pub(super) fn resolve_chains_document<'a>(
 fn distribute_chains(
     members: &BTreeMap<String, Vec<Member>>,
     source: &BTreeMap<String, &TextNode>,
-    resolved: &BTreeMap<String, ResolvedToken>,
-    style_map: &BTreeMap<&str, &Style>,
+    source_page_styles: &BTreeMap<String, &[zenith_core::BlockStyle]>,
+    doc_styles: ChainDocStyles,
     fonts: &dyn FontProvider,
     engine: &RustybuzzEngine,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> ChainAssignments {
+    let resolved = doc_styles.resolved;
+    let style_map = doc_styles.style_map;
     let mut assignments: ChainAssignments = BTreeMap::new();
 
     for (chain_id, chain_members) in members {
@@ -349,6 +423,31 @@ fn distribute_chains(
             Some("rtl") => TextDirection::Rtl,
             _ => TextDirection::Ltr,
         };
+
+        // ── BLOCK PATH ────────────────────────────────────────────────────
+        // When the source id is in the parsed-markdown side-channel, this chain
+        // flows as BLOCKS (headings styled, paragraphs spaced) across members.
+        // Every other chain (and a markdown source that parsed to no blocks)
+        // takes the historical inline path below — byte-identical.
+        if let Some(blocks) = doc_styles.md_blocks.get(&src.id)
+            && !blocks.is_empty()
+        {
+            distribute_block_chain(
+                BlockChainInput {
+                    src,
+                    blocks: blocks.as_slice(),
+                    chain_members: chain_members.as_slice(),
+                    page_block_styles: source_page_styles.get(chain_id).copied().unwrap_or(&[]),
+                    doc_styles,
+                    direction,
+                    fonts,
+                    engine,
+                },
+                diagnostics,
+                &mut assignments,
+            );
+            continue;
+        }
 
         // Shape the source spans ONCE into word tokens with the shared style.
         let (families, font_size, base_weight, spans) =
@@ -464,6 +563,241 @@ fn distribute_chains(
     }
 
     assignments
+}
+
+/// Distribute a CHAINED markdown source across its members as styled BLOCKS.
+///
+/// Each [`MdBlock`] is shaped once (per-block font/size/fill via the shared
+/// cascade) into a descriptor; this distributor then packs each block's tokens to
+/// each member's OWN width (members differ) and tags every resulting [`Line`] with
+/// that block's per-line style + height, so a heading and body paragraph keep
+/// their own ascent/size while sharing one galley. Inter-block spacing is folded
+/// into the LAST line of the previous block's `height_px`; the very first block's
+/// space-before is suppressed (no gap at the galley top). When a block boundary
+/// lands at a member-box bottom the trailing gap simply ends that box (v1).
+///
+/// Overflow beyond the last member rides the EXISTING chain overflow path: the
+/// last member keeps all remaining lines and `chain_member` raises the existing
+/// `text.fit_failed` diagnostic under `overflow="fit"`, so the "add a chained
+/// box" guidance persists until the article fits.
+struct BlockChainInput<'a> {
+    src: &'a TextNode,
+    blocks: &'a [zenith_core::MdBlock],
+    chain_members: &'a [Member],
+    page_block_styles: &'a [zenith_core::BlockStyle],
+    doc_styles: ChainDocStyles<'a>,
+    direction: TextDirection,
+    fonts: &'a dyn FontProvider,
+    engine: &'a RustybuzzEngine,
+}
+
+fn distribute_block_chain(
+    input: BlockChainInput,
+    diagnostics: &mut Vec<Diagnostic>,
+    assignments: &mut ChainAssignments,
+) {
+    let BlockChainInput {
+        src,
+        blocks,
+        chain_members,
+        page_block_styles,
+        doc_styles,
+        direction,
+        fonts,
+        engine,
+    } = input;
+
+    // The chain source's base render style (families/size/weight) for the cascade
+    // fallback. The returned spans are unused on the block path.
+    // Use the base-style resolver (families/size/weight only) — the per-span
+    // ResolvedSpan allocation is not needed on the block path.
+    let (families, font_size, base_weight) = resolve_chain_base_style(
+        src,
+        doc_styles.resolved,
+        doc_styles.style_map,
+        fonts,
+        diagnostics,
+    );
+
+    let descriptors = shape_source_blocks(
+        src,
+        blocks,
+        ChainSourceShape {
+            families: &families,
+            node_font_size: font_size,
+            base_weight,
+            direction,
+        },
+        BlockStyleEnv {
+            resolved: doc_styles.resolved,
+            page_block_styles,
+            doc_block_styles: doc_styles.doc_block_styles,
+        },
+        ShapeEnv { engine, fonts },
+        diagnostics,
+    );
+
+    // The chain's representative metrics = the FIRST block's metrics (used by the
+    // baseline-grid snap + as the assignment-level fallback). Per-line style on
+    // each Line carries the real per-block values for emit.
+    let rep_metrics = descriptors.first().map(|d| d.metrics).unwrap_or_default();
+
+    // A FIFO of blocks awaiting placement. Each block's owned tokens are consumed
+    // exactly once (no cloning): a straddling block re-queues its overflow tail at
+    // the FRONT (re-wrapped to the next member's width). `style` carries the
+    // per-line style/metrics/spacing; `is_spacer` marks a horizontal-rule gap.
+    struct PendingBlock {
+        index: usize,
+        tokens: Vec<WordToken>,
+        style: LineStyle,
+        line_height: f64,
+        space_advance: f64,
+        space_after_px: f64,
+        space_before_px: f64,
+        is_spacer: bool,
+    }
+    let mut queue: std::collections::VecDeque<PendingBlock> = descriptors
+        .into_iter()
+        .enumerate()
+        .map(|(index, d)| PendingBlock {
+            index,
+            tokens: d.tokens,
+            style: d.line_style,
+            line_height: d.metrics.line_height,
+            space_advance: d.metrics.space_advance,
+            space_after_px: d.space_after_px,
+            space_before_px: d.space_before_px,
+            is_spacer: d.is_spacer,
+        })
+        .collect();
+
+    let last_member = chain_members.len().saturating_sub(1);
+
+    for (mi, member) in chain_members.iter().enumerate() {
+        let mut member_lines: Vec<Line> = Vec::new();
+        let mut used_h = 0.0_f64;
+        let is_last = mi == last_member;
+        // The block index of the previous line in THIS member, the gap-fold
+        // target. `None` before any line in this member → no fold at the top.
+        let mut prev_block_in_member: Option<usize> = None;
+        // The `space_after` of the block that owns the previous line in THIS
+        // member, captured when it was placed (its descriptor is consumed by then).
+        let mut prev_space_after: f64 = 0.0;
+
+        while let Some(block) = queue.pop_front() {
+            // A spacer block (horizontal rule) is ONE empty line of the gap height.
+            let mut block_lines: Vec<Line> = if block.is_spacer {
+                vec![Line {
+                    words: Vec::new(),
+                    content_w: 0.0,
+                    paragraph: block.index,
+                    height_px: block.line_height,
+                    line_style: Some(block.style),
+                }]
+            } else {
+                let mut ls = pack_lines(
+                    block.tokens,
+                    member.w,
+                    block.space_advance,
+                    None,
+                    block.line_height,
+                );
+                for l in &mut ls {
+                    l.paragraph = block.index;
+                    l.line_style = Some(block.style);
+                }
+                ls
+            };
+
+            // Fold the inter-block gap into the previous line of THIS member when
+            // this is a NEW block (the prior member-top continuation gets no fold,
+            // so the gap that ended the prior box is not double-counted). The gap
+            // is `prev.space_after + this.space_before`.
+            let gap = match prev_block_in_member {
+                Some(prev_idx) if prev_idx != block.index => {
+                    prev_space_after + block.space_before_px
+                }
+                _ => 0.0,
+            };
+
+            if is_last {
+                // Last member keeps everything; overflow rides chain_member's own
+                // `overflow="fit"` check + the assignment carries all leftover.
+                if gap > 0.0
+                    && let Some(prev_line) = member_lines.last_mut()
+                {
+                    prev_line.height_px += gap;
+                }
+                if block_lines.last().is_some() {
+                    prev_block_in_member = Some(block.index);
+                    prev_space_after = block.space_after_px;
+                }
+                member_lines.append(&mut block_lines);
+                continue;
+            }
+
+            // Apply the gap to the previous line (folded into its height) before
+            // measuring this block, so the gap counts against the box budget.
+            if gap > 0.0
+                && let Some(prev_line) = member_lines.last_mut()
+            {
+                prev_line.height_px += gap;
+                used_h += gap;
+            }
+
+            // Place lines while the box height allows. A still-empty member always
+            // takes at least the first line so content cannot stall.
+            let mut placed = 0usize;
+            for l in &block_lines {
+                if used_h + l.height_px > member.h && !member_lines.is_empty() {
+                    break;
+                }
+                used_h += l.height_px;
+                placed += 1;
+            }
+
+            if placed == block_lines.len() {
+                if block_lines.last().is_some() {
+                    prev_block_in_member = Some(block.index);
+                    prev_space_after = block.space_after_px;
+                }
+                member_lines.append(&mut block_lines);
+                continue;
+            }
+
+            // The block straddles this member boundary: keep `placed` lines here,
+            // re-queue the overflow tail (re-wrapped to the NEXT member's width).
+            let kept: Vec<Line> = block_lines.drain(..placed).collect();
+            member_lines.extend(kept);
+            let tail_tokens = flatten_lines_to_tokens(block_lines, None);
+            queue.push_front(PendingBlock {
+                index: block.index,
+                tokens: tail_tokens,
+                style: block.style,
+                line_height: block.line_height,
+                space_advance: block.space_advance,
+                space_after_px: block.space_after_px,
+                // A continued tail carries NO space-before (the block already
+                // started above); its space-after still applies after it ends.
+                space_before_px: 0.0,
+                is_spacer: false,
+            });
+            break;
+        }
+
+        assignments.insert(
+            member.id.clone(),
+            ChainAssignment {
+                lines: member_lines,
+                metrics: rep_metrics,
+                is_last_member: is_last,
+            },
+        );
+
+        if is_last {
+            break;
+        }
+    }
 }
 
 /// Adjust a greedy height-cut `take` (number of lines kept in THIS box, out of
