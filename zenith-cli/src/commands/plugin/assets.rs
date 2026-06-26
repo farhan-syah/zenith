@@ -35,23 +35,29 @@ pub fn skill_description() -> Option<String> {
     })
 }
 
-/// Split a `---\n…\n---\n` frontmatter block off the front of `s`.
+/// Split a `---` frontmatter block off the front of `s`, accepting LF or CRLF.
 /// Returns `(frontmatter_without_fences, body)`.
 fn split_frontmatter(s: &str) -> (Option<&str>, &str) {
-    let Some(rest) = s.strip_prefix("---\n") else {
+    let s = s.strip_prefix('\u{feff}').unwrap_or(s);
+    let rest = if let Some(rest) = s.strip_prefix("---\r\n") {
+        rest
+    } else if let Some(rest) = s.strip_prefix("---\n") {
+        rest
+    } else {
         return (None, s);
     };
-    match rest.find("\n---") {
-        Some(end) => {
-            let fm = &rest[..end];
-            // Body begins after the closing fence line.
-            let after = &rest[end + "\n---".len()..];
-            let body = after.strip_prefix('\n').unwrap_or(after);
-            let body = body.strip_prefix('\n').unwrap_or(body);
-            (Some(fm), body)
+
+    for (line_start, line) in rest.split_inclusive('\n').scan(0usize, |offset, line| {
+        let line_start = *offset;
+        *offset += line.len();
+        Some((line_start, line))
+    }) {
+        if line.trim_end_matches(['\r', '\n']) == "---" {
+            return (Some(&rest[..line_start]), &rest[line_start + line.len()..]);
         }
-        None => (None, s),
     }
+
+    (None, s)
 }
 
 fn frontmatter(s: &str) -> Option<&str> {
@@ -73,4 +79,40 @@ fn unquote(s: &str) -> String {
         }
     }
     s.to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_frontmatter_accepts_lf() {
+        let (fm, body) = split_frontmatter("---\ndescription: test\n---\n# Body\n");
+
+        assert_eq!(fm, Some("description: test\n"));
+        assert_eq!(body, "# Body\n");
+    }
+
+    #[test]
+    fn split_frontmatter_accepts_crlf() {
+        let (fm, body) = split_frontmatter("---\r\ndescription: test\r\n---\r\n# Body\r\n");
+
+        assert_eq!(fm, Some("description: test\r\n"));
+        assert_eq!(body, "# Body\r\n");
+    }
+
+    #[test]
+    fn split_frontmatter_accepts_utf8_bom() {
+        let (fm, body) = split_frontmatter("\u{feff}---\r\ndescription: test\r\n---\r\n# Body\r\n");
+
+        assert_eq!(fm, Some("description: test\r\n"));
+        assert_eq!(body, "# Body\r\n");
+    }
+
+    #[test]
+    fn split_frontmatter_leaves_plain_markdown_unchanged() {
+        let input = "# Body\n---\nnot frontmatter\n";
+
+        assert_eq!(split_frontmatter(input), (None, input));
+    }
 }

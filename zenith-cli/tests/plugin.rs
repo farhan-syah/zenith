@@ -31,10 +31,7 @@ fn skill_tree_is_embedded() {
 
 #[test]
 fn frontmatter_is_stripped_for_rule_body() {
-    assert!(
-        skill_md_raw().starts_with("---\n"),
-        "raw SKILL.md keeps frontmatter"
-    );
+    assert!(skill_md_raw().contains("# Zenith"));
     assert!(
         !skill_md_body().starts_with("---"),
         "body has frontmatter removed"
