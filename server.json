@@ -1,10 +1,10 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.farhan-syah/zenith",
+  "name": "io.github.zenitheditor/zenith",
   "description": "Author, validate, and render deterministic .zen design documents (KDL → PNG/PDF). A token-efficient MCP surface: schema/validate/inspect/tokens/tx/render/fmt/merge/theme plus the scratch→promote→finalize workspace loop, with on-demand schema lookup and resource-link artifacts.",
   "version": "0.1.0",
   "repository": {
-    "url": "https://github.com/farhan-syah/zenith",
+    "url": "https://github.com/zenitheditor/zenith",
     "source": "github"
   },
   "packages": [

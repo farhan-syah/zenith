@@ -1,6 +1,6 @@
 # Contributing to Zenith
 
-Thanks for your interest in Zenith. This guide covers contributing to the **engine** (this repository). For sharing finished designs, see the separate [zenith-showcase](https://github.com/farhan-syah/zenith-showcase) repository.
+Thanks for your interest in Zenith. This guide covers contributing to the **engine** (this repository). For sharing finished designs, see the separate [zenith-showcase](https://github.com/zenitheditor/zenith-showcase) repository.
 
 Zenith is pre-`0.1`. The format and APIs are still moving, so opening an issue to discuss a change before you write it is usually the fastest path.
 
@@ -14,12 +14,12 @@ Zenith is pre-`0.1`. The format and APIs are still moving, so opening an issue t
 - **Libraries** — your own reusable packs (`libraries/*.zen`), or a new built-in preset shipped with the engine (see "Libraries" below).
 - **Conformance** — scenario coverage rendered into `conformance/<area>/`.
 - **Bug reports & feature requests** — open an issue with a minimal `.zen` reproduction and the exact `zenith` command and output.
-- **Designs** — reusable `.zen` source, recipes, and rendered output belong in [zenith-showcase](https://github.com/farhan-syah/zenith-showcase), not here.
+- **Designs** — reusable `.zen` source, recipes, and rendered output belong in [zenith-showcase](https://github.com/zenitheditor/zenith-showcase), not here.
 
 ## Getting Started
 
 ```bash
-git clone --recurse-submodules https://github.com/farhan-syah/zenith
+git clone --recurse-submodules https://github.com/zenitheditor/zenith
 cd zenith
 cargo build --release
 cargo test --workspace

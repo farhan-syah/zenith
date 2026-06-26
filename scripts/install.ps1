@@ -1,10 +1,10 @@
 # Zenith CLI installer for Windows (PowerShell)
 #
 # Install latest stable:
-#   irm https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/zenitheditor/zenith/main/scripts/install.ps1 | iex
 #
 # Install a specific version:
-#   $v="0.1.0"; irm https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/install.ps1 | iex
+#   $v="0.1.0"; irm https://raw.githubusercontent.com/zenitheditor/zenith/main/scripts/install.ps1 | iex
 #
 # Build and install from a local source checkout:
 #   .\scripts\install.ps1 -Local
@@ -17,7 +17,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$Repo = "farhan-syah/zenith"
+$Repo = "zenitheditor/zenith"
 $BinName = "zenith.exe"
 
 function Install-Zenith {

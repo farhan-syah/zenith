@@ -34,7 +34,7 @@ The CLI is self-documenting and **authoritative** for node/attribute/op syntax. 
 it before this skill:
 
 ```bash
-zenith --version                  # if missing, see https://github.com/farhan-syah/zenith#install
+zenith --version                  # if missing, see https://github.com/zenitheditor/zenith#install
 zenith --help                     # command list + the loop, in the tool itself
 zenith <command> --help           # exact flags and an EXAMPLE for any command
 zenith schema nodes               # all node kinds
@@ -54,7 +54,7 @@ directly, with types and required/optional status. This skill holds what the CLI
 guidance, design workflow, recipes, gotchas, and judgment calls.
 
 If `zenith` is not installed, tell the user the one-line installer
-(`curl -fsSL https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/install.sh | sh`)
+(`curl -fsSL https://raw.githubusercontent.com/zenitheditor/zenith/main/scripts/install.sh | sh`)
 rather than guessing — do not fabricate a workflow you can't run.
 
 ## The core loop (always follow this)

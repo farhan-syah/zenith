@@ -13,7 +13,7 @@ use std::process::{Command, Stdio};
 
 /// Raw URL of the install script on the default branch.
 const INSTALL_SCRIPT_URL: &str =
-    "https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/install.sh";
+    "https://raw.githubusercontent.com/zenitheditor/zenith/main/scripts/install.sh";
 
 /// Download and run the install script, forwarding the channel/version flags.
 ///

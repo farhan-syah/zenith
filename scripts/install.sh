@@ -2,27 +2,27 @@
 # Zenith CLI installer
 #
 # Install latest stable:
-#   curl -fsSL https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/zenitheditor/zenith/main/scripts/install.sh | sh
 #
 # Install latest prerelease:
-#   curl -fsSL https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/install.sh | sh -s -- --pre
+#   curl -fsSL https://raw.githubusercontent.com/zenitheditor/zenith/main/scripts/install.sh | sh -s -- --pre
 #
 # Install/switch to a specific version:
-#   curl -fsSL https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/install.sh | sh -s -- --version v0.1.0
-#   curl -fsSL https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/install.sh | sh -s -- --version v0.1.0-beta.1
+#   curl -fsSL https://raw.githubusercontent.com/zenitheditor/zenith/main/scripts/install.sh | sh -s -- --version v0.1.0
+#   curl -fsSL https://raw.githubusercontent.com/zenitheditor/zenith/main/scripts/install.sh | sh -s -- --version v0.1.0-beta.1
 #
 # Build and install from a local source checkout:
 #   ./scripts/install.sh --local
 #
 # Uninstall:
-#   curl -fsSL https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/install.sh | sh -s -- --uninstall
+#   curl -fsSL https://raw.githubusercontent.com/zenitheditor/zenith/main/scripts/install.sh | sh -s -- --uninstall
 #
 # Environment variables:
 #   ZENITH_INSTALL_DIR  Install directory (default: ~/.local/bin)
 
 set -eu
 
-REPO="farhan-syah/zenith"
+REPO="zenitheditor/zenith"
 BINARY="zenith"
 INSTALL_DIR="${ZENITH_INSTALL_DIR:-$HOME/.local/bin}"
 

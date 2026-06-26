@@ -100,7 +100,7 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           is_published() {
-            curl -sf -H "User-Agent: zenith-ci (github.com/farhan-syah/zenith)" \
+            curl -sf -H "User-Agent: zenith-ci (github.com/zenitheditor/zenith)" \
               "https://crates.io/api/v1/crates/$1/$2" > /dev/null 2>&1
           }
 
@@ -157,7 +157,7 @@ jobs:
     if: needs.validate-version.outputs.is_prerelease == 'false'
     runs-on: ubuntu-latest
     permissions:
-      id-token: write # GitHub OIDC — authenticates the io.github.farhan-syah/* namespace
+      id-token: write # GitHub OIDC — authenticates the io.github.zenitheditor/* namespace
       contents: read
     steps:
       - uses: actions/checkout@v6

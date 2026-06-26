@@ -44,7 +44,7 @@ A `.zen` file is human-readable [KDL](https://kdl.dev) text. The engine parses i
 Zenith is pre-release and not yet published to crates.io. Build from source:
 
 ```bash
-git clone --recurse-submodules https://github.com/farhan-syah/zenith
+git clone --recurse-submodules https://github.com/zenitheditor/zenith
 cd zenith
 cargo build --release            # builds the workspace, including the `zenith` CLI
 ```
@@ -69,34 +69,34 @@ The recommended way to install the `zenith` CLI is the install script, which det
 **Linux / macOS**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/zenitheditor/zenith/main/scripts/install.sh | sh
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-irm https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/zenitheditor/zenith/main/scripts/install.ps1 | iex
 ```
 
 Set `ZENITH_INSTALL_DIR` to change the install location (default `~/.local/bin`):
 
 ```bash
 ZENITH_INSTALL_DIR=/usr/local/bin \
-  curl -fsSL https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/install.sh | sh
+  curl -fsSL https://raw.githubusercontent.com/zenitheditor/zenith/main/scripts/install.sh | sh
 ```
 
 ### With cargo
 
 ```bash
 cargo install zenith-tool    # from crates.io (installs the `zenith` binary)
-cargo install --git https://github.com/farhan-syah/zenith zenith-tool   # from source
+cargo install --git https://github.com/zenitheditor/zenith zenith-tool   # from source
 ```
 
 The library crates (`zenith-core`, `zenith-layout`, `zenith-scene`, `zenith-render`, `zenith-tx`, `zenith-session`) are published under their own names for Rust projects that want to build on the engine directly.
 
 ### Prebuilt binaries
 
-Download directly from [GitHub Releases](https://github.com/farhan-syah/zenith/releases):
+Download directly from [GitHub Releases](https://github.com/zenitheditor/zenith/releases):
 
 | Platform | Architecture  | Asset                                 |
 | :------- | :------------ | :------------------------------------ |
@@ -533,7 +533,7 @@ Because a Zenith file is just text, it lives wherever your code lives. Commit it
 
 <details><summary>Reusable Zenith examples live in the <code>zenith-showcase</code> submodule.</summary>
 
-The public showcase lives at [`farhan-syah/zenith-showcase`](https://github.com/farhan-syah/zenith-showcase) and is linked here as the [`zenith-showcase`](./zenith-showcase) submodule.
+The public showcase lives at [`zenitheditor/zenith-showcase`](https://github.com/zenitheditor/zenith-showcase) and is linked here as the [`zenith-showcase`](./zenith-showcase) submodule.
 
 It is the place for reusable Zenith examples: `.zen` source, rendered outputs, visual recipes, actions, filters, backgrounds, posters, flyers, books, magazines, ads, diagrams, presentations, and other generated design work.
 

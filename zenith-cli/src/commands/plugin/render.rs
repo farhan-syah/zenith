@@ -11,7 +11,7 @@ use super::assets::{skill_description, skill_md_body};
 /// folder-skill feature, so here the agent should lean on the CLI's own help.
 const RULE_NOTE: &str = "> **Single-file install.** The `references/` packs, `templates/`, and \
 `themes/` ship with the full folder skill (Claude Code, Codex, OpenCode) and live in the \
-[repo](https://github.com/farhan-syah/zenith). In this agent, drive the self-documenting \
+[repo](https://github.com/zenitheditor/zenith). In this agent, drive the self-documenting \
 `zenith` CLI directly — run `zenith --help` and `zenith <command> --help` for exact flags, \
 and read the repo's `examples/*.zen` for syntax.";
 
