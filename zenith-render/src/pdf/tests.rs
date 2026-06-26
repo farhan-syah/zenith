@@ -1,8 +1,9 @@
 //! Unit tests for the vector PDF backend.
 
-use zenith_core::{AssetProvider, BytesAssetProvider, FontProvider, default_provider};
+use zenith_core::{AssetKind, AssetProvider, BytesAssetProvider, FontProvider, default_provider};
 use zenith_scene::{
-    Color, FilterSpec, GradientPaint, GradientStop, Paint, Rect, Scene, SceneCommand, SceneGlyph,
+    Color, FilterSpec, FitMode, GradientPaint, GradientStop, Paint, Rect, Scene, SceneCommand,
+    SceneGlyph,
 };
 
 use super::render_pdf;
@@ -209,6 +210,54 @@ fn glyph_run_emits_path_fill_ops() {
     assert!(
         text.contains("\nf\n") || text.contains(" f\n"),
         "glyph run must emit a fill `f` op"
+    );
+}
+
+#[test]
+fn svg_asset_emits_vector_paths_and_shading_not_raster() {
+    // A logo-shaped SVG: one gradient-filled polygon + one solid polygon. The
+    // PDF backend must translate it to VECTOR ops — a nonzero fill `f` for the
+    // solid polygon and an axial shading `/sh0 sh` for the gradient one — and
+    // must NOT embed the SVG as a rasterized image XObject.
+    const LOGO_SVG: &[u8] = b"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>\
+        <defs><linearGradient id='g' gradientUnits='userSpaceOnUse' x1='0' y1='0' x2='100' y2='100'>\
+        <stop offset='0' stop-color='#24b6dd'/><stop offset='1' stop-color='#0860a0'/>\
+        </linearGradient></defs>\
+        <polygon points='0,0 100,0 0,100' fill='url(#g)'/>\
+        <polygon points='100,0 100,100 0,100' fill='#051b3e'/></svg>";
+
+    let fonts = default_provider();
+    let mut assets = BytesAssetProvider::new();
+    assets.register("asset.logo", AssetKind::Svg, std::sync::Arc::from(LOGO_SVG));
+
+    let mut scene = Scene::new(200.0, 200.0);
+    scene.commands.push(SceneCommand::DrawImage {
+        x: 20.0,
+        y: 20.0,
+        w: 160.0,
+        h: 160.0,
+        asset_id: "asset.logo".to_string(),
+        fit: FitMode::Contain,
+        pos_x: 50.0,
+        pos_y: 50.0,
+        opacity: 1.0,
+        clip_shape: None,
+        src_rect: None,
+    });
+
+    let bytes = render_pdf(&scene, &fonts, &assets);
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(
+        text.contains("\nf\n") || text.contains(" f\n"),
+        "SVG solid polygon must emit a nonzero fill `f` op"
+    );
+    assert!(
+        text.contains("/sh0 sh"),
+        "SVG linear gradient must emit an axial shading `/sh0 sh`"
+    );
+    assert!(
+        !text.contains("/Subtype /Image"),
+        "SVG must be vector, not a rasterized image XObject"
     );
 }
 

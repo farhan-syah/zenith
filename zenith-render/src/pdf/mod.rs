@@ -36,6 +36,7 @@
 //!   outline pen.
 //! - `gradient` — linear gradient → PDF axial (Type 2) shading dictionaries.
 //! - `image`    — raster image → FlateDecode RGB image XObject (+ alpha SMask).
+//! - `svg`      — SVG asset → native PDF vector operators (paths + shadings).
 
 mod color;
 mod content;
@@ -44,6 +45,7 @@ mod geometry;
 mod gradient;
 mod image;
 mod raster_embed;
+mod svg;
 
 #[cfg(test)]
 mod tests;

@@ -43,7 +43,7 @@ pub(super) struct PageResources {
 
 impl PageResources {
     /// Intern an alpha byte, returning its stable `ExtGState` resource index.
-    fn intern_alpha(&mut self, a: u8) -> usize {
+    pub(super) fn intern_alpha(&mut self, a: u8) -> usize {
         match self.alphas.binary_search(&a) {
             Ok(i) => i,
             Err(i) => {
@@ -595,6 +595,7 @@ pub(super) fn emit_command(
             emit_image(
                 content,
                 res,
+                fonts,
                 assets,
                 ImageDraw {
                     x: *x,
@@ -682,7 +683,7 @@ pub(super) fn emit_command(
 }
 
 /// Push a gradient and return its resource index.
-fn push_gradient(res: &mut PageResources, g: AxialGradient) -> usize {
+pub(super) fn push_gradient(res: &mut PageResources, g: AxialGradient) -> usize {
     let id = res.gradients.len();
     res.gradients.push(g);
     id
@@ -793,6 +794,7 @@ struct ImageDraw<'a> {
 fn emit_image(
     content: &mut Content,
     res: &mut PageResources,
+    fonts: &dyn FontProvider,
     assets: &dyn AssetProvider,
     draw: ImageDraw<'_>,
 ) {
@@ -814,10 +816,33 @@ fn emit_image(
     let Some(asset) = assets.by_id(asset_id) else {
         return;
     };
-    // Only raster images are embedded; SVG-kind assets are deferred (see
-    // DrawSvgAsset). Match the kind explicitly.
-    if !matches!(asset.kind, zenith_core::AssetKind::Image) {
-        return;
+    // Dispatch on asset kind. Raster images embed as a Flate XObject below; SVG
+    // assets translate to native PDF vector operators (paths + shadings) via the
+    // `svg` module — true vector output, not a rasterized embed. Font/Unknown
+    // kinds are not drawable images.
+    match asset.kind {
+        zenith_core::AssetKind::Image => {}
+        zenith_core::AssetKind::Svg => {
+            super::svg::emit_svg(
+                content,
+                res,
+                fonts,
+                &asset.bytes,
+                super::svg::SvgPlacement {
+                    x,
+                    y,
+                    w,
+                    h,
+                    fit,
+                    pos_x,
+                    pos_y,
+                    opacity,
+                    clip_shape,
+                },
+            );
+            return;
+        }
+        zenith_core::AssetKind::Font | zenith_core::AssetKind::Unknown(_) => return,
     }
     let Some(decoded) = decode_for_pdf(&asset.bytes) else {
         return;
