@@ -2,9 +2,20 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.zenitheditor/zenith",
   "description": "Author, validate, edit, and render deterministic .zen design docs to PNG/PDF.",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "repository": {
     "url": "https://github.com/zenitheditor/zenith",
     "source": "github"
-  }
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@zenitheditor/zenith-mcp",
+      "version": "0.0.3",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
 }
