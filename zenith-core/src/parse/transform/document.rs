@@ -273,6 +273,7 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
 /// ```text
 /// diagnostics {
 ///   allow "layout.off_canvas"
+///   allow "layout.off_canvas" "bg.glow" "bg.rim"
 ///   deny  "token.unused"
 ///   warn  "node.unknown_property"
 /// }
@@ -294,7 +295,11 @@ pub(crate) fn transform_diagnostic_policy(node: &KdlNode) -> Result<DiagnosticPo
                 // Unknown verb → ignore (forward-compat).
                 _ => continue,
             };
-            let code = match child.get(0) {
+            let mut positional = child
+                .entries()
+                .iter()
+                .filter(|entry| entry.name().is_none());
+            let code = match positional.next().map(|entry| entry.value()) {
                 Some(KdlValue::String(s)) => s.clone(),
                 _ => {
                     return Err(ParseError::spanless(
@@ -306,9 +311,39 @@ pub(crate) fn transform_diagnostic_policy(node: &KdlNode) -> Result<DiagnosticPo
                     ));
                 }
             };
+            let mut subjects: Vec<String> = Vec::new();
+            for (idx, entry) in positional.enumerate() {
+                match entry.value() {
+                    KdlValue::String(s) => subjects.push(s.clone()),
+                    _ => {
+                        let subject_index = idx + 1;
+                        return Err(ParseError::spanless(
+                            ParseErrorCode::InvalidPropertyValue,
+                            format!(
+                                "diagnostics `{verb_name}` subject argument {subject_index} must \
+                                 be a quoted subject-id string, e.g. `{verb_name} \
+                                 \"layout.off_canvas\" \"bg.glow\"`"
+                            ),
+                        ));
+                    }
+                }
+            }
+            if child.entries().iter().any(|entry| {
+                entry
+                    .name()
+                    .map(|name| name.value() == "subject" || name.value() == "subjects")
+                    .unwrap_or(false)
+            }) {
+                return Err(ParseError::spanless(
+                    ParseErrorCode::InvalidPropertyValue,
+                    "diagnostics scoped subjects must be positional strings after the \
+                     diagnostic code, e.g. `allow \"layout.off_canvas\" \"bg.glow\"`",
+                ));
+            }
             entries.push(PolicyEntry {
                 verb,
                 code,
+                subjects,
                 source_span: node_span(child),
             });
         }

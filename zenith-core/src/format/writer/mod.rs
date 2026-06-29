@@ -322,7 +322,8 @@ fn write_document(doc: &Document, out: &mut String) {
 /// the policy has at least one entry, so documents without a policy keep their
 /// existing canonical form (and round-trip) byte-identically. Entry order is
 /// preserved (last-wins resolution is applied at consult time, not here). Each
-/// entry emits a single leaf line: `<verb> "<code>"`.
+/// entry emits a single leaf line: `<verb> "<code>"`, followed by any scoped
+/// subject ids as positional strings.
 fn write_diagnostics_block(policy: &DiagnosticPolicy, out: &mut String, depth: usize) {
     if policy.entries.is_empty() {
         return;
@@ -339,7 +340,13 @@ fn write_diagnostics_block(policy: &DiagnosticPolicy, out: &mut String, depth: u
         out.push_str(verb);
         out.push_str(" \"");
         out.push_str(&escape_kdl_string(&entry.code));
-        out.push_str("\"\n");
+        out.push('"');
+        for subject in &entry.subjects {
+            out.push_str(" \"");
+            out.push_str(&escape_kdl_string(subject));
+            out.push('"');
+        }
+        out.push('\n');
     }
     indent(out, depth);
     out.push_str("}\n");

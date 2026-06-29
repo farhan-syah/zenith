@@ -78,6 +78,7 @@ impl CliPolicyFlags {
             entries.push(PolicyEntry {
                 verb: PolicyVerb::Allow,
                 code: code.clone(),
+                subjects: Vec::new(),
                 source_span: None,
             });
         }
@@ -85,6 +86,7 @@ impl CliPolicyFlags {
             entries.push(PolicyEntry {
                 verb: PolicyVerb::Warn,
                 code: code.clone(),
+                subjects: Vec::new(),
                 source_span: None,
             });
         }
@@ -92,6 +94,7 @@ impl CliPolicyFlags {
             entries.push(PolicyEntry {
                 verb: PolicyVerb::Deny,
                 code: code.clone(),
+                subjects: Vec::new(),
                 source_span: None,
             });
         }
@@ -277,6 +280,7 @@ mod tests {
             entries: vec![PolicyEntry {
                 verb: PolicyVerb::Deny,
                 code: code.to_owned(),
+                subjects: Vec::new(),
                 source_span: None,
             }],
         }
@@ -287,6 +291,7 @@ mod tests {
             entries: vec![PolicyEntry {
                 verb: PolicyVerb::Allow,
                 code: code.to_owned(),
+                subjects: Vec::new(),
                 source_span: None,
             }],
         }
@@ -314,7 +319,7 @@ mod tests {
         };
         let merged = merge_policy(&global, &local, &in_file, &flags);
         // Last-wins: CLI deny is final.
-        assert_eq!(merged.verb_for("a"), Some(&PolicyVerb::Deny));
+        assert_eq!(merged.verb_for("a", None), Some(&PolicyVerb::Deny));
     }
 
     #[test]
@@ -323,7 +328,7 @@ mod tests {
         let local = deny("a");
         let in_file = allow("a");
         let merged = merge_policy(&global, &local, &in_file, &CliPolicyFlags::default());
-        assert_eq!(merged.verb_for("a"), Some(&PolicyVerb::Allow));
+        assert_eq!(merged.verb_for("a", None), Some(&PolicyVerb::Allow));
     }
 
     #[test]

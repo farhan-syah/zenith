@@ -38,12 +38,58 @@ fn doc_with_off_canvas(policy_block: &str) -> Document {
     parse(&src)
 }
 
+fn doc_with_two_off_canvas(policy_block: &str) -> Document {
+    let src = format!(
+        r##"zenith version=1 {{
+{policy_block}  document id="doc.policy.subject" title="P" {{
+    page id="page.1" w=(px)100 h=(px)100 {{
+      rect id="bg.glow" x=(px)-20 y=(px)0 w=(px)40 h=(px)40 fill=(token)"color.bg"
+      rect id="shape.accidental" x=(px)90 y=(px)0 w=(px)40 h=(px)40 fill=(token)"color.bg"
+    }}
+  }}
+  tokens format="zenith-token-v1" {{
+    token id="color.bg" type="color" value="#ffffff"
+  }}
+}}
+"##
+    );
+    parse(&src)
+}
+
+fn doc_with_three_off_canvas(policy_block: &str) -> Document {
+    let src = format!(
+        r##"zenith version=1 {{
+{policy_block}  document id="doc.policy.subjects" title="P" {{
+    page id="page.1" w=(px)100 h=(px)100 {{
+      rect id="bg.glow" x=(px)-20 y=(px)0 w=(px)40 h=(px)40 fill=(token)"color.bg"
+      rect id="bg.rim" x=(px)0 y=(px)-20 w=(px)40 h=(px)40 fill=(token)"color.bg"
+      rect id="shape.accidental" x=(px)90 y=(px)0 w=(px)40 h=(px)40 fill=(token)"color.bg"
+    }}
+  }}
+  tokens format="zenith-token-v1" {{
+    token id="color.bg" type="color" value="#ffffff"
+  }}
+}}
+"##
+    );
+    parse(&src)
+}
+
 fn severity_of<'a>(report: &'a ValidationReport, code: &str) -> Option<&'a Severity> {
     report
         .diagnostics
         .iter()
         .find(|d| d.code == code)
         .map(|d| &d.severity)
+}
+
+fn subjects_for<'a>(report: &'a ValidationReport, code: &str) -> Vec<&'a str> {
+    report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == code)
+        .filter_map(|d| d.subject_id.as_deref())
+        .collect()
 }
 
 #[test]
@@ -68,6 +114,34 @@ fn allow_suppresses_advisory() {
     assert!(
         !has_code(&report, "layout.off_canvas"),
         "allow must drop the advisory; codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn scoped_allow_suppresses_only_matching_subject() {
+    let doc = doc_with_two_off_canvas(
+        "  diagnostics {\n    allow \"layout.off_canvas\" \"bg.glow\"\n  }\n",
+    );
+    let report = validate(&doc);
+    assert_eq!(
+        subjects_for(&report, "layout.off_canvas"),
+        vec!["shape.accidental"],
+        "scoped allow must leave unrelated off-canvas diagnostics visible; codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn scoped_allow_accepts_multiple_subjects_on_one_entry() {
+    let doc = doc_with_three_off_canvas(
+        "  diagnostics {\n    allow \"layout.off_canvas\" \"bg.glow\" \"bg.rim\"\n  }\n",
+    );
+    let report = validate(&doc);
+    assert_eq!(
+        subjects_for(&report, "layout.off_canvas"),
+        vec!["shape.accidental"],
+        "multi-subject allow must suppress only listed subjects; codes: {:?}",
         codes(&report)
     );
 }
@@ -164,7 +238,7 @@ fn self_validation_cannot_be_suppressed_by_the_policy() {
 fn diagnostics_block_round_trips_and_is_idempotent() {
     let src = r##"zenith version=1 {
   diagnostics {
-    allow "layout.off_canvas"
+    allow "layout.off_canvas" "bg.glow" "bg.rim"
     deny "token.unused"
     warn "node.unknown_property"
   }
@@ -180,6 +254,10 @@ fn diagnostics_block_round_trips_and_is_idempotent() {
 "##;
     let doc = parse(src);
     assert_eq!(doc.diagnostic_policy.entries.len(), 3);
+    assert_eq!(
+        doc.diagnostic_policy.entries[0].subjects,
+        vec!["bg.glow".to_owned(), "bg.rim".to_owned()]
+    );
 
     let formatted = format_document(&doc).expect("format");
     let text = String::from_utf8(formatted).expect("utf8");

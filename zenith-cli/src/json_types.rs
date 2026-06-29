@@ -329,6 +329,8 @@ pub struct SchemaDiagnosticsOutput {
     pub summary: String,
     /// The policy verbs: `allow`, `deny`, `warn`.
     pub verbs: Vec<String>,
+    /// Canonical KDL policy-entry forms.
+    pub syntax: Vec<String>,
     /// Precedence note: in-file `diagnostics { … }` now; CLI flags/config later.
     pub precedence: &'static str,
     /// Every diagnostic code in the catalog (governable and always-Error).

@@ -7,6 +7,7 @@
 //! ```text
 //! diagnostics {
 //!     allow "layout.off_canvas"     // suppress this advisory
+//!     allow "layout.off_canvas" "bg.glow" "bg.rim" // suppress only these nodes
 //!     deny  "font.local"            // elevate to a blocking Error (CI gate)
 //!     warn  "node.unknown_property" // force to Warning
 //! }
@@ -44,13 +45,19 @@ pub enum PolicyVerb {
 }
 
 /// A single entry inside a document's `diagnostics { … }` block: one verb
-/// applied to one diagnostic code.
+/// applied to one diagnostic code, optionally scoped to diagnostic subject ids.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PolicyEntry {
     /// What this entry does to the named code.
     pub verb: PolicyVerb,
     /// The diagnostic code this entry governs, e.g. `"layout.off_canvas"`.
     pub code: String,
+    /// Optional diagnostic subject ids this entry governs, e.g. `"bg.glow"`.
+    ///
+    /// When empty, the entry governs every diagnostic with the matching code.
+    /// When non-empty, the entry governs only diagnostics whose `subject_id`
+    /// exactly matches one of these values.
+    pub subjects: Vec<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
 }
@@ -69,17 +76,33 @@ pub struct DiagnosticPolicy {
 }
 
 impl DiagnosticPolicy {
-    /// The effective verb for `code`, or `None` if no entry governs it.
+    /// The effective verb for `code` and `subject_id`, or `None` if no entry
+    /// governs that diagnostic.
     ///
-    /// Resolution is **last-wins**: when several entries name the same code, the
-    /// last one written takes effect, so we scan in reverse and return the first
-    /// match.
-    pub fn verb_for(&self, code: &str) -> Option<&PolicyVerb> {
+    /// Resolution is **last-wins** among entries that match both code and
+    /// subjects. A code-only entry matches every subject for that code; a scoped
+    /// entry matches only the listed subject ids.
+    pub fn verb_for(&self, code: &str, subject_id: Option<&str>) -> Option<&PolicyVerb> {
         self.entries
             .iter()
             .rev()
-            .find(|e| e.code == code)
+            .find(|e| e.matches(code, subject_id))
             .map(|e| &e.verb)
+    }
+}
+
+impl PolicyEntry {
+    fn matches(&self, code: &str, subject_id: Option<&str>) -> bool {
+        if self.code != code {
+            return false;
+        }
+        if self.subjects.is_empty() {
+            return true;
+        }
+        match subject_id {
+            Some(actual) => self.subjects.iter().any(|expected| expected == actual),
+            None => false,
+        }
     }
 }
 
@@ -95,6 +118,7 @@ mod tests {
         PolicyEntry {
             verb,
             code: code.to_owned(),
+            subjects: Vec::new(),
             source_span: None,
         }
     }
@@ -103,7 +127,7 @@ mod tests {
     fn default_policy_is_empty_and_inert() {
         let p = DiagnosticPolicy::default();
         assert!(p.entries.is_empty());
-        assert_eq!(p.verb_for("anything"), None);
+        assert_eq!(p.verb_for("anything", None), None);
     }
 
     #[test]
@@ -111,8 +135,11 @@ mod tests {
         let p = DiagnosticPolicy {
             entries: vec![entry(PolicyVerb::Allow, "layout.off_canvas")],
         };
-        assert_eq!(p.verb_for("layout.off_canvas"), Some(&PolicyVerb::Allow));
-        assert_eq!(p.verb_for("token.unused"), None);
+        assert_eq!(
+            p.verb_for("layout.off_canvas", Some("r.off")),
+            Some(&PolicyVerb::Allow)
+        );
+        assert_eq!(p.verb_for("token.unused", None), None);
     }
 
     #[test]
@@ -124,6 +151,31 @@ mod tests {
             ],
         };
         // The later `warn` overrides the earlier `deny`.
-        assert_eq!(p.verb_for("node.unknown_property"), Some(&PolicyVerb::Warn));
+        assert_eq!(
+            p.verb_for("node.unknown_property", None),
+            Some(&PolicyVerb::Warn)
+        );
+    }
+
+    #[test]
+    fn scoped_entry_matches_only_its_subjects() {
+        let p = DiagnosticPolicy {
+            entries: vec![PolicyEntry {
+                verb: PolicyVerb::Allow,
+                code: "layout.off_canvas".to_owned(),
+                subjects: vec!["bg.glow".to_owned(), "bg.rim".to_owned()],
+                source_span: None,
+            }],
+        };
+        assert_eq!(
+            p.verb_for("layout.off_canvas", Some("bg.glow")),
+            Some(&PolicyVerb::Allow)
+        );
+        assert_eq!(
+            p.verb_for("layout.off_canvas", Some("bg.rim")),
+            Some(&PolicyVerb::Allow)
+        );
+        assert_eq!(p.verb_for("layout.off_canvas", Some("shape.1")), None);
+        assert_eq!(p.verb_for("layout.off_canvas", None), None);
     }
 }

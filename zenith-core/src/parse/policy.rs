@@ -120,19 +120,24 @@ mod tests {
     #[test]
     fn parses_allow_deny_warn_block() {
         let src = br#"diagnostics {
-            allow "layout.off_canvas"
+            allow "layout.off_canvas" "bg.glow" "bg.rim"
             deny  "font.local"
             warn  "node.unknown_property"
         }"#;
         let policy = parse_diagnostic_policy(src).expect("must parse");
         assert_eq!(policy.entries.len(), 3);
         assert_eq!(
-            policy.verb_for("layout.off_canvas"),
+            policy.verb_for("layout.off_canvas", Some("bg.glow")),
             Some(&PolicyVerb::Allow)
         );
-        assert_eq!(policy.verb_for("font.local"), Some(&PolicyVerb::Deny));
         assert_eq!(
-            policy.verb_for("node.unknown_property"),
+            policy.verb_for("layout.off_canvas", Some("bg.rim")),
+            Some(&PolicyVerb::Allow)
+        );
+        assert_eq!(policy.verb_for("layout.off_canvas", Some("shape.1")), None);
+        assert_eq!(policy.verb_for("font.local", None), Some(&PolicyVerb::Deny));
+        assert_eq!(
+            policy.verb_for("node.unknown_property", None),
             Some(&PolicyVerb::Warn)
         );
     }
@@ -170,6 +175,24 @@ mod tests {
     }
 
     #[test]
+    fn subject_argument_must_be_string() {
+        let src = br#"diagnostics {
+            allow "layout.off_canvas" 1
+        }"#;
+        let err = parse_diagnostic_policy(src).expect_err("invalid subject must fail");
+        assert_eq!(err.code, ParseErrorCode::InvalidPropertyValue);
+    }
+
+    #[test]
+    fn subject_property_is_rejected() {
+        let src = br#"diagnostics {
+            allow "layout.off_canvas" subject="bg.glow"
+        }"#;
+        let err = parse_diagnostic_policy(src).expect_err("subject property must fail");
+        assert_eq!(err.code, ParseErrorCode::InvalidPropertyValue);
+    }
+
+    #[test]
     fn last_wins_across_entries() {
         let src = br#"diagnostics {
             deny "node.unknown_property"
@@ -177,7 +200,7 @@ mod tests {
         }"#;
         let policy = parse_diagnostic_policy(src).expect("must parse");
         assert_eq!(
-            policy.verb_for("node.unknown_property"),
+            policy.verb_for("node.unknown_property", None),
             Some(&PolicyVerb::Warn)
         );
     }

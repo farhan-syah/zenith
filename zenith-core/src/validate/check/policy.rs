@@ -28,9 +28,9 @@ use crate::diagnostics::{Diagnostic, Severity};
 /// Apply `policy` to an assembled diagnostic list, returning the adjusted list.
 ///
 /// Each diagnostic is matched against the policy's effective verb for its code
-/// (last-wins). Error-severity diagnostics are never dropped or weakened. With an
-/// empty policy this returns the input unchanged (identity pass), preserving the
-/// default-off byte-identical guarantee.
+/// and subject id (last-wins). Error-severity diagnostics are never dropped or
+/// weakened. With an empty policy this returns the input unchanged (identity
+/// pass), preserving the default-off byte-identical guarantee.
 pub fn apply_policy(diagnostics: Vec<Diagnostic>, policy: &DiagnosticPolicy) -> Vec<Diagnostic> {
     // Fast path: an empty policy is an exact identity pass.
     if policy.entries.is_empty() {
@@ -39,7 +39,7 @@ pub fn apply_policy(diagnostics: Vec<Diagnostic>, policy: &DiagnosticPolicy) -> 
 
     let mut out: Vec<Diagnostic> = Vec::with_capacity(diagnostics.len());
     for mut diag in diagnostics {
-        match policy.verb_for(&diag.code) {
+        match policy.verb_for(&diag.code, diag.subject_id.as_deref()) {
             None => out.push(diag),
             Some(verb) => match verb {
                 PolicyVerb::Allow => {
@@ -141,6 +141,21 @@ mod tests {
                 .map(|(verb, code)| PolicyEntry {
                     verb,
                     code: code.to_owned(),
+                    subjects: Vec::new(),
+                    source_span: None,
+                })
+                .collect(),
+        }
+    }
+
+    fn scoped_policy(entries: Vec<(PolicyVerb, &str, Vec<&str>)>) -> DiagnosticPolicy {
+        DiagnosticPolicy {
+            entries: entries
+                .into_iter()
+                .map(|(verb, code, subjects)| PolicyEntry {
+                    verb,
+                    code: code.to_owned(),
+                    subjects: subjects.into_iter().map(str::to_owned).collect(),
                     source_span: None,
                 })
                 .collect(),
@@ -149,6 +164,10 @@ mod tests {
 
     fn diag(code: &str, severity: Severity) -> Diagnostic {
         Diagnostic::new(code, severity, "msg", None, None)
+    }
+
+    fn subject_diag(code: &str, severity: Severity, subject: &str) -> Diagnostic {
+        Diagnostic::new(code, severity, "msg", None, Some(subject.to_owned()))
     }
 
     #[test]
@@ -192,6 +211,49 @@ mod tests {
             (PolicyVerb::Deny, "node.unknown_property"),
             (PolicyVerb::Warn, "node.unknown_property"),
         ]);
+        let out = apply_policy(input, &p);
+        assert_eq!(out[0].severity, Severity::Warning);
+    }
+
+    #[test]
+    fn scoped_allow_drops_only_matching_subject() {
+        let input = vec![
+            subject_diag("layout.off_canvas", Severity::Advisory, "bg.glow"),
+            subject_diag("layout.off_canvas", Severity::Advisory, "shape.1"),
+        ];
+        let p = scoped_policy(vec![(
+            PolicyVerb::Allow,
+            "layout.off_canvas",
+            vec!["bg.glow"],
+        )]);
+        let out = apply_policy(input, &p);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].subject_id.as_deref(), Some("shape.1"));
+    }
+
+    #[test]
+    fn unscoped_later_entry_overrides_scoped_entry_for_same_subject() {
+        let input = vec![subject_diag(
+            "layout.off_canvas",
+            Severity::Advisory,
+            "bg.glow",
+        )];
+        let p = DiagnosticPolicy {
+            entries: vec![
+                PolicyEntry {
+                    verb: PolicyVerb::Deny,
+                    code: "layout.off_canvas".to_owned(),
+                    subjects: vec!["bg.glow".to_owned()],
+                    source_span: None,
+                },
+                PolicyEntry {
+                    verb: PolicyVerb::Warn,
+                    code: "layout.off_canvas".to_owned(),
+                    subjects: Vec::new(),
+                    source_span: None,
+                },
+            ],
+        };
         let out = apply_policy(input, &p);
         assert_eq!(out[0].severity, Severity::Warning);
     }

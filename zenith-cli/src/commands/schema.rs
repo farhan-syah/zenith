@@ -18,8 +18,15 @@ use crate::json_types::{
 };
 
 /// Precedence note shown on the `schema diagnostics` surface.
-const DIAGNOSTICS_PRECEDENCE: &str = "Resolution today is the in-file `diagnostics { … }` \
-block (last-wins per code); CLI flags and config-file overrides resolve in a later unit.";
+const DIAGNOSTICS_PRECEDENCE: &str = "policy resolution is last-wins across global config, local config, in-file diagnostics, then CLI flags";
+
+const DIAGNOSTICS_SYNTAX: &[&str] = &[
+    "allow \"<code>\"",
+    "allow \"<code>\" \"<subject-id>\"",
+    "allow \"<code>\" \"<subject-id>\" \"<subject-id>\"",
+    "deny \"<code>\"",
+    "warn \"<code>\"",
+];
 
 // ── Public entry points ───────────────────────────────────────────────────────
 
@@ -487,6 +494,7 @@ pub fn diagnostics(json: bool) -> (String, u8) {
             schema: "zenith-schema-v1",
             summary: summary.to_owned(),
             verbs: verbs.iter().map(|&v| v.to_owned()).collect(),
+            syntax: DIAGNOSTICS_SYNTAX.iter().map(|&s| s.to_owned()).collect(),
             precedence: DIAGNOSTICS_PRECEDENCE,
             codes,
         };
@@ -496,8 +504,15 @@ pub fn diagnostics(json: bool) -> (String, u8) {
 
         text.push_str("Policy verbs (in a root `diagnostics { … }` block):\n");
         text.push_str("  allow \"<code>\"  —  suppress this advisory/warning\n");
+        text.push_str(
+            "  allow \"<code>\" \"<subject-id>\" [\"<subject-id>\" …]  —  suppress only listed subjects\n",
+        );
         text.push_str("  deny  \"<code>\"  —  elevate to a blocking Error (CI gate)\n");
         text.push_str("  warn  \"<code>\"  —  force to a Warning\n\n");
+
+        text.push_str("Examples:\n");
+        text.push_str("  allow \"layout.off_canvas\"\n");
+        text.push_str("  allow \"layout.off_canvas\" \"bg.glow\" \"bg.rim\"\n\n");
 
         text.push_str("Precedence: ");
         text.push_str(DIAGNOSTICS_PRECEDENCE);
@@ -1542,6 +1557,36 @@ mod tests {
         assert!(
             !text.contains("\"content\""),
             "rect JSON must not carry a content field (skip_serializing_if = None); got:\n{text}"
+        );
+    }
+
+    // ── Diagnostics surface tests ────────────────────────────────────────────
+
+    #[test]
+    fn diagnostics_human_mentions_scoped_policy_syntax() {
+        let (text, code) = diagnostics(false);
+        assert_eq!(code, 0);
+        assert!(
+            text.contains("allow \"<code>\" \"<subject-id>\""),
+            "human output must show scoped diagnostic policy syntax; got:\n{text}"
+        );
+        assert!(
+            text.contains("allow \"layout.off_canvas\" \"bg.glow\" \"bg.rim\""),
+            "human output must include multi-subject example; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn diagnostics_json_carries_policy_syntax() {
+        let (text, code) = diagnostics(true);
+        assert_eq!(code, 0);
+        assert!(
+            text.contains("\"syntax\""),
+            "JSON must carry syntax examples; got:\n{text}"
+        );
+        assert!(
+            text.contains("allow \\\"<code>\\\" \\\"<subject-id>\\\""),
+            "JSON must include scoped diagnostic policy syntax; got:\n{text}"
         );
     }
 
