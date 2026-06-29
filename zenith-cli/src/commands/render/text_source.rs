@@ -87,6 +87,7 @@ fn resolve_in_nodes(
             | Node::Connector(_)
             | Node::Pattern(_)
             | Node::Chart(_)
+            | Node::Light(_)
             | Node::Unknown(_) => {}
         }
     }

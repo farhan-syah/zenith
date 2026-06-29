@@ -632,6 +632,15 @@ fn build_node_entry(node: &Node, resolved: &Resolved) -> NodeEntry {
             locked: n.locked,
             children: vec![],
         },
+        Node::Light(n) => NodeEntry {
+            id: n.id.clone(),
+            kind: "light".into(),
+            role: n.role.clone(),
+            geometry: light_geom(n, resolved),
+            visible: n.visible,
+            locked: n.locked,
+            children: vec![],
+        },
         Node::Unknown(n) => NodeEntry {
             id: n.id.clone().unwrap_or_default(),
             kind: n.kind.clone(),
@@ -711,6 +720,7 @@ fn node_id_str(node: &Node) -> &str {
         Node::Connector(n) => &n.id,
         Node::Pattern(n) => &n.id,
         Node::Chart(n) => &n.id,
+        Node::Light(n) => &n.id,
         Node::Unknown(n) => n.id.as_deref().unwrap_or(""),
     }
 }
@@ -739,7 +749,8 @@ fn node_children(node: &Node) -> Option<&[Node]> {
         | Node::Shape(_)
         | Node::Connector(_)
         | Node::Pattern(_)
-        | Node::Chart(_) => None,
+        | Node::Chart(_)
+        | Node::Light(_) => None,
     }
 }
 
@@ -784,6 +795,23 @@ fn bbox_geom(
         y: opt_pv_to_f64(y, resolved),
         w: opt_pv_to_f64(w, resolved),
         h: opt_pv_to_f64(h, resolved),
+        x1: None,
+        y1: None,
+        x2: None,
+        y2: None,
+        point_count: None,
+    })
+}
+
+fn light_geom(n: &zenith_core::LightNode, resolved: &Resolved) -> Option<NodeGeometry> {
+    let x = opt_pv_to_f64(n.x.as_ref(), resolved)?;
+    let y = opt_pv_to_f64(n.y.as_ref(), resolved)?;
+    let radius = opt_pv_to_f64(n.radius.as_ref(), resolved)?;
+    Some(NodeGeometry {
+        x: Some(x - radius),
+        y: Some(y - radius),
+        w: Some(radius * 2.0),
+        h: Some(radius * 2.0),
         x1: None,
         y1: None,
         x2: None,

@@ -338,6 +338,7 @@ pub(crate) fn known_props_for_kind(kind: &str) -> &'static [&'static str] {
         CELL_KNOWN_PROPS, COLUMN_KNOWN_PROPS, FRAME_KNOWN_PROPS, GROUP_KNOWN_PROPS,
         INSTANCE_KNOWN_PROPS, ROW_KNOWN_PROPS, TABLE_KNOWN_PROPS,
     };
+    use super::effect::LIGHT_KNOWN_PROPS;
     use super::leaf::{
         CODE_KNOWN_PROPS, ELLIPSE_KNOWN_PROPS, IMAGE_KNOWN_PROPS, LINE_KNOWN_PROPS,
         POLYGON_KNOWN_PROPS, POLYLINE_KNOWN_PROPS, RECT_KNOWN_PROPS, TEXT_KNOWN_PROPS,
@@ -370,6 +371,7 @@ pub(crate) fn known_props_for_kind(kind: &str) -> &'static [&'static str] {
         "footnote" => FOOTNOTE_KNOWN_PROPS,
         "pattern" => PATTERN_KNOWN_PROPS,
         "chart" => CHART_KNOWN_PROPS,
+        "light" => LIGHT_KNOWN_PROPS,
         "instance" => INSTANCE_KNOWN_PROPS,
         _ => &[],
     }

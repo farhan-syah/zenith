@@ -183,6 +183,7 @@ fn collect_chains<'a>(
             | Node::Connector(_)
             | Node::Pattern(_)
             | Node::Chart(_)
+            | Node::Light(_)
             | Node::Unknown(_) => {}
         }
     }

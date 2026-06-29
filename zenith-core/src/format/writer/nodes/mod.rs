@@ -10,6 +10,7 @@ use crate::ast::Node;
 
 mod container;
 mod document;
+mod effect;
 mod helpers;
 mod leaf;
 mod special;
@@ -18,6 +19,7 @@ mod special;
 pub(in crate::format::writer) use document::write_document_body;
 
 use container::{write_frame, write_group, write_table};
+use effect::write_light;
 use leaf::{
     write_chart, write_code, write_ellipse, write_image, write_line, write_pattern, write_polygon,
     write_polyline, write_rect, write_text,
@@ -50,6 +52,7 @@ pub(super) fn write_node(node: &Node, out: &mut String, depth: usize) {
         Node::Unknown(u) => write_unknown_node(u, out, depth),
         Node::Pattern(p) => write_pattern(p, out, depth),
         Node::Chart(c) => write_chart(c, out, depth),
+        Node::Light(l) => write_light(l, out, depth),
     }
 }
 

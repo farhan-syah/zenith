@@ -58,6 +58,7 @@ fn index_nodes(children: &[Node], page_index_1based: usize, map: &mut BTreeMap<S
             | Node::Connector(_)
             | Node::Pattern(_)
             | Node::Chart(_)
+            | Node::Light(_)
             | Node::Unknown(_) => {}
         }
     }
@@ -137,6 +138,7 @@ fn collect_node_boxes(
             | Node::Connector(_)
             | Node::Pattern(_)
             | Node::Chart(_)
+            | Node::Light(_)
             | Node::Unknown(_) => {}
         }
     }
@@ -175,6 +177,7 @@ fn node_rect(
         Node::Shape(n) => rect(&n.x, &n.y, &n.w, &n.h),
         Node::Pattern(n) => rect(&n.x, &n.y, &n.w, &n.h),
         Node::Chart(n) => rect(&n.x, &n.y, &n.w, &n.h),
+        Node::Light(_) => None,
         // An `instance` has no intrinsic w/h (its box is the expanded subtree),
         // and line/polygon/polyline have no rectangular box — none can serve as a
         // rectangular exclusion, so they are skipped.
@@ -210,6 +213,7 @@ fn node_id(node: &Node) -> Option<&str> {
         Node::Connector(n) => Some(&n.id),
         Node::Pattern(n) => Some(&n.id),
         Node::Chart(n) => Some(&n.id),
+        Node::Light(n) => Some(&n.id),
         Node::Unknown(_) => None,
     }
 }

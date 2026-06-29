@@ -234,6 +234,7 @@ pub(in crate::compile) fn compile_footnote_zone(
             | Node::Connector(_)
             | Node::Pattern(_)
             | Node::Chart(_)
+            | Node::Light(_)
             | Node::Unknown(_) => None,
         })
         .collect();
@@ -424,6 +425,7 @@ fn node_bottom_box(
         | Node::Connector(_)
         | Node::Pattern(_)
         | Node::Chart(_)
+        | Node::Light(_)
         | Node::Unknown(_) => return None,
     };
     Some((

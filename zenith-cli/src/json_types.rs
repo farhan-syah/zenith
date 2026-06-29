@@ -195,6 +195,9 @@ pub struct SchemaNodeDetail {
     pub kind: String,
     pub summary: String,
     pub attributes: Vec<SchemaAttr>,
+    /// Minimal full-node authoring example, when one is available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub example: Option<String>,
     /// Child-content descriptor for kinds that accept authorable children.
     /// Absent from JSON for kinds with no authorable child content.
     #[serde(skip_serializing_if = "Option::is_none")]

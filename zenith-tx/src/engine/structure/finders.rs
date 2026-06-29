@@ -80,6 +80,7 @@ pub(super) fn subtree_contains_container(node: &Node, parent_id: &str) -> bool {
         | Node::Connector(_)
         | Node::Pattern(_)
         | Node::Chart(_)
+        | Node::Light(_)
         | Node::Unknown(_) => false,
     }
 }
@@ -136,6 +137,7 @@ fn find_container_in_children_mut<'a>(
             | Node::Connector(_)
             | Node::Pattern(_)
             | Node::Chart(_)
+            | Node::Light(_)
             | Node::Unknown(_) => None,
         });
 
@@ -162,6 +164,7 @@ fn find_container_in_children_mut<'a>(
             | Some(Node::Connector(_))
             | Some(Node::Pattern(_))
             | Some(Node::Chart(_))
+            | Some(Node::Light(_))
             | Some(Node::Unknown(_))
             | None => None,
         },
@@ -186,6 +189,7 @@ fn find_container_in_children_mut<'a>(
             | Some(Node::Connector(_))
             | Some(Node::Pattern(_))
             | Some(Node::Chart(_))
+            | Some(Node::Light(_))
             | Some(Node::Unknown(_))
             | None => None,
         },
@@ -231,7 +235,8 @@ pub(super) fn remove_node_by_id(children: &mut Vec<Node>, id: &str) -> Option<No
             | Node::Shape(_)
             | Node::Connector(_)
             | Node::Pattern(_)
-            | Node::Chart(_) => None,
+            | Node::Chart(_)
+            | Node::Light(_) => None,
         };
         if nested.is_some() {
             return nested;

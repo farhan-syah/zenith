@@ -22,6 +22,7 @@ mod container;
 mod crop;
 mod ctx;
 mod data_resolve;
+mod effect;
 mod field;
 mod footnote;
 mod image;
@@ -52,6 +53,7 @@ use chart::compile_chart;
 use container::{compile_frame, compile_group, compile_instance};
 pub(in crate::compile) use ctx::NodeCtx;
 use data_resolve::{scan_for_data_refs, substitute_data_refs};
+use effect::compile_light;
 use field::{
     FieldCtx, build_node_boxes, build_page_index_map, build_section_assignments, compute_live_area,
     resolve_field_to_text,
@@ -687,6 +689,7 @@ pub(super) fn node_role(node: &Node) -> Option<&str> {
         Node::Connector(n) => n.role.as_deref(),
         Node::Pattern(n) => n.role.as_deref(),
         Node::Chart(n) => n.role.as_deref(),
+        Node::Light(n) => n.role.as_deref(),
         Node::Unknown(_) => None,
     }
 }
@@ -757,6 +760,10 @@ pub(in crate::compile) fn compile_node(
                 diagnostics,
                 ctx,
             );
+            0.0
+        }
+        Node::Light(light) => {
+            compile_light(light, resolved, commands, diagnostics, ctx);
             0.0
         }
         Node::Text(text) => compile_text(

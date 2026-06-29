@@ -141,6 +141,7 @@ fn collect_flows<'a>(
             | Node::Connector(_)
             | Node::Pattern(_)
             | Node::Chart(_)
+            | Node::Light(_)
             | Node::Unknown(_) => {}
         }
     }

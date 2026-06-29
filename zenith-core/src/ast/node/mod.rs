@@ -7,6 +7,7 @@
 mod anchor;
 mod common;
 mod container;
+mod effect;
 mod leaf;
 mod special;
 
@@ -15,6 +16,7 @@ pub use common::{Node, ObjectPosition, Point, TextSpan, UnknownProperty, Unknown
 pub use container::{
     FrameNode, GroupNode, ProtectedRegion, TableCell, TableColumn, TableNode, TableRow,
 };
+pub use effect::LightNode;
 pub use leaf::{
     ChartNode, ChartSeries, CodeNode, EllipseNode, ImageNode, LineNode, PatternNode, PolygonNode,
     PolylineNode, RectNode, TextNode,

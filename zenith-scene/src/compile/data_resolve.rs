@@ -133,6 +133,7 @@ fn node_has_data_ref(node: &Node) -> bool {
                         || s.data_ref.is_some()
                 })
         }
+        Node::Light(n) => any_prop(&[&n.x, &n.y, &n.radius, &n.color]),
         Node::Frame(n) => n.children.iter().any(node_has_data_ref),
         Node::Group(n) => n.children.iter().any(node_has_data_ref),
         Node::Instance(n) => instance_has_data_ref(n),
@@ -203,6 +204,13 @@ fn substitute_node(node: &mut Node, ctx: &DataContext, diagnostics: &mut Vec<Dia
         Node::Connector(n) => substitute_connector(n, ctx, diagnostics),
         Node::Pattern(n) => substitute_pattern(n, ctx, diagnostics),
         Node::Chart(n) => substitute_chart(n, ctx, diagnostics),
+        Node::Light(n) => {
+            let id = n.id.clone();
+            substitute_dim_prop_opt(&mut n.x, ctx, &id, "x", diagnostics);
+            substitute_dim_prop_opt(&mut n.y, ctx, &id, "y", diagnostics);
+            substitute_dim_prop_opt(&mut n.radius, ctx, &id, "radius", diagnostics);
+            substitute_color_prop_opt(&mut n.color, ctx, &id, "color", diagnostics);
+        }
         Node::Frame(n) => substitute_children(&mut n.children, ctx, diagnostics),
         Node::Group(n) => substitute_children(&mut n.children, ctx, diagnostics),
         Node::Instance(n) => substitute_instance(n, ctx, diagnostics),

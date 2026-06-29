@@ -421,6 +421,7 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
         | Node::Polyline(_)
         | Node::Footnote(_)
         | Node::Instance(_)
+        | Node::Light(_)
         | Node::Unknown(_) => return None,
     };
     Some(f)
@@ -536,6 +537,7 @@ fn collect_anchor(
         | Node::Table(_)
         | Node::Pattern(_)
         | Node::Chart(_)
+        | Node::Light(_)
         | Node::Unknown(_) => {}
     }
 }

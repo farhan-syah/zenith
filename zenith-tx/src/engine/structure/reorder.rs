@@ -144,7 +144,8 @@ fn reorder_in(children: &mut [Node], id: &str, kind: ReorderKind) -> MoveOutcome
             | Node::Shape(_)
             | Node::Connector(_)
             | Node::Pattern(_)
-            | Node::Chart(_) => {}
+            | Node::Chart(_)
+            | Node::Light(_) => {}
         }
     }
     MoveOutcome::NotFound

@@ -9,6 +9,7 @@ use crate::error::ParseError;
 use super::chart::transform_chart;
 use super::container::{transform_frame, transform_group, transform_instance, transform_table};
 use super::document::transform_children;
+use super::effect::transform_light;
 use super::helpers::{collect_unknown_props, node_span, optional_string_prop};
 use super::leaf::{
     transform_code, transform_ellipse, transform_image, transform_line, transform_polygon,
@@ -40,6 +41,7 @@ pub(super) fn transform_node(node: &KdlNode) -> Result<Node, ParseError> {
         "connector" => transform_connector(node).map(|c| Node::Connector(Box::new(c))),
         "pattern" => transform_pattern(node).map(|p| Node::Pattern(Box::new(p))),
         "chart" => transform_chart(node).map(|c| Node::Chart(Box::new(c))),
+        "light" => transform_light(node).map(|l| Node::Light(Box::new(l))),
         _ => Ok(Node::Unknown(Box::new(UnknownNode {
             kind: node.name().value().to_owned(),
             id: optional_string_prop(node, "id").map(str::to_owned),

@@ -18,6 +18,7 @@ mod block_style;
 mod chart;
 mod container;
 mod document;
+mod effect;
 mod helpers;
 mod leaf;
 mod node;

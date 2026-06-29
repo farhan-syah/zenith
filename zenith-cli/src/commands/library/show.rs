@@ -373,6 +373,7 @@ fn node_kind_name(node: &zenith_core::Node) -> &'static str {
         zenith_core::Node::Connector(_) => "connector",
         zenith_core::Node::Pattern(_) => "pattern",
         zenith_core::Node::Chart(_) => "chart",
+        zenith_core::Node::Light(_) => "light",
         zenith_core::Node::Unknown(_) => "unknown",
     }
 }

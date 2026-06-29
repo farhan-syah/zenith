@@ -245,6 +245,7 @@ fn cell_natural_width(
             | Node::Connector(_)
             | Node::Pattern(_)
             | Node::Chart(_)
+            | Node::Light(_)
             | Node::Unknown(_)) => child_declared_box(other, env.resolved).0.unwrap_or(0.0),
         };
         widest = widest.max(w);
@@ -307,6 +308,7 @@ fn cell_content_height(
             | Node::Connector(_)
             | Node::Pattern(_)
             | Node::Chart(_)
+            | Node::Light(_)
             | Node::Unknown(_)) => {
                 let y0 = child_declared_y(other, env.resolved).unwrap_or(0.0);
                 let h_decl = child_declared_box(other, env.resolved).1.unwrap_or(0.0);

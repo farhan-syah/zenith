@@ -5,6 +5,7 @@ use crate::ast::value::PropertyValue;
 use crate::data::DataFormat;
 
 use super::container::{FrameNode, GroupNode, TableNode};
+use super::effect::LightNode;
 use super::leaf::{
     ChartNode, CodeNode, EllipseNode, ImageNode, LineNode, PatternNode, PolygonNode, PolylineNode,
     RectNode, TextNode,
@@ -179,4 +180,7 @@ pub enum Node {
     // series. Boxing keeps `Node` compact for the `large_enum_variant` lint,
     // mirroring `Rect`/`Text`/`Table`/`Shape`/`Pattern`.
     Chart(Box<ChartNode>),
+    // Boxed for the same forward-growth reason as the other rich authoring
+    // variants: future effect nodes may gain more fields without bloating Node.
+    Light(Box<LightNode>),
 }

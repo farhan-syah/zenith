@@ -102,6 +102,7 @@ pub(super) fn child_declared_box(
         | Node::Connector(_)
         | Node::Pattern(_)
         | Node::Chart(_)
+        | Node::Light(_)
         | Node::Unknown(_) => (None, None),
     }
 }
@@ -136,6 +137,7 @@ pub(super) fn child_declared_y(
         | Node::Connector(_)
         | Node::Pattern(_)
         | Node::Chart(_)
+        | Node::Light(_)
         | Node::Unknown(_) => None,
     }
 }

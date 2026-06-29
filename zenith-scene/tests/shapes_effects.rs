@@ -2,7 +2,7 @@ mod common;
 use common::*;
 use zenith_core::default_provider;
 use zenith_scene::compile;
-use zenith_scene::ir::{LineCap, SceneCommand};
+use zenith_scene::ir::{LineCap, Paint, SceneCommand};
 
 /// A text node and a rect node carrying a `shadow=(token)` must emit a
 /// `BeginShadow { shadows:[…] }` … `EndShadow` bracket around their draw
@@ -82,6 +82,52 @@ page id="page.sh" w=(px)200 h=(px)200 {
         has_draw_between,
         "a draw must sit inside the bracket: {cmds:?}"
     );
+}
+
+#[test]
+fn light_emits_radial_gradient_ellipse() {
+    let src = r##"zenith version=1 {
+  project id="proj.light" name="Light"
+  tokens format="zenith-token-v1" {
+token id="color.glow" type="color" value="#7cc7ff"
+  }
+  styles {}
+  document id="doc.light" title="Light" {
+page id="page.light" w=(px)300 h=(px)200 {
+  light id="bg.glow" kind="ambient" x=(px)150 y=(px)80 radius=(px)40 color=(token)"color.glow" opacity=0.5
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let fill = result.scene.commands.iter().find_map(|cmd| match cmd {
+        SceneCommand::FillEllipse {
+            x,
+            y,
+            w,
+            h,
+            rx,
+            ry,
+            paint,
+        } => Some((*x, *y, *w, *h, *rx, *ry, paint)),
+        _ => None,
+    });
+    let (x, y, w, h, rx, ry, paint) = fill.expect("light must emit a FillEllipse");
+    assert_eq!(
+        (x, y, w, h, rx, ry),
+        (110.0, 40.0, 80.0, 80.0, Some(40.0), Some(40.0))
+    );
+    let Paint::Gradient(gradient) = paint else {
+        panic!("light paint must be a radial gradient");
+    };
+    assert!(gradient.radial, "light gradient must be radial");
+    assert_eq!(gradient.stops.len(), 2);
+    assert_eq!(gradient.stops[0].color.r, 0x7c);
+    assert_eq!(gradient.stops[0].color.g, 0xc7);
+    assert_eq!(gradient.stops[0].color.b, 0xff);
+    assert_eq!(gradient.stops[0].color.a, 128);
+    assert_eq!(gradient.stops[1].color.a, 0);
 }
 
 /// A node WITHOUT a shadow must emit a command stream byte-identical to the

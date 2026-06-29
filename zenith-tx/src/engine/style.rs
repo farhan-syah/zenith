@@ -34,6 +34,7 @@ fn node_fill_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> {
         Node::Shape(n) => Some(&mut n.fill),
         Node::Pattern(n) => Some(&mut n.fill),
         Node::Chart(n) => Some(&mut n.fill),
+        Node::Light(_) => None,
         // A connector is stroke-only (like `line`): it has no `fill` field, so
         // set_fill honestly surfaces tx.unsupported_property.
         Node::Line(_)
@@ -60,6 +61,7 @@ fn node_stroke_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> {
         Node::Connector(n) => Some(&mut n.stroke),
         Node::Pattern(n) => Some(&mut n.stroke),
         Node::Chart(n) => Some(&mut n.stroke),
+        Node::Light(_) => None,
         Node::Text(_)
         | Node::Code(_)
         | Node::Frame(_)
@@ -88,6 +90,7 @@ fn node_stroke_width_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> 
         Node::Connector(n) => Some(&mut n.stroke_width),
         Node::Pattern(n) => Some(&mut n.stroke_width),
         Node::Chart(n) => Some(&mut n.stroke_width),
+        Node::Light(_) => None,
         Node::Text(_)
         | Node::Code(_)
         | Node::Frame(_)
@@ -124,6 +127,7 @@ fn node_opacity_mut(node: &mut Node) -> Option<&mut Option<f64>> {
         Node::Connector(n) => Some(&mut n.opacity),
         Node::Pattern(n) => Some(&mut n.opacity),
         Node::Chart(n) => Some(&mut n.opacity),
+        Node::Light(n) => Some(&mut n.opacity),
         // A footnote has no `opacity` field.
         Node::Footnote(_) => None,
         Node::Unknown(_) => None,
@@ -158,6 +162,7 @@ fn node_overflow_mut(node: &mut Node) -> Option<&mut Option<String>> {
         | Node::Connector(_)
         | Node::Pattern(_)
         | Node::Chart(_)
+        | Node::Light(_)
         | Node::Unknown(_) => None,
     }
 }
@@ -614,6 +619,7 @@ fn collect_text_entries(children: &[Node], out: &mut Vec<(String, bool)>) {
             | Node::Connector(_)
             | Node::Pattern(_)
             | Node::Chart(_)
+            | Node::Light(_)
             | Node::Unknown(_) => {}
         }
     }
@@ -742,6 +748,7 @@ pub(super) fn apply_find_replace_text(
                     | Some(Node::Connector(_))
                     | Some(Node::Pattern(_))
                     | Some(Node::Chart(_))
+                    | Some(Node::Light(_))
                     | Some(Node::Unknown(_))
                     | None => false,
                 };

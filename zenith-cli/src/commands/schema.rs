@@ -135,6 +135,7 @@ pub fn node_detail(kind: &str, json: bool) -> (String, u8) {
         .collect();
 
     let content_desc = core_schema::node_content(kind);
+    let example = core_schema::node_example(kind);
 
     if json {
         let content = content_desc.map(|d| SchemaNodeContent {
@@ -147,6 +148,7 @@ pub fn node_detail(kind: &str, json: bool) -> (String, u8) {
                 kind: kind.to_owned(),
                 summary: summary.to_owned(),
                 attributes: attrs,
+                example: example.map(str::to_owned),
                 content,
             },
         };
@@ -165,6 +167,12 @@ pub fn node_detail(kind: &str, json: bool) -> (String, u8) {
             text.push_str("  Example:\n");
             for line in d.example.lines() {
                 text.push_str(&format!("    {line}\n"));
+            }
+        }
+        if let Some(ex) = example {
+            text.push_str("\nExample:\n");
+            for line in ex.lines() {
+                text.push_str(&format!("  {line}\n"));
             }
         }
         text.push_str(
@@ -1557,6 +1565,42 @@ mod tests {
         assert!(
             !text.contains("\"content\""),
             "rect JSON must not carry a content field (skip_serializing_if = None); got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn node_detail_light_human_shows_example_without_content() {
+        let (text, code) = node_detail("light", false);
+        assert_eq!(code, 0);
+        assert!(
+            text.contains("Example:"),
+            "light must show authoring example; got:\n{text}"
+        );
+        assert!(
+            text.contains("light id=\"bg.glow\""),
+            "light example must be concrete; got:\n{text}"
+        );
+        assert!(
+            !text.contains("Content:"),
+            "light is a leaf node and must not show Content section; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn node_detail_light_json_has_example_without_content() {
+        let (text, code) = node_detail("light", true);
+        assert_eq!(code, 0);
+        assert!(
+            text.contains("\"example\""),
+            "light JSON must carry example; got:\n{text}"
+        );
+        assert!(
+            text.contains("bg.glow"),
+            "light JSON example must include usable node id; got:\n{text}"
+        );
+        assert!(
+            !text.contains("\"content\""),
+            "light JSON must not carry child content; got:\n{text}"
         );
     }
 

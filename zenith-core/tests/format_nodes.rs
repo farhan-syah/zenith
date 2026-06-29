@@ -34,6 +34,7 @@ fn test_image_clip_parse_format_round_trip() {
   }
 }
 "##;
+
     let adapter = KdlAdapter;
     let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
     let image_node = match &doc.body.pages[0].children[0] {
@@ -71,6 +72,50 @@ fn test_image_clip_parse_format_round_trip() {
         image2.clip_radius,
         Some(PropertyValue::TokenRef("size.radius.avatar".to_owned())),
         "clip-radius must survive a format → re-parse round-trip"
+    );
+}
+
+#[test]
+fn light_node_parse_format_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.light" name="Light"
+  tokens format="zenith-token-v1" {
+    token id="color.glow" type="color" value="#7cc7ff"
+    token id="size.glow" type="dimension" value=(px)420
+  }
+  styles {
+  }
+  document id="doc.light" title="Light" {
+    page id="page.light" w=(px)1080 h=(px)1080 {
+      light id="bg.glow" kind="ambient" x=(%)85 y=(%)12 radius=(token)"size.glow" color=(token)"color.glow" opacity=0.35
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let light = match &doc.body.pages[0].children[0] {
+        Node::Light(l) => l,
+        other => panic!("expected light node, got {other:?}"),
+    };
+    assert_eq!(light.id, "bg.glow");
+    assert_eq!(light.kind.as_deref(), Some("ambient"));
+    assert_eq!(light.opacity, Some(0.35));
+
+    let formatted = format_document(&doc).expect("format must succeed");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("formatted must be utf8");
+    assert!(
+        formatted_str.contains(
+            "light id=\"bg.glow\" kind=\"ambient\" x=(%)85 y=(%)12 radius=(token)\"size.glow\" color=(token)\"color.glow\" opacity=0.35"
+        ),
+        "formatted light line missing canonical attrs; got:\n{formatted_str}"
+    );
+    let reparsed = adapter
+        .parse(&formatted)
+        .expect("re-parse after format must succeed");
+    assert!(
+        matches!(&reparsed.body.pages[0].children[0], Node::Light(l) if l.id == "bg.glow"),
+        "light must survive format round-trip"
     );
 }
 
