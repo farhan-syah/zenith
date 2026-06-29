@@ -16,7 +16,7 @@ pub use common::{Node, ObjectPosition, Point, TextSpan, UnknownProperty, Unknown
 pub use container::{
     FrameNode, GroupNode, ProtectedRegion, TableCell, TableColumn, TableNode, TableRow,
 };
-pub use effect::LightNode;
+pub use effect::{LightNode, MeshNode};
 pub use leaf::{
     ChartNode, ChartSeries, CodeNode, EllipseNode, ImageNode, LineNode, PatternNode, PolygonNode,
     PolylineNode, RectNode, TextNode,

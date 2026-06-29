@@ -288,6 +288,16 @@ pub(super) fn walk_node(
                 diagnostics,
             );
         }
+        Node::Mesh(m) => {
+            node::check_mesh(
+                m,
+                ctx,
+                seen_ids,
+                referenced_token_ids,
+                geom_required,
+                diagnostics,
+            );
+        }
         Node::Polygon(poly) => {
             node::check_polygon(poly, ctx, seen_ids, referenced_token_ids, diagnostics);
         }

@@ -144,6 +144,7 @@ fn apply_override(children: &mut [Node], ov: &Override) -> bool {
             | Node::Pattern(_)
             | Node::Chart(_)
             | Node::Light(_)
+            | Node::Mesh(_)
             | Node::Unknown(_) => None,
         };
         if let Some(gc) = grandchildren
@@ -191,6 +192,7 @@ fn set_node_fill(node: &mut Node, fill: PropertyValue) {
         Node::Pattern(n) => n.fill = Some(fill),
         Node::Chart(n) => n.fill = Some(fill),
         Node::Light(_) => {}
+        Node::Mesh(n) => n.stroke = Some(fill),
         // A connector is stroke-only; it has no fill to override.
         Node::Line(_)
         | Node::Frame(_)
@@ -224,6 +226,7 @@ fn set_node_visible(node: &mut Node, v: bool) {
         Node::Pattern(n) => n.visible = Some(v),
         Node::Chart(n) => n.visible = Some(v),
         Node::Light(n) => n.visible = Some(v),
+        Node::Mesh(n) => n.visible = Some(v),
         // A footnote has no `visible` flag; nothing to set.
         Node::Footnote(_) => {}
         Node::Unknown(_) => {}
@@ -253,6 +256,7 @@ fn node_local_id(node: &Node) -> Option<&str> {
         Node::Pattern(n) => Some(&n.id),
         Node::Chart(n) => Some(&n.id),
         Node::Light(n) => Some(&n.id),
+        Node::Mesh(n) => Some(&n.id),
         Node::Unknown(_) => None,
     }
 }
@@ -292,6 +296,7 @@ pub(in crate::compile) fn prefix_ids_in_children(children: &mut [Node], prefix: 
             | Node::Pattern(_)
             | Node::Chart(_)
             | Node::Light(_)
+            | Node::Mesh(_)
             | Node::Unknown(_) => {}
         }
     }
@@ -325,6 +330,7 @@ fn prefix_node_id(node: &mut Node, prefix: &str) {
         Node::Pattern(n) => pre!(n.id),
         Node::Chart(n) => pre!(n.id),
         Node::Light(n) => pre!(n.id),
+        Node::Mesh(n) => pre!(n.id),
         Node::Unknown(_) => {}
     }
 }

@@ -14,7 +14,7 @@ use super::super::util::resolve_property_dimension_px;
 /// - `stroke_dash`/`stroke_gap` are `None` when dash is absent or `<= 0`
 ///   (solid stroke, byte-identical to prior behavior).
 /// - `stroke_linecap` is `None` (Butt default) when dash is absent.
-pub(super) fn resolve_dash_params(
+pub(in crate::compile) fn resolve_dash_params(
     dash_prop: Option<&PropertyValue>,
     gap_prop: Option<&PropertyValue>,
     linecap_str: Option<&str>,

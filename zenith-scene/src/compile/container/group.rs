@@ -366,6 +366,20 @@ fn group_children_center(
                 };
                 expand!(base_dx + x - r, base_dy + y - r, r * 2.0, r * 2.0);
             }
+            Node::Mesh(n) => {
+                let (Some(xd), Some(yd), Some(wd), Some(hd)) = (&n.x, &n.y, &n.w, &n.h) else {
+                    continue;
+                };
+                let (Some(x), Some(y), Some(w), Some(h)) = (
+                    resolve_geometry_px(Some(xd), resolved),
+                    resolve_geometry_px(Some(yd), resolved),
+                    resolve_geometry_px(Some(wd), resolved),
+                    resolve_geometry_px(Some(hd), resolved),
+                ) else {
+                    continue;
+                };
+                expand!(base_dx + x, base_dy + y, w, h);
+            }
             // Instances have no authoritative bbox (their expanded subtree is
             // the geometry); a field's/toc's box is resolved at projection time,
             // not here; unknown nodes have no geometry — skip all.

@@ -134,6 +134,19 @@ fn node_has_data_ref(node: &Node) -> bool {
                 })
         }
         Node::Light(n) => any_prop(&[&n.x, &n.y, &n.radius, &n.color]),
+        Node::Mesh(n) => any_prop(&[
+            &n.x,
+            &n.y,
+            &n.w,
+            &n.h,
+            &n.vanishing_x,
+            &n.vanishing_y,
+            &n.extend,
+            &n.stroke,
+            &n.stroke_width,
+            &n.stroke_dash,
+            &n.stroke_gap,
+        ]),
         Node::Frame(n) => n.children.iter().any(node_has_data_ref),
         Node::Group(n) => n.children.iter().any(node_has_data_ref),
         Node::Instance(n) => instance_has_data_ref(n),
@@ -210,6 +223,20 @@ fn substitute_node(node: &mut Node, ctx: &DataContext, diagnostics: &mut Vec<Dia
             substitute_dim_prop_opt(&mut n.y, ctx, &id, "y", diagnostics);
             substitute_dim_prop_opt(&mut n.radius, ctx, &id, "radius", diagnostics);
             substitute_color_prop_opt(&mut n.color, ctx, &id, "color", diagnostics);
+        }
+        Node::Mesh(n) => {
+            let id = n.id.clone();
+            substitute_dim_prop_opt(&mut n.x, ctx, &id, "x", diagnostics);
+            substitute_dim_prop_opt(&mut n.y, ctx, &id, "y", diagnostics);
+            substitute_dim_prop_opt(&mut n.w, ctx, &id, "w", diagnostics);
+            substitute_dim_prop_opt(&mut n.h, ctx, &id, "h", diagnostics);
+            substitute_dim_prop_opt(&mut n.vanishing_x, ctx, &id, "vanishing-x", diagnostics);
+            substitute_dim_prop_opt(&mut n.vanishing_y, ctx, &id, "vanishing-y", diagnostics);
+            substitute_dim_prop_opt(&mut n.extend, ctx, &id, "extend", diagnostics);
+            substitute_color_prop_opt(&mut n.stroke, ctx, &id, "stroke", diagnostics);
+            substitute_dim_prop_opt(&mut n.stroke_width, ctx, &id, "stroke-width", diagnostics);
+            substitute_dim_prop_opt(&mut n.stroke_dash, ctx, &id, "stroke-dash", diagnostics);
+            substitute_dim_prop_opt(&mut n.stroke_gap, ctx, &id, "stroke-gap", diagnostics);
         }
         Node::Frame(n) => substitute_children(&mut n.children, ctx, diagnostics),
         Node::Group(n) => substitute_children(&mut n.children, ctx, diagnostics),

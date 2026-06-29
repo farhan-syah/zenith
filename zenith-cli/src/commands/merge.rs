@@ -208,6 +208,9 @@ fn collect_data_nodes(
             zenith_core::Node::Light(n) => {
                 reject_data_role_on_non_text(n.role.as_deref(), &n.id)?;
             }
+            zenith_core::Node::Mesh(n) => {
+                reject_data_role_on_non_text(n.role.as_deref(), &n.id)?;
+            }
             zenith_core::Node::Unknown(_n) => {
                 // UnknownNode has no id or role field; data.* roles cannot be
                 // placed on unknown nodes (the parser would not parse them).

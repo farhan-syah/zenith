@@ -500,6 +500,7 @@ pub fn strip_node_span(node: &mut Node) {
             // Series are pure data (no sub-nodes), so no recursion needed.
         }
         Node::Light(l) => l.source_span = None,
+        Node::Mesh(m) => m.source_span = None,
         Node::Unknown(u) => {
             u.source_span = None;
             for child in &mut u.children {

@@ -146,6 +146,61 @@ fn fill_with_missing_token_ref_produces_unknown_reference() {
     assert!(report.has_errors());
 }
 
+#[test]
+fn mesh_perspective_requires_vanishing_point() {
+    let src = r##"zenith version=1 {
+  project id="proj.mesh" name="Mesh"
+  tokens format="zenith-token-v1" {
+    token id="color.grid" type="color" value="#203040"
+  }
+  styles {}
+  document id="doc.mesh" title="Mesh" {
+    page id="page.mesh" w=(px)300 h=(px)200 {
+      mesh id="grid" kind="perspective" x=(px)0 y=(px)0 w=(px)300 h=(px)200 rows=4 columns=4 stroke=(token)"color.grid" stroke-width=(px)1
+    }
+  }
+}
+"##;
+    let doc = KdlAdapter.parse(src.as_bytes()).expect("parse");
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "node.missing_geometry"),
+        "perspective mesh without vanishing point must report missing geometry; codes: {:?}",
+        codes(&report)
+    );
+    assert!(report.has_errors());
+}
+
+#[test]
+fn mesh_zero_rows_and_columns_are_invalid() {
+    let src = r##"zenith version=1 {
+  project id="proj.mesh" name="Mesh"
+  tokens format="zenith-token-v1" {
+    token id="color.grid" type="color" value="#203040"
+  }
+  styles {}
+  document id="doc.mesh" title="Mesh" {
+    page id="page.mesh" w=(px)300 h=(px)200 {
+      mesh id="grid" x=(px)0 y=(px)0 w=(px)300 h=(px)200 rows=0 columns=0 stroke=(token)"color.grid" stroke-width=(px)1
+    }
+  }
+}
+"##;
+    let doc = KdlAdapter.parse(src.as_bytes()).expect("parse");
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "mesh.invalid_rows"),
+        "codes: {:?}",
+        codes(&report)
+    );
+    assert!(
+        has_code(&report, "mesh.invalid_columns"),
+        "codes: {:?}",
+        codes(&report)
+    );
+    assert!(report.has_errors());
+}
+
 // ── Test 4b: font-weight referencing a missing token ──────────────────
 
 #[test]

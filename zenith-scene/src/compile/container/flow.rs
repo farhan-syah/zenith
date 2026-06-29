@@ -38,6 +38,7 @@ fn node_visible(node: &Node) -> Option<bool> {
         Node::Pattern(n) => n.visible,
         Node::Chart(n) => n.visible,
         Node::Light(n) => n.visible,
+        Node::Mesh(n) => n.visible,
         // A footnote has no `visible` flag.
         Node::Footnote(_) => None,
         Node::Unknown(_) => None,
@@ -66,6 +67,7 @@ pub(super) fn node_declared_w(
         Node::Pattern(n) => n.w.as_ref(),
         Node::Chart(n) => n.w.as_ref(),
         Node::Light(_) => None,
+        Node::Mesh(n) => n.w.as_ref(),
         Node::Line(_)
         | Node::Polygon(_)
         | Node::Polyline(_)
@@ -98,6 +100,7 @@ pub(super) fn node_declared_h(
         Node::Pattern(n) => n.h.as_ref(),
         Node::Chart(n) => n.h.as_ref(),
         Node::Light(_) => None,
+        Node::Mesh(n) => n.h.as_ref(),
         Node::Line(_)
         | Node::Polygon(_)
         | Node::Polyline(_)
@@ -207,6 +210,12 @@ pub(super) fn with_flow_box(node: &Node, x: f64, y: f64, w: f64, h: Option<f64>)
             n.h = h_dim;
         }
         Node::Light(_) => {}
+        Node::Mesh(n) => {
+            n.x = px(x);
+            n.y = px(y);
+            n.w = px(w);
+            n.h = h_dim;
+        }
         // Geometry-less kinds: no x/y/w/h box to inject. (An instance carries
         // only an x/y origin, no w/h box, so flow layout does not reposition it
         // — it renders at its authored origin and advances the cursor by 0.)

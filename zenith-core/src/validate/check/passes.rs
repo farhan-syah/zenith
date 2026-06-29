@@ -98,6 +98,9 @@ pub(in crate::validate::check) fn collect_local_ids(
             Node::Light(n) => {
                 out.insert(n.id.clone());
             }
+            Node::Mesh(n) => {
+                out.insert(n.id.clone());
+            }
             Node::Unknown(_) => {}
         }
     }
@@ -199,6 +202,7 @@ pub(in crate::validate::check) fn check_footnote_refs(
                 | Node::Pattern(_)
                 | Node::Chart(_)
                 | Node::Light(_)
+                | Node::Mesh(_)
                 | Node::Unknown(_) => {}
             }
         }

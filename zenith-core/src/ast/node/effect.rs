@@ -38,3 +38,37 @@ pub struct LightNode {
     /// Reserved for future focused/angled light families.
     pub angle: Option<Dimension>,
 }
+
+/// A procedural grid/perspective mesh rendered as generated stroke ink.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeshNode {
+    pub id: String,
+    pub name: Option<String>,
+    pub role: Option<String>,
+    /// Mesh family. `None` is interpreted as `orthographic`.
+    pub kind: Option<String>,
+    pub x: Option<PropertyValue>,
+    pub y: Option<PropertyValue>,
+    pub w: Option<PropertyValue>,
+    pub h: Option<PropertyValue>,
+    /// Number of cells on the horizontal axis. Emits `columns + 1` vertical lines.
+    pub columns: Option<u32>,
+    /// Number of cells on the vertical axis. Emits `rows + 1` horizontal lines.
+    pub rows: Option<u32>,
+    /// One-point perspective vanishing point X. Required when kind is `perspective`.
+    pub vanishing_x: Option<PropertyValue>,
+    /// One-point perspective vanishing point Y. Required when kind is `perspective`.
+    pub vanishing_y: Option<PropertyValue>,
+    /// Intentional extension beyond the authored bbox for bleed/overscan.
+    pub extend: Option<PropertyValue>,
+    pub stroke: Option<PropertyValue>,
+    pub stroke_width: Option<PropertyValue>,
+    pub stroke_dash: Option<PropertyValue>,
+    pub stroke_gap: Option<PropertyValue>,
+    pub stroke_linecap: Option<String>,
+    pub opacity: Option<f64>,
+    pub visible: Option<bool>,
+    pub locked: Option<bool>,
+    pub source_span: Option<Span>,
+    pub unknown_props: BTreeMap<String, UnknownProperty>,
+}

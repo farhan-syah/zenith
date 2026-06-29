@@ -14,6 +14,7 @@ mod rect_ellipse;
 mod routing;
 mod shape;
 
+pub(in crate::compile) use common::resolve_dash_params;
 pub(super) use connector::{ConnectorEnv, compile_connector};
 pub(super) use poly::{compile_line, compile_polygon, compile_polyline};
 pub(super) use rect_ellipse::{RectEllipseEnv, compile_ellipse, compile_rect};

@@ -41,6 +41,7 @@ pub fn node_kinds() -> &'static [&'static str] {
         "instance",
         "line",
         "light",
+        "mesh",
         "pattern",
         "polygon",
         "polyline",
@@ -83,6 +84,9 @@ pub fn node_summary(kind: &str) -> Option<&'static str> {
             "Data-visualization chart (bar, line, area, sparkline, pie, donut) with inline series data.",
         ),
         "light" => Some("Effect node that emits a soft radial ambient light."),
+        "mesh" => {
+            Some("Effect node that emits a procedural orthographic or perspective grid mesh.")
+        }
         _ => None,
     }
 }
@@ -96,6 +100,11 @@ pub fn node_example(kind: &str) -> Option<&'static str> {
         "light" => Some(
             "light id=\"bg.glow\" kind=\"ambient\" x=(%)85 y=(%)12 \
              radius=(token)\"size.glow\" color=(token)\"color.glow\" opacity=0.35",
+        ),
+        "mesh" => Some(
+            "mesh id=\"bg.mesh\" kind=\"perspective\" x=(px)0 y=(px)0 w=(px)1920 h=(px)1080 \
+             rows=7 columns=8 vanishing-x=(px)1260 vanishing-y=(px)-420 extend=(px)160 \
+             stroke=(token)\"color.grid\" stroke-width=(token)\"stroke.hairline\" opacity=0.34",
         ),
         _ => None,
     }
@@ -282,7 +291,7 @@ pub fn node_content(kind: &str) -> Option<NodeContentDescriptor> {
                 "series label=\"Costs\" color=(token)\"color.secondary\" 80.0 90.0 100.0 120.0",
             ),
         }),
-        "light" => None,
+        "light" | "mesh" => None,
 
         // ── Motif-bearing kind ────────────────────────────────────────────────
         "pattern" => Some(NodeContentDescriptor {
@@ -502,6 +511,19 @@ fn attribute_type_for_kind_inner(kind: &str, name: &str, fallback: &'static str)
         ("light", "kind") => "enum: ambient|glow|key|rim",
         ("light", "color") => "token ref: color",
         ("light", "angle") => "dimension: deg",
+        ("mesh", "kind") => "enum: orthographic|perspective",
+        ("mesh", "stroke-width") | ("mesh", "stroke-dash") | ("mesh", "stroke-gap") => {
+            "dimension literal or token ref: dimension"
+        }
+        ("mesh", "x")
+        | ("mesh", "y")
+        | ("mesh", "w")
+        | ("mesh", "h")
+        | ("mesh", "vanishing-x")
+        | ("mesh", "vanishing-y")
+        | ("mesh", "extend") => "dimension literal or token ref: dimension",
+        ("mesh", "rows") | ("mesh", "columns") => "u32 (>0)",
+        ("mesh", "stroke-linecap") => "enum: butt|round|square",
         // chart axis/legend/caption/bar-mode/orientation/legend-position/legend-layout/legend-align: chart-only attributes (validate/check/nodes/node/chart.rs).
         ("chart", "legend") => "bool",
         ("chart", "caption") => "string",
@@ -987,6 +1009,7 @@ mod tests {
             Node::Pattern(_) => 1,
             Node::Chart(_) => 1,
             Node::Light(_) => 1,
+            Node::Mesh(_) => 1,
             // Unknown is intentionally excluded from the authorable kind list.
             // This arm is required for exhaustiveness; the count still returns 1
             // so the total reflects all variants (authorable + Unknown).
@@ -999,7 +1022,7 @@ mod tests {
     /// This is the count returned by `node_variant_count_exhaustive` for any
     /// `Node`, summed across all variants — i.e. the total variant count.
     /// Updated by hand when a variant is added (compile error forces it).
-    const TOTAL_NODE_VARIANTS: usize = 21; // 20 authorable + 1 Unknown
+    const TOTAL_NODE_VARIANTS: usize = 22; // 21 authorable + 1 Unknown
 
     #[test]
     fn node_summary_covers_every_node_kind() {

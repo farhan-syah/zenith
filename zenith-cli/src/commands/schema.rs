@@ -1604,6 +1604,42 @@ mod tests {
         );
     }
 
+    #[test]
+    fn node_detail_mesh_human_shows_example_without_content() {
+        let (text, code) = node_detail("mesh", false);
+        assert_eq!(code, 0);
+        assert!(
+            text.contains("Example:"),
+            "mesh must show authoring example; got:\n{text}"
+        );
+        assert!(
+            text.contains("mesh id=\"bg.mesh\""),
+            "mesh example must be concrete; got:\n{text}"
+        );
+        assert!(
+            !text.contains("Content:"),
+            "mesh is a leaf node and must not show Content section; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn node_detail_mesh_json_has_example_without_content() {
+        let (text, code) = node_detail("mesh", true);
+        assert_eq!(code, 0);
+        assert!(
+            text.contains("\"example\""),
+            "mesh JSON must carry example; got:\n{text}"
+        );
+        assert!(
+            text.contains("bg.mesh"),
+            "mesh JSON example must include usable node id; got:\n{text}"
+        );
+        assert!(
+            !text.contains("\"content\""),
+            "mesh JSON must not carry child content; got:\n{text}"
+        );
+    }
+
     // ── Diagnostics surface tests ────────────────────────────────────────────
 
     #[test]

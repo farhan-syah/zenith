@@ -344,6 +344,7 @@ fn walk_images(nodes: &[Node], doc: &Document, project_dir: &Path, out: &mut Vec
             | Node::Pattern(_)
             | Node::Chart(_)
             | Node::Light(_)
+            | Node::Mesh(_)
             | Node::Unknown(_) => {}
         }
     }

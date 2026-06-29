@@ -238,6 +238,7 @@ fn collect_entries(
             | Node::Pattern(_)
             | Node::Chart(_)
             | Node::Light(_)
+            | Node::Mesh(_)
             | Node::Unknown(_) => {}
         }
     }

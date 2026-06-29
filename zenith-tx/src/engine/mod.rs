@@ -493,6 +493,7 @@ fn node_is_locked(doc: &Document, id: &str) -> bool {
             Node::Pattern(n) => n.locked,
             Node::Chart(n) => n.locked,
             Node::Light(n) => n.locked,
+            Node::Mesh(n) => n.locked,
             // A footnote has no `locked` field; treat as unlocked.
             Node::Footnote(_) => None,
             Node::Unknown(_) => None,
@@ -539,7 +540,8 @@ pub(super) fn subtree_contains(node: &Node, id: &str) -> bool {
         | Node::Connector(_)
         | Node::Pattern(_)
         | Node::Chart(_)
-        | Node::Light(_) => false,
+        | Node::Light(_)
+        | Node::Mesh(_) => false,
     }
 }
 
@@ -626,7 +628,8 @@ fn find_in_children_any_mut<'a>(children: &'a mut [Node], id: &str) -> Option<&'
             | Node::Connector(_)
             | Node::Pattern(_)
             | Node::Chart(_)
-            | Node::Light(_) => None,
+            | Node::Light(_)
+            | Node::Mesh(_) => None,
         }
     });
 
@@ -666,6 +669,7 @@ fn find_in_children_any_mut<'a>(children: &'a mut [Node], id: &str) -> Option<&'
             | Some(Node::Pattern(_))
             | Some(Node::Chart(_))
             | Some(Node::Light(_))
+            | Some(Node::Mesh(_))
             | None => None,
         },
     }
@@ -718,7 +722,8 @@ pub(super) fn find_node_shared<'a>(children: &'a [Node], id: &str) -> Option<&'a
             | Node::Connector(_)
             | Node::Pattern(_)
             | Node::Chart(_)
-            | Node::Light(_) => {}
+            | Node::Light(_)
+            | Node::Mesh(_) => {}
         }
     }
     None
@@ -747,6 +752,7 @@ pub(super) fn node_id_of(node: &Node) -> Option<&str> {
         Node::Pattern(p) => Some(&p.id),
         Node::Chart(c) => Some(&c.id),
         Node::Light(l) => Some(&l.id),
+        Node::Mesh(m) => Some(&m.id),
         Node::Unknown(u) => u.id.as_deref(),
     }
 }
@@ -776,6 +782,7 @@ pub(super) fn node_kind_str(node: &Node) -> &'static str {
         Node::Pattern(_) => "pattern",
         Node::Chart(_) => "chart",
         Node::Light(_) => "light",
+        Node::Mesh(_) => "mesh",
         Node::Unknown(_) => "unknown",
     }
 }

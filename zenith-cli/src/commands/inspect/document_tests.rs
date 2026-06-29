@@ -153,6 +153,31 @@ fn role_is_surfaced_when_authored() {
 }
 
 #[test]
+fn mesh_reports_authored_bbox_geometry() {
+    let src = r##"zenith version=1 {
+  project id="proj.mesh" name="Mesh"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.mesh" title="Mesh" {
+    page id="page.mesh" w=(px)300 h=(px)200 {
+      mesh id="grid" role="background-grid" x=(px)10 y=(px)20 w=(px)100 h=(px)80 rows=2 columns=4
+    }
+  }
+}
+"##;
+    let doc = KdlAdapter.parse(src.as_bytes()).unwrap();
+    let pages = build_doc_tree(&doc.body.pages, &resolve_tokens(&doc.tokens).resolved);
+    let mesh = &pages[0].children[0];
+    assert_eq!(mesh.kind, "mesh");
+    assert_eq!(mesh.role.as_deref(), Some("background-grid"));
+    let geom = mesh.geometry.as_ref().unwrap();
+    assert_eq!(geom.x, Some(10.0));
+    assert_eq!(geom.y, Some(20.0));
+    assert_eq!(geom.w, Some(100.0));
+    assert_eq!(geom.h, Some(80.0));
+}
+
+#[test]
 fn role_emitted_in_json_and_omitted_when_absent() {
     let out = run(TOKEN_GEOM_DOC, None, true).expect("run must succeed");
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();

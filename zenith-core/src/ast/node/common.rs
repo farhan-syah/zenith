@@ -5,7 +5,7 @@ use crate::ast::value::PropertyValue;
 use crate::data::DataFormat;
 
 use super::container::{FrameNode, GroupNode, TableNode};
-use super::effect::LightNode;
+use super::effect::{LightNode, MeshNode};
 use super::leaf::{
     ChartNode, CodeNode, EllipseNode, ImageNode, LineNode, PatternNode, PolygonNode, PolylineNode,
     RectNode, TextNode,
@@ -183,4 +183,7 @@ pub enum Node {
     // Boxed for the same forward-growth reason as the other rich authoring
     // variants: future effect nodes may gain more fields without bloating Node.
     Light(Box<LightNode>),
+    // Boxed: procedural meshes are effect nodes with enough forward-growth
+    // fields to keep out of the enum payload.
+    Mesh(Box<MeshNode>),
 }

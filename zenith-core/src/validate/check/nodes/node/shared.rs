@@ -155,6 +155,13 @@ pub(in crate::validate::check) fn node_bbox(
             let r = resolve_axis(pv_to_dim(n.radius.as_ref())?, page_w.max(page_h))?;
             Some((x - r, y - r, r * 2.0, r * 2.0))
         }
+        Node::Mesh(n) => {
+            let x = resolve_axis(pv_to_dim(n.x.as_ref())?, page_w)?;
+            let y = resolve_axis(pv_to_dim(n.y.as_ref())?, page_h)?;
+            let w = resolve_axis(pv_to_dim(n.w.as_ref())?, page_w)?;
+            let h = resolve_axis(pv_to_dim(n.h.as_ref())?, page_h)?;
+            Some((x, y, w, h))
+        }
         // A connector has no authored bbox: its endpoints are DERIVED from the
         // resolved boxes of its `from`/`to` targets at compile time and are not
         // known at validate time, so there is no off_canvas check here.
@@ -231,6 +238,7 @@ pub(in crate::validate::check) fn node_rotate_deg(node: &Node) -> Option<f64> {
         Node::Pattern(n) => n.rotate.as_ref(),
         Node::Chart(n) => n.rotate.as_ref(),
         Node::Light(_) => None,
+        Node::Mesh(_) => None,
         Node::Line(_)
         | Node::Instance(_)
         | Node::Field(_)
@@ -268,6 +276,7 @@ pub(in crate::validate::check) fn node_role(node: &Node) -> Option<&str> {
         Node::Pattern(n) => n.role.as_deref(),
         Node::Chart(n) => n.role.as_deref(),
         Node::Light(n) => n.role.as_deref(),
+        Node::Mesh(n) => n.role.as_deref(),
         Node::Unknown(_) => None,
     }
 }
@@ -297,6 +306,7 @@ pub(in crate::validate::check) fn node_id_and_span(
         Node::Pattern(n) => (&n.id, n.source_span),
         Node::Chart(n) => (&n.id, n.source_span),
         Node::Light(n) => (&n.id, n.source_span),
+        Node::Mesh(n) => (&n.id, n.source_span),
         Node::Unknown(n) => (n.id.as_deref().unwrap_or(&n.kind), n.source_span),
     }
 }
@@ -547,6 +557,7 @@ fn node_sibling_fields(node: &Node) -> Option<(&str, Option<&str>, Option<crate:
         Node::Pattern(n) => (n.id.as_str(), n.anchor_sibling.as_deref(), n.source_span),
         Node::Chart(n) => (n.id.as_str(), n.anchor_sibling.as_deref(), n.source_span),
         Node::Light(_) => return None,
+        Node::Mesh(_) => return None,
         // Kinds that never carry an `anchor` are not sibling-bearing.
         Node::Line(_)
         | Node::Connector(_)

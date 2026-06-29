@@ -103,6 +103,7 @@ fn backdrop_rgb(
             | Node::Pattern(_)
             | Node::Chart(_)
             | Node::Light(_)
+            | Node::Mesh(_)
             | Node::Unknown(_) => continue,
         };
 
@@ -403,6 +404,7 @@ pub(super) fn check_text_contrast(
         | Node::Pattern(_)
         | Node::Chart(_)
         | Node::Light(_)
+        | Node::Mesh(_)
         | Node::Unknown(_) => {}
     }
 }

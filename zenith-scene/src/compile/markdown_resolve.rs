@@ -74,7 +74,8 @@ fn node_has_markdown_text(node: &Node) -> bool {
         | Node::Instance(_)
         | Node::Pattern(_)
         | Node::Chart(_)
-        | Node::Light(_) => false,
+        | Node::Light(_)
+        | Node::Mesh(_) => false,
     }
 }
 
@@ -148,7 +149,8 @@ fn resolve_node(node: &mut Node, blocks: &mut MdBlockMap) {
         | Node::Instance(_)
         | Node::Pattern(_)
         | Node::Chart(_)
-        | Node::Light(_) => {}
+        | Node::Light(_)
+        | Node::Mesh(_) => {}
     }
 }
 

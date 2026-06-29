@@ -103,6 +103,7 @@ pub(super) fn child_declared_box(
         | Node::Pattern(_)
         | Node::Chart(_)
         | Node::Light(_)
+        | Node::Mesh(_)
         | Node::Unknown(_) => (None, None),
     }
 }
@@ -138,6 +139,7 @@ pub(super) fn child_declared_y(
         | Node::Pattern(_)
         | Node::Chart(_)
         | Node::Light(_)
+        | Node::Mesh(_)
         | Node::Unknown(_) => None,
     }
 }

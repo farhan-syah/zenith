@@ -119,6 +119,51 @@ fn light_node_parse_format_round_trip() {
     );
 }
 
+#[test]
+fn mesh_node_parse_format_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.mesh" name="Mesh"
+  tokens format="zenith-token-v1" {
+    token id="color.grid" type="color" value="#203040"
+    token id="stroke.hairline" type="dimension" value=(px)1
+  }
+  styles {
+  }
+  document id="doc.mesh" title="Mesh" {
+    page id="page.mesh" w=(px)1920 h=(px)1080 {
+      mesh id="bg.mesh" kind="perspective" x=(px)0 y=(px)0 w=(px)1920 h=(px)1080 rows=7 columns=8 vanishing-x=(px)1260 vanishing-y=(px)-420 extend=(px)160 stroke=(token)"color.grid" stroke-width=(token)"stroke.hairline" opacity=0.34
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let mesh = match &doc.body.pages[0].children[0] {
+        Node::Mesh(m) => m,
+        other => panic!("expected mesh node, got {other:?}"),
+    };
+    assert_eq!(mesh.id, "bg.mesh");
+    assert_eq!(mesh.kind.as_deref(), Some("perspective"));
+    assert_eq!(mesh.rows, Some(7));
+    assert_eq!(mesh.columns, Some(8));
+
+    let formatted = format_document(&doc).expect("format must succeed");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("formatted must be utf8");
+    assert!(
+        formatted_str.contains(
+            "mesh id=\"bg.mesh\" kind=\"perspective\" x=(px)0 y=(px)0 w=(px)1920 h=(px)1080 rows=7 columns=8 vanishing-x=(px)1260 vanishing-y=(px)-420 extend=(px)160 stroke=(token)\"color.grid\" stroke-width=(token)\"stroke.hairline\" opacity=0.34"
+        ),
+        "formatted mesh line missing canonical attrs; got:\n{formatted_str}"
+    );
+    let reparsed = adapter
+        .parse(&formatted)
+        .expect("re-parse after format must succeed");
+    assert!(
+        matches!(&reparsed.body.pages[0].children[0], Node::Mesh(m) if m.id == "bg.mesh"),
+        "mesh must survive format round-trip"
+    );
+}
+
 /// A `.zen` document with an image node exercising the string and `(pct)`
 /// object-position forms.
 const WITH_IMAGE: &str = r##"zenith version=1 {

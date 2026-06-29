@@ -130,6 +130,57 @@ page id="page.light" w=(px)300 h=(px)200 {
     assert_eq!(gradient.stops[1].color.a, 0);
 }
 
+#[test]
+fn mesh_orthographic_emits_deterministic_lines() {
+    let src = r##"zenith version=1 {
+  project id="proj.mesh" name="Mesh"
+  tokens format="zenith-token-v1" {
+token id="color.grid" type="color" value="#203040"
+  }
+  styles {}
+  document id="doc.mesh" title="Mesh" {
+page id="page.mesh" w=(px)300 h=(px)200 {
+  mesh id="grid" kind="orthographic" x=(px)10 y=(px)20 w=(px)100 h=(px)80 rows=2 columns=4 extend=(px)5 stroke=(token)"color.grid" stroke-width=(px)2 opacity=0.5
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let lines: Vec<&SceneCommand> = result
+        .scene
+        .commands
+        .iter()
+        .filter(|cmd| matches!(cmd, SceneCommand::StrokeLine { .. }))
+        .collect();
+    assert_eq!(lines.len(), 8, "rows+1 plus columns+1 lines");
+    match lines[0] {
+        SceneCommand::StrokeLine {
+            x1,
+            y1,
+            x2,
+            y2,
+            color,
+            stroke_width,
+            ..
+        } => {
+            assert_eq!((*x1, *y1, *x2, *y2), (5.0, 20.0, 115.0, 20.0));
+            assert_eq!(*stroke_width, 2.0);
+            assert_eq!(
+                (color.r, color.g, color.b, color.a),
+                (0x20, 0x30, 0x40, 128)
+            );
+        }
+        other => panic!("expected first mesh command to be StrokeLine, got {other:?}"),
+    }
+    match lines[3] {
+        SceneCommand::StrokeLine { x1, y1, x2, y2, .. } => {
+            assert_eq!((*x1, *y1, *x2, *y2), (10.0, 15.0, 10.0, 105.0));
+        }
+        other => panic!("expected vertical mesh line, got {other:?}"),
+    }
+}
+
 /// A node WITHOUT a shadow must emit a command stream byte-identical to the
 /// pre-shadow behavior: no `BeginShadow`/`EndShadow` anywhere.
 #[test]

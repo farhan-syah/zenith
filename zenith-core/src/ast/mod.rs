@@ -28,8 +28,8 @@ pub use document::{
 pub use library::LibraryDef;
 pub use node::{
     Anchor, AnchorEdge, ChartNode, ChartSeries, CodeNode, ConnectorNode, EllipseNode, FieldNode,
-    FootnoteNode, FrameNode, GroupNode, ImageNode, InstanceNode, LightNode, LineNode, Node,
-    ObjectPosition, Override, PatternNode, Point, PolygonNode, PolylineNode, ProtectedRegion,
+    FootnoteNode, FrameNode, GroupNode, ImageNode, InstanceNode, LightNode, LineNode, MeshNode,
+    Node, ObjectPosition, Override, PatternNode, Point, PolygonNode, PolylineNode, ProtectedRegion,
     RectNode, ShapeNode, TableCell, TableColumn, TableNode, TableRow, TextNode, TextSpan, TocNode,
     UnknownNode, UnknownProperty, UnknownValue, anchor_xy, parse_anchor, parse_anchor_edge,
 };
